@@ -269,6 +269,92 @@ def elimina_duplicati_tieni_ultimo():
 
 
 
+
+def load_documenti(cliente_id=None):
+    sb = get_supabase()
+    q = sb.table("documenti_cliente").select("*").order("id", desc=True)
+    if cliente_id is not None:
+        q = q.eq("cliente_id", int(cliente_id))
+    data = q.execute().data
+    df = pd.DataFrame(data)
+    if not df.empty and "created_at" in df.columns:
+        df["created_at_it"] = df["created_at"].apply(lambda x: pd.to_datetime(x).strftime("%d/%m/%Y %H:%M") if x else "")
+    return df
+
+
+def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""):
+    if file is None:
+        return False, "Nessun file caricato."
+
+    if not file.name.lower().endswith(".pdf"):
+        return False, "Per ora sono ammessi solo file PDF."
+
+    cliente = get_cliente(cliente_id)
+    if not cliente:
+        return False, "Cliente non trovato."
+
+    sb = get_supabase()
+
+    safe_name = file.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    path = f"cliente_{cliente_id}/{tipo_documento.lower().replace(' ', '_')}_{timestamp}_{safe_name}"
+
+    try:
+        sb.storage.from_("documenti").upload(
+            path,
+            file.getvalue(),
+            {"content-type": "application/pdf", "x-upsert": "true"}
+        )
+    except Exception as e:
+        return False, f"Errore upload documento: {e}"
+
+    public_url = sb.storage.from_("documenti").get_public_url(path)
+
+    sb.table("documenti_cliente").insert({
+        "cliente_id": int(cliente_id),
+        "tipo_documento": tipo_documento,
+        "nome_file": file.name,
+        "storage_path": path,
+        "public_url": public_url,
+        "caricato_da": user_label(),
+        "note": note_documento,
+        "created_at": now_iso(),
+    }).execute()
+
+    if tipo_documento == "CERTIFICATO MEDICO":
+        sb.table("clienti").update({
+            "certificato_medico": "SI",
+            "updated_at": now_iso(),
+        }).eq("id", int(cliente_id)).execute()
+
+    insert_history(
+        cliente_id,
+        f"upload documento - {tipo_documento}",
+        "",
+        file.name,
+        f"Documento caricato da {user_label()}"
+    )
+
+    return True, "Documento caricato correttamente."
+
+
+def get_latest_doc_url(cliente_id, tipo_documento):
+    df = load_documenti(cliente_id)
+    if df.empty:
+        return None
+    sub = df[df["tipo_documento"] == tipo_documento]
+    if sub.empty:
+        return None
+    return sub.iloc[0].get("public_url")
+
+
+def pdf_icon_link(url, label="PDF"):
+    if url:
+        return f'<a href="{url}" target="_blank" style="text-decoration:none;font-size:22px;">📄 {label}</a>'
+    return '<span style="opacity:0.45;font-size:18px;">📄 non caricato</span>'
+
+
+
 def load_pagamenti():
     sb = get_supabase()
     data = sb.table("pagamenti").select("*").order("id", desc=True).execute().data
@@ -609,6 +695,7 @@ def main():
         "✏️ Modifica cliente",
         "🚨 Alert clienti",
         "💳 Gestione incassi",
+        "📄 Documenti / Certificati",
         "📋 Database clienti",
         "📊 Dashboard",
         "🕘 Cronologia",
@@ -656,6 +743,18 @@ def main():
             st.subheader("Alert cliente")
             render_alerts(get_cliente_alerts(cliente))
 
+            st.subheader("Documenti cliente")
+            cert_url = get_latest_doc_url(cliente_id, "CERTIFICATO MEDICO")
+            contratto_url = get_latest_doc_url(cliente_id, "CONTRATTO")
+            privacy_url = get_latest_doc_url(cliente_id, "PRIVACY")
+            dc1, dc2, dc3 = st.columns(3)
+            with dc1:
+                st.markdown("<b>Certificato medico</b><br>" + pdf_icon_link(cert_url, "apri certificato"), unsafe_allow_html=True)
+            with dc2:
+                st.markdown("<b>Contratto</b><br>" + pdf_icon_link(contratto_url, "apri contratto"), unsafe_allow_html=True)
+            with dc3:
+                st.markdown("<b>Privacy/documenti</b><br>" + pdf_icon_link(privacy_url, "apri privacy"), unsafe_allow_html=True)
+
             st.markdown("### Aggiornamento rapido lezioni")
             c1,c2,c3 = st.columns(3)
             c1.metric("Lezioni totali", int(cliente.get("numero_lezioni") or 0))
@@ -678,6 +777,64 @@ def main():
                         update_cliente(cliente_id, data)
                         st.success("Cliente aggiornato correttamente.")
                         st.rerun()
+
+
+
+    elif menu == "📄 Documenti / Certificati":
+        st.header("Documenti e certificati cliente")
+
+        if df.empty:
+            st.info("Inserisci almeno un cliente prima di caricare documenti.")
+        else:
+            tab1, tab2 = st.tabs(["Carica documento", "Archivio documenti"])
+
+            with tab1:
+                st.subheader("Carica PDF cliente")
+                df_sorted = df.sort_values("id", ascending=True).copy()
+                labels = (df_sorted["id"].astype(str) + " - " + df_sorted["nome"] + " " + df_sorted["cognome"]).tolist()
+
+                with st.form("upload_documento"):
+                    selected = st.selectbox("Cliente", labels)
+                    cliente_id = int(selected.split(" - ")[0])
+
+                    tipo_documento = st.selectbox("Tipo documento", ["CERTIFICATO MEDICO", "CONTRATTO", "PRIVACY", "ALTRO DOCUMENTO"])
+                    file = st.file_uploader("Carica PDF", type=["pdf"])
+                    note_documento = st.text_area("Note documento")
+
+                    submitted = st.form_submit_button("Carica documento")
+
+                    if submitted:
+                        ok, msg = upload_documento_cliente(cliente_id, file, tipo_documento, note_documento)
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+            with tab2:
+                st.subheader("Archivio documenti")
+                docs = load_documenti()
+                if docs.empty:
+                    st.info("Nessun documento caricato.")
+                else:
+                    clienti_df = df[["id", "nome", "cognome"]].copy()
+                    clienti_df["cliente"] = clienti_df["nome"] + " " + clienti_df["cognome"]
+                    docs_view = docs.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+
+                    for _, r in docs_view.iterrows():
+                        st.markdown(
+                            f"""
+                            <div style="background:#fff;border:1px solid #d9c07a;border-radius:14px;padding:14px;margin-bottom:10px;">
+                                <b>{r.get('cliente','')}</b><br>
+                                Tipo: <b>{r.get('tipo_documento','')}</b><br>
+                                File: {pdf_icon_link(r.get('public_url'), r.get('nome_file','PDF'))}<br>
+                                Caricato da: {r.get('caricato_da','')}<br>
+                                Data: {r.get('created_at_it','')}<br>
+                                Note: {r.get('note','')}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
 
     elif menu == "💳 Gestione incassi":
