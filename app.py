@@ -492,21 +492,29 @@ def main():
     menu = st.sidebar.radio("Navigazione", ["➕ Nuovo cliente", "✏️ Modifica cliente", "🚨 Alert clienti", "📋 Database clienti", "📊 Dashboard", "🧹 Pulizia duplicati", "🕘 Cronologia", "⬇️ Export Excel"])
     df = load_clienti()
     if menu == "➕ Nuovo cliente":
-        st.header("Nuova iscrizione cliente")
+        st.header("Nuova iscrizione / aggiornamento cliente")
+        st.info("Se il cliente è già presente, questa schermata aggiorna la sua scheda invece di creare un duplicato.")
         with st.form("nuovo_cliente"):
             data = cliente_form("new", unique_suffix="form")
-            allow_duplicate = st.checkbox("Consenti duplicato intenzionale", value=False)
-            if st.form_submit_button("Salva cliente"):
+            allow_duplicate = st.checkbox("Crea comunque nuova scheda separata (solo se davvero necessario)", value=False)
+            if st.form_submit_button("Salva / aggiorna cliente"):
                 if not data["nome"] or not data["cognome"]:
                     st.error("Nome e cognome sono obbligatori.")
                 else:
                     existing = find_existing_clienti_for_data(data)
+
                     if not existing.empty and not allow_duplicate:
-                        st.error("Cliente già presente. Non creo un duplicato. Vai in 'Modifica cliente' per aggiornarlo.")
-                        st.dataframe(existing[["id","nome","cognome","cellulare","email","codice_fiscale","pacchetto","created_at"]], use_container_width=True, hide_index=True)
+                        # Se il cliente esiste già, aggiorno la scheda esistente invece di creare un duplicato.
+                        # Tengo l'ID più recente tra i record eventualmente già presenti.
+                        existing_id = int(existing["id"].max())
+                        update_cliente(existing_id, data)
+                        insert_history(existing_id, "AGGIORNAMENTO DA NUOVA ISCRIZIONE", "", "Scheda aggiornata", "Cliente già presente: aggiornati pacchetto, pagamento, lezioni, date e documenti.")
+                        st.success(f"Cliente già presente: scheda aggiornata correttamente. ID: {existing_id}")
+                        st.info("Non è stato creato alcun duplicato. Le modifiche sono disponibili in Cronologia.")
+
                     else:
                         cid = insert_cliente((data["nome"], data["cognome"], data["cellulare"], data["email"], data["codice_fiscale"], data["pacchetto"], data["tipologia_pagamento"], data["numero_lezioni"], data["lezioni_utilizzate"], data["importo"], data["importo_pagato"], data["data_iscrizione"], data["data_inizio_pacchetto"], data["scadenza_abbonamento"], data["certificato_medico"], data["scadenza_certificato"], data["consenso_foto_video"], data["stato_cliente"], data["note"], now_iso(), now_iso()))
-                        st.success(f"Cliente salvato correttamente. ID: {cid}")
+                        st.success(f"Nuovo cliente salvato correttamente. ID: {cid}")
     elif menu == "✏️ Modifica cliente":
         st.header("Modifica cliente / aggiorna lezioni")
         if df.empty: st.info("Nessun cliente inserito.")
