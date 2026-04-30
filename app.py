@@ -338,20 +338,87 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
     return True, "Documento caricato correttamente."
 
 
-def get_latest_doc_url(cliente_id, tipo_documento):
+
+def delete_documento(documento_id):
+    if not is_admin():
+        return False, "Operazione riservata all'amministratore."
+
+    sb = get_supabase()
+    data = sb.table("documenti_cliente").select("*").eq("id", int(documento_id)).limit(1).execute().data
+
+    if not data:
+        return False, "Documento non trovato."
+
+    doc = data[0]
+    cliente_id = int(doc.get("cliente_id"))
+    storage_path = doc.get("storage_path")
+
+    try:
+        if storage_path:
+            sb.storage.from_("documenti").remove([storage_path])
+    except Exception:
+        # Se il file non viene trovato nello storage, elimino comunque il record dal database.
+        pass
+
+    sb.table("documenti_cliente").delete().eq("id", int(documento_id)).execute()
+
+    insert_history(
+        cliente_id,
+        f"eliminazione documento - {doc.get('tipo_documento', '')}",
+        doc.get("nome_file", ""),
+        "",
+        f"Documento eliminato da {user_label()}"
+    )
+
+    return True, "Documento eliminato correttamente."
+
+
+def get_documento_by_id(documento_id):
+    sb = get_supabase()
+    data = sb.table("documenti_cliente").select("*").eq("id", int(documento_id)).limit(1).execute().data
+    return data[0] if data else None
+
+
+def get_latest_doc(cliente_id, tipo_documento):
     df = load_documenti(cliente_id)
     if df.empty:
         return None
     sub = df[df["tipo_documento"] == tipo_documento]
     if sub.empty:
         return None
-    return sub.iloc[0].get("public_url")
+    return sub.iloc[0].to_dict()
+
+
+def get_latest_doc_url(cliente_id, tipo_documento):
+    doc = get_latest_doc(cliente_id, tipo_documento)
+    return doc.get("public_url") if doc else None
 
 
 def pdf_icon_link(url, label="PDF"):
     if url:
         return f'<a href="{url}" target="_blank" style="text-decoration:none;font-size:22px;">📄 {label}</a>'
     return '<span style="opacity:0.45;font-size:18px;">📄 non caricato</span>'
+
+
+def document_card_html(doc, empty_label="non caricato"):
+    if not doc:
+        return f'<span style="opacity:0.45;font-size:18px;">📄 {empty_label}</span>'
+    url = doc.get("public_url", "")
+    nome_file = doc.get("nome_file", "PDF")
+    caricato_da = doc.get("caricato_da", "")
+    created_at = doc.get("created_at", "")
+    try:
+        created_at = pd.to_datetime(created_at).strftime("%d/%m/%Y %H:%M") if created_at else ""
+    except Exception:
+        pass
+    return f"""
+    <div style="line-height:1.55;">
+        <a href="{url}" target="_blank" style="text-decoration:none;font-size:20px;">📄 Apri PDF</a><br>
+        <a href="{url}" target="_blank" download style="text-decoration:none;font-size:15px;">⬇️ Download</a><br>
+        <span style="font-size:13px;">{nome_file}</span><br>
+        <span style="font-size:12px;opacity:0.75;">Caricato da: {caricato_da}<br>{created_at}</span>
+    </div>
+    """
 
 
 
@@ -744,16 +811,24 @@ def main():
             render_alerts(get_cliente_alerts(cliente))
 
             st.subheader("Documenti cliente")
-            cert_url = get_latest_doc_url(cliente_id, "CERTIFICATO MEDICO")
-            contratto_url = get_latest_doc_url(cliente_id, "CONTRATTO")
-            privacy_url = get_latest_doc_url(cliente_id, "PRIVACY")
+            cert_doc = get_latest_doc(cliente_id, "CERTIFICATO MEDICO")
+            contratto_doc = get_latest_doc(cliente_id, "CONTRATTO")
+            privacy_doc = get_latest_doc(cliente_id, "PRIVACY")
             dc1, dc2, dc3 = st.columns(3)
             with dc1:
-                st.markdown("<b>Certificato medico</b><br>" + pdf_icon_link(cert_url, "apri certificato"), unsafe_allow_html=True)
+                st.markdown("<b>Certificato medico</b><br>" + document_card_html(cert_doc), unsafe_allow_html=True)
             with dc2:
-                st.markdown("<b>Contratto</b><br>" + pdf_icon_link(contratto_url, "apri contratto"), unsafe_allow_html=True)
+                st.markdown("<b>Contratto</b><br>" + document_card_html(contratto_doc), unsafe_allow_html=True)
             with dc3:
-                st.markdown("<b>Privacy/documenti</b><br>" + pdf_icon_link(privacy_url, "apri privacy"), unsafe_allow_html=True)
+                st.markdown("<b>Privacy/documenti</b><br>" + document_card_html(privacy_doc), unsafe_allow_html=True)
+
+            with st.expander("Storico documenti del cliente"):
+                docs_cliente = load_documenti(cliente_id)
+                if docs_cliente.empty:
+                    st.info("Nessun documento nello storico.")
+                else:
+                    cols_docs_cliente = ["id", "tipo_documento", "nome_file", "caricato_da", "created_at_it", "note", "public_url"]
+                    st.dataframe(docs_cliente[[c for c in cols_docs_cliente if c in docs_cliente.columns]], use_container_width=True, hide_index=True)
 
             st.markdown("### Aggiornamento rapido lezioni")
             c1,c2,c3 = st.columns(3)
@@ -821,20 +896,45 @@ def main():
                     clienti_df["cliente"] = clienti_df["nome"] + " " + clienti_df["cognome"]
                     docs_view = docs.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
 
+                    filtro_cliente = st.text_input("Cerca cliente / file / tipo documento")
+                    if filtro_cliente:
+                        s = filtro_cliente.lower()
+                        docs_view = docs_view[
+                            docs_view["cliente"].fillna("").str.lower().str.contains(s)
+                            | docs_view["nome_file"].fillna("").str.lower().str.contains(s)
+                            | docs_view["tipo_documento"].fillna("").str.lower().str.contains(s)
+                        ]
+
                     for _, r in docs_view.iterrows():
-                        st.markdown(
-                            f"""
-                            <div style="background:#fff;border:1px solid #d9c07a;border-radius:14px;padding:14px;margin-bottom:10px;">
-                                <b>{r.get('cliente','')}</b><br>
-                                Tipo: <b>{r.get('tipo_documento','')}</b><br>
-                                File: {pdf_icon_link(r.get('public_url'), r.get('nome_file','PDF'))}<br>
-                                Caricato da: {r.get('caricato_da','')}<br>
-                                Data: {r.get('created_at_it','')}<br>
-                                Note: {r.get('note','')}
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
+                        cdoc1, cdoc2 = st.columns([5, 1])
+                        with cdoc1:
+                            st.markdown(
+                                f"""
+                                <div style="background:#fff;border:1px solid #d9c07a;border-radius:14px;padding:14px;margin-bottom:10px;">
+                                    <b>{r.get('cliente','')}</b><br>
+                                    ID documento: <b>{r.get('id','')}</b><br>
+                                    Tipo: <b>{r.get('tipo_documento','')}</b><br>
+                                    File: {pdf_icon_link(r.get('public_url'), r.get('nome_file','PDF'))}<br>
+                                    Caricato da: {r.get('caricato_da','')}<br>
+                                    Data: {r.get('created_at_it','')}<br>
+                                    Note: {r.get('note','')}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        with cdoc2:
+                            if is_admin():
+                                if st.button("🗑 Elimina", key=f"delete_doc_{int(r.get('id'))}"):
+                                    ok, msg = delete_documento(int(r.get("id")))
+                                    if ok:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+
+            st.markdown("---")
+            st.subheader("Sostituzione documento")
+            st.info("Per sostituire un documento, carica un nuovo PDF dello stesso tipo per lo stesso cliente. L'ultimo caricato diventa quello visibile nella scheda cliente; i precedenti restano nello storico, salvo eliminazione admin.")
 
 
     elif menu == "💳 Gestione incassi":
