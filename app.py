@@ -1,5 +1,6 @@
 
 from datetime import datetime, date, timedelta
+import urllib.parse
 import hashlib
 import pandas as pd
 import streamlit as st
@@ -268,6 +269,120 @@ def elimina_duplicati_tieni_ultimo():
     return len(ids_to_delete)
 
 
+
+
+
+
+def clean_phone_for_whatsapp(phone):
+    phone = "" if phone is None else str(phone).strip()
+    phone = phone.replace(" ", "").replace("-", "").replace(".", "").replace("/", "")
+    if not phone:
+        return ""
+    if phone.startswith("+"):
+        return phone.replace("+", "")
+    if phone.startswith("00"):
+        return phone[2:]
+    if phone.startswith("3"):
+        return "39" + phone
+    return phone
+
+
+def build_whatsapp_url(phone, message):
+    cleaned = clean_phone_for_whatsapp(phone)
+    encoded = urllib.parse.quote(message)
+    if cleaned:
+        return f"https://wa.me/{cleaned}?text={encoded}"
+    return f"https://wa.me/?text={encoded}"
+
+
+def get_next_lezione_cliente(cliente_id):
+    try:
+        lez_df = load_lezioni()
+    except Exception:
+        return None
+    if lez_df.empty:
+        return None
+    today_ts = pd.Timestamp(date.today())
+    lez_df["data_dt"] = pd.to_datetime(lez_df["data_lezione"], errors="coerce")
+    sub = lez_df[
+        (lez_df["cliente_id"].astype(int) == int(cliente_id)) &
+        (lez_df["data_dt"] >= today_ts) &
+        (lez_df["stato"].isin(["PRENOTATO", "RECUPERO"]))
+    ].sort_values(["data_dt", "ora_inizio"])
+    if sub.empty:
+        return None
+    return sub.iloc[0].to_dict()
+
+
+def genera_testo_whatsapp(cliente, template, custom_message=""):
+    nome = cliente.get("nome", "").strip() or "cliente"
+    cognome = cliente.get("cognome", "").strip()
+    nome_completo = f"{nome} {cognome}".strip()
+
+    residuo = max(float(cliente.get("importo") or 0) - float(cliente.get("importo_pagato") or 0), 0)
+    scadenza_cert = format_date_it(cliente.get("scadenza_certificato"))
+    scadenza_abb = format_date_it(cliente.get("scadenza_abbonamento"))
+    lezioni_totali = int(cliente.get("numero_lezioni") or 0)
+    lezioni_usate = int(cliente.get("lezioni_utilizzate") or 0)
+    lezioni_residue = max(lezioni_totali - lezioni_usate, 0)
+
+    if template == "CERTIFICATO MEDICO MANCANTE":
+        return (
+            f"Ciao {nome}, ti ricordiamo che per allenarti in sicurezza presso KREO è necessario consegnare il certificato medico. "
+            f"Puoi inviarcelo qui su WhatsApp oppure portarlo in sede. Grazie!"
+        )
+
+    if template == "CERTIFICATO MEDICO IN SCADENZA":
+        return (
+            f"Ciao {nome}, ti ricordiamo che il tuo certificato medico risulta in scadenza/scaduto al {scadenza_cert}. "
+            f"Ti chiediamo di aggiornarlo appena possibile per proseguire regolarmente il percorso KREO."
+        )
+
+    if template == "RESIDUO DA SALDARE":
+        return (
+            f"Ciao {nome}, ti ricordiamo che risulta ancora un saldo aperto di {euro(residuo)} relativo al tuo percorso KREO. "
+            f"Puoi regolarizzarlo in sede oppure concordare la modalità di pagamento con lo staff. Grazie!"
+        )
+
+    if template == "PROMEMORIA LEZIONE":
+        next_lesson = get_next_lezione_cliente(cliente.get("id"))
+        if next_lesson:
+            data_l = format_date_it(next_lesson.get("data_lezione"))
+            ora = next_lesson.get("ora_inizio", "")
+            trainer = next_lesson.get("trainer", "")
+            return (
+                f"Ciao {nome}, ti ricordiamo la tua prossima lezione KREO del {data_l} alle {ora}"
+                f"{' con ' + trainer if trainer else ''}. Ti aspettiamo!"
+            )
+        return f"Ciao {nome}, ti ricordiamo il tuo prossimo appuntamento KREO. Per qualsiasi esigenza puoi scriverci qui."
+
+    if template == "RINNOVO / PROSSIMA RATA":
+        return (
+            f"Ciao {nome}, ti ricordiamo che il tuo percorso/abbonamento KREO ha prossima scadenza il {scadenza_abb}. "
+            f"Per continuità nel percorso, puoi passare in sede o scriverci qui per il rinnovo."
+        )
+
+    if template == "LEZIONI RESIDUE BASSE":
+        return (
+            f"Ciao {nome}, ti segnaliamo che hai {lezioni_residue} lezioni residue sul tuo percorso KREO. "
+            f"Quando vuoi, possiamo valutare insieme il rinnovo o il prossimo step del tuo programma."
+        )
+
+    if template == "MESSAGGIO PERSONALIZZATO":
+        return custom_message or f"Ciao {nome}, ti scriviamo da KREO Your Place."
+
+    return f"Ciao {nome}, ti scriviamo da KREO Your Place."
+
+
+def registra_notifica(cliente_id, template, messaggio):
+    insert_history(
+        cliente_id,
+        "notifica whatsapp",
+        "",
+        template,
+        f"Messaggio generato da {user_label()}: {messaggio[:250]}"
+    )
+    return True
 
 
 
@@ -924,6 +1039,7 @@ def main():
         "📋 Database clienti",
         "📊 Dashboard",
         "📅 Calendario lezioni",
+        "📲 Notifiche WhatsApp",
         "🕘 Cronologia",
     ]
 
@@ -1243,6 +1359,105 @@ def main():
                         st.rerun()
             else:
                 st.info("Eliminazione clienti disponibile solo per amministratore.")
+
+
+
+    elif menu == "📲 Notifiche WhatsApp":
+        st.header("Notifiche WhatsApp")
+
+        if df.empty:
+            st.info("Inserisci almeno un cliente prima di generare notifiche.")
+        else:
+            tab1, tab2 = st.tabs(["Genera messaggio", "Clienti da contattare"])
+
+            with tab1:
+                st.subheader("Genera messaggio WhatsApp")
+                df_sorted = df.sort_values("id", ascending=True).copy()
+                labels = (df_sorted["id"].astype(str) + " - " + df_sorted["nome"] + " " + df_sorted["cognome"]).tolist()
+
+                selected = st.selectbox("Cliente", labels)
+                cliente_id = int(selected.split(" - ")[0])
+                cliente = get_cliente(cliente_id)
+
+                template = st.selectbox(
+                    "Template messaggio",
+                    [
+                        "CERTIFICATO MEDICO MANCANTE",
+                        "CERTIFICATO MEDICO IN SCADENZA",
+                        "RESIDUO DA SALDARE",
+                        "PROMEMORIA LEZIONE",
+                        "RINNOVO / PROSSIMA RATA",
+                        "LEZIONI RESIDUE BASSE",
+                        "MESSAGGIO PERSONALIZZATO",
+                    ]
+                )
+
+                custom_message = ""
+                if template == "MESSAGGIO PERSONALIZZATO":
+                    custom_message = st.text_area("Scrivi messaggio personalizzato")
+
+                messaggio = genera_testo_whatsapp(cliente, template, custom_message)
+                messaggio_editato = st.text_area("Messaggio generato", value=messaggio, height=170)
+
+                telefono = cliente.get("cellulare", "")
+                wa_url = build_whatsapp_url(telefono, messaggio_editato)
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Cliente", f"{cliente.get('nome','')} {cliente.get('cognome','')}")
+                c2.metric("Cellulare", telefono or "mancante")
+                c3.metric("Residuo", euro(max(float(cliente.get("importo") or 0) - float(cliente.get("importo_pagato") or 0), 0)))
+
+                st.markdown(f"[📲 Apri WhatsApp con messaggio pronto]({wa_url})", unsafe_allow_html=True)
+
+                if st.button("Registra notifica in cronologia"):
+                    registra_notifica(cliente_id, template, messaggio_editato)
+                    st.success("Notifica registrata in cronologia.")
+
+            with tab2:
+                st.subheader("Clienti da contattare")
+                alert_df = build_alert_dashboard(df)
+
+                if alert_df.empty:
+                    st.success("Nessun cliente con alert da contattare.")
+                else:
+                    st.info("Questa vista aiuta a individuare rapidamente chi contattare per certificati, residui, scadenze o lezioni.")
+                    priorita = st.multiselect("Filtra priorità", ["ALTA", "MEDIA"], default=["ALTA", "MEDIA"], key="wa_priorita")
+                    view = alert_df[alert_df["Priorità"].isin(priorita)].copy()
+                    st.dataframe(view, use_container_width=True, hide_index=True)
+
+                    st.markdown("### Generazione rapida da alert")
+                    if not view.empty:
+                        alert_ids = view["ID"].dropna().astype(int).unique().tolist()
+                        quick_labels = []
+                        for cid in alert_ids:
+                            c = get_cliente(cid)
+                            if c:
+                                quick_labels.append(f"{cid} - {c.get('nome','')} {c.get('cognome','')}")
+
+                        if quick_labels:
+                            quick_selected = st.selectbox("Cliente da alert", quick_labels)
+                            quick_id = int(quick_selected.split(" - ")[0])
+                            quick_cliente = get_cliente(quick_id)
+
+                            quick_template = st.selectbox(
+                                "Template rapido",
+                                [
+                                    "CERTIFICATO MEDICO MANCANTE",
+                                    "CERTIFICATO MEDICO IN SCADENZA",
+                                    "RESIDUO DA SALDARE",
+                                    "RINNOVO / PROSSIMA RATA",
+                                    "LEZIONI RESIDUE BASSE",
+                                ],
+                                key="quick_template"
+                            )
+                            quick_msg = genera_testo_whatsapp(quick_cliente, quick_template)
+                            quick_msg_edit = st.text_area("Messaggio rapido", value=quick_msg, height=140)
+                            quick_url = build_whatsapp_url(quick_cliente.get("cellulare", ""), quick_msg_edit)
+                            st.markdown(f"[📲 Apri WhatsApp]({quick_url})", unsafe_allow_html=True)
+
+                            if st.button("Registra notifica rapida"):
+                                registra_notifica(quick_id, quick_template, quick_msg_edit)
+                                st.success("Notifica registrata in cronologia.")
 
 
     elif menu == "📅 Calendario lezioni":
