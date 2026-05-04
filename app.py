@@ -1215,6 +1215,68 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
     }
 
 
+def login_gate():
+    st.markdown("### Scegli tipo di accesso")
+    access_type = st.radio(
+        "Accesso",
+        ["Staff KREO", "Cliente"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+
+    if access_type == "Cliente":
+        cliente_login_gate()
+        return False
+
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if st.session_state.logged_in and st.session_state.get("user"):
+        return True
+
+    st.title("Accesso gestionale KREO")
+    st.caption("Inserisci le credenziali personali assegnate allo staff.")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Entra"):
+        if not username or not password:
+            st.error("Inserisci username e password.")
+            return False
+
+        sb = get_supabase()
+        data = (
+            sb.table("utenti")
+            .select("*")
+            .eq("username", username.strip().lower())
+            .eq("attivo", True)
+            .limit(1)
+            .execute()
+            .data
+        )
+
+        if not data:
+            st.error("Utente non trovato o non attivo.")
+            return False
+
+        user = data[0]
+        if user.get("password_hash") != hash_password(password):
+            st.error("Password errata.")
+            return False
+
+        st.session_state.logged_in = True
+        st.session_state.user = {
+            "id": user.get("id"),
+            "nome": user.get("nome"),
+            "username": user.get("username"),
+            "ruolo": user.get("ruolo"),
+        }
+        st.rerun()
+
+    return False
+
+
+
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
     style()
