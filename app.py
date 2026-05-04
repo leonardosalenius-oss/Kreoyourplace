@@ -357,9 +357,150 @@ def get_cliente_by_login(username, password):
     return cliente, None
 
 
+
+def area_cliente_premium_style():
+    st.markdown("""
+    <style>
+    .client-hero {
+        background: linear-gradient(135deg, #111111 0%, #262018 48%, #d4af37 160%);
+        border-radius: 28px;
+        padding: 34px;
+        margin: 10px 0 26px 0;
+        color: white;
+        box-shadow: 0 18px 45px rgba(0,0,0,0.22);
+    }
+    .client-hero-title {
+        font-size: 38px;
+        line-height: 1.05;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+        color: white !important;
+    }
+    .client-hero-subtitle {
+        margin-top: 12px;
+        font-size: 17px;
+        color: rgba(255,255,255,0.86) !important;
+    }
+    .client-card {
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(212,175,55,0.34);
+        border-radius: 24px;
+        padding: 22px;
+        min-height: 120px;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.08);
+        margin-bottom: 16px;
+    }
+    .client-card-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #7a6a44 !important;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: 8px;
+    }
+    .client-card-value {
+        font-size: 30px;
+        font-weight: 900;
+        color: #111111 !important;
+        line-height: 1.05;
+        word-break: break-word;
+    }
+    .client-card-small {
+        font-size: 13px;
+        color: #6b6252 !important;
+        margin-top: 8px;
+    }
+    .client-status-ok {
+        background: #ecfdf5;
+        border: 1px solid #10b981;
+        color: #065f46 !important;
+        padding: 16px 18px;
+        border-radius: 18px;
+        margin: 10px 0;
+        font-weight: 700;
+    }
+    .client-status-alert {
+        background: #fff7ed;
+        border: 1px solid #f97316;
+        color: #9a3412 !important;
+        padding: 16px 18px;
+        border-radius: 18px;
+        margin: 10px 0;
+        font-weight: 700;
+    }
+    .client-status-danger {
+        background: #fef2f2;
+        border: 1px solid #ef4444;
+        color: #991b1b !important;
+        padding: 16px 18px;
+        border-radius: 18px;
+        margin: 10px 0;
+        font-weight: 700;
+    }
+    .lesson-premium-card {
+        background: #ffffff;
+        border-radius: 20px;
+        padding: 18px 20px;
+        margin-bottom: 14px;
+        border-left: 7px solid #d4af37;
+        box-shadow: 0 8px 22px rgba(0,0,0,0.07);
+    }
+    .lesson-premium-date {
+        font-size: 18px;
+        font-weight: 900;
+        color: #111 !important;
+    }
+    .lesson-premium-info {
+        margin-top: 7px;
+        color: #4b463c !important;
+        font-size: 15px;
+        line-height: 1.55;
+    }
+    .doc-premium-card {
+        background: white;
+        border: 1px solid rgba(212,175,55,0.35);
+        border-radius: 20px;
+        padding: 18px 20px;
+        margin-bottom: 14px;
+        box-shadow: 0 8px 22px rgba(0,0,0,0.06);
+    }
+    .premium-section-title {
+        font-size: 26px;
+        font-weight: 900;
+        margin: 25px 0 14px 0;
+        color: #111 !important;
+    }
+    .premium-pill {
+        display: inline-block;
+        padding: 8px 13px;
+        background: rgba(212,175,55,0.14);
+        border: 1px solid rgba(212,175,55,0.45);
+        border-radius: 999px;
+        color: #6b5511 !important;
+        font-weight: 800;
+        font-size: 13px;
+        margin-top: 12px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def premium_metric_card(title, value, small=""):
+    return f"""
+    <div class="client-card">
+        <div class="client-card-title">{title}</div>
+        <div class="client-card-value">{value}</div>
+        <div class="client-card-small">{small}</div>
+    </div>
+    """
+
+
 def cliente_area_view(cliente):
-    st.title("KREO Area Cliente")
-    st.caption(f"Benvenuto/a, {cliente.get('nome','')} {cliente.get('cognome','')}")
+    area_cliente_premium_style()
+
+    nome = cliente.get('nome','')
+    cognome = cliente.get('cognome','')
+    nome_completo = f"{nome} {cognome}".strip()
 
     numero_lezioni = int(cliente.get("numero_lezioni") or 0)
     lezioni_usate = int(cliente.get("lezioni_utilizzate") or 0)
@@ -367,19 +508,72 @@ def cliente_area_view(cliente):
     importo = float(cliente.get("importo") or 0)
     pagato = float(cliente.get("importo_pagato") or 0)
     residuo = max(importo - pagato, 0)
+    pacchetto = cliente.get("pacchetto", "")
+    scadenza_abbonamento = parse_date(cliente.get("scadenza_abbonamento"), None)
+
+    giorni_scadenza = None
+    if scadenza_abbonamento:
+        giorni_scadenza = (scadenza_abbonamento - date.today()).days
+
+    st.markdown(
+        f"""
+        <div class="client-hero">
+            <div class="client-hero-title">Benvenuto/a, {nome} 👋</div>
+            <div class="client-hero-subtitle">
+                Questa è la tua area personale KREO: percorso, lezioni, documenti e stato del tuo programma.
+            </div>
+            <div class="premium-pill">KREO Your Place · Area Cliente Premium</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Pacchetto", cliente.get("pacchetto", ""))
-    c2.metric("Lezioni residue", lezioni_residue)
-    c3.metric("Scadenza", format_date_it(cliente.get("scadenza_abbonamento")))
-    c4.metric("Residuo", euro(residuo))
+    with c1:
+        st.markdown(premium_metric_card("Pacchetto", pacchetto[:24] + "..." if len(pacchetto) > 24 else pacchetto, "Percorso attivo"), unsafe_allow_html=True)
+    with c2:
+        st.markdown(premium_metric_card("Lezioni residue", lezioni_residue, f"{lezioni_usate} utilizzate su {numero_lezioni}"), unsafe_allow_html=True)
+    with c3:
+        if giorni_scadenza is None:
+            scad_value = "-"
+            scad_small = "Scadenza non impostata"
+        else:
+            scad_value = f"{giorni_scadenza} gg"
+            scad_small = f"Scadenza {format_date_it(cliente.get('scadenza_abbonamento'))}"
+        st.markdown(premium_metric_card("Scadenza", scad_value, scad_small), unsafe_allow_html=True)
+    with c4:
+        st.markdown(premium_metric_card("Residuo", euro(residuo), "Saldo percorso"), unsafe_allow_html=True)
+
+    # Status alerts
+    if cliente.get("certificato_medico") == "SI":
+        st.markdown(
+            f'<div class="client-status-ok">✅ Certificato medico consegnato · scadenza {format_date_it(cliente.get("scadenza_certificato"))}</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            '<div class="client-status-danger">⚠️ Certificato medico non ancora consegnato. Invialo o portalo in sede prima dell’allenamento.</div>',
+            unsafe_allow_html=True
+        )
+
+    if residuo > 0:
+        st.markdown(
+            f'<div class="client-status-alert">💳 Risulta un residuo aperto di {euro(residuo)}. Puoi regolarizzarlo in sede o contattare lo staff.</div>',
+            unsafe_allow_html=True
+        )
+
+    if lezioni_residue <= 0 and numero_lezioni > 0:
+        st.markdown(
+            '<div class="client-status-alert">🏋️ Le lezioni risultano terminate. Contatta lo staff per rinnovare o pianificare il prossimo step.</div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Prossime lezioni", "Documenti", "Pagamenti", "Stato percorso"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📅 Prossime lezioni", "📄 Documenti", "💳 Pagamenti", "✨ Stato percorso"])
 
     with tab1:
-        st.subheader("Lezioni prenotate")
+        st.markdown('<div class="premium-section-title">Le tue prossime lezioni</div>', unsafe_allow_html=True)
         try:
             lez_df = load_lezioni()
         except Exception:
@@ -398,33 +592,62 @@ def cliente_area_view(cliente):
             if view.empty:
                 st.info("Nessuna prossima lezione.")
             else:
-                cols = ["data_lezione_it", "ora_inizio", "ora_fine", "trainer", "stato", "note"]
-                st.dataframe(view[[c for c in cols if c in view.columns]], use_container_width=True, hide_index=True)
+                for _, row in view.iterrows():
+                    st.markdown(
+                        f"""
+                        <div class="lesson-premium-card">
+                            <div class="lesson-premium-date">📅 {row.get('data_lezione_it','')}</div>
+                            <div class="lesson-premium-info">
+                                🕒 {row.get('ora_inizio','')} - {row.get('ora_fine','')}<br>
+                                👤 Trainer: <b>{row.get('trainer','')}</b><br>
+                                📌 Stato: <b>{row.get('stato','')}</b><br>
+                                {('📝 ' + str(row.get('note',''))) if row.get('note') else ''}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
     with tab2:
-        st.subheader("Documenti")
-        docs = load_documenti(int(cliente.get("id")))
+        st.markdown('<div class="premium-section-title">I tuoi documenti</div>', unsafe_allow_html=True)
+        try:
+            docs = load_documenti(int(cliente.get("id")))
+        except Exception:
+            docs = pd.DataFrame()
+
         if docs.empty:
             st.info("Nessun documento caricato.")
         else:
             for _, r in docs.iterrows():
                 st.markdown(
                     f"""
-                    <div style="background:#fff;border:1px solid #d9c07a;border-radius:14px;padding:14px;margin-bottom:10px;">
-                        <b>{r.get('tipo_documento','')}</b><br>
+                    <div class="doc-premium-card">
+                        <b>📄 {r.get('tipo_documento','')}</b><br>
                         File: {pdf_icon_link(r.get('public_url'), r.get('nome_file','PDF'))}<br>
-                        Data caricamento: {r.get('created_at_it','')}
+                        <span style="opacity:.75;">Data caricamento: {r.get('created_at_it','')}</span>
                     </div>
                     """,
                     unsafe_allow_html=True
                 )
 
     with tab3:
-        st.subheader("Pagamenti")
+        st.markdown('<div class="premium-section-title">Pagamenti e saldo</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="client-card">
+                <div class="client-card-title">Situazione economica</div>
+                <div class="client-card-value">{euro(pagato)} / {euro(importo)}</div>
+                <div class="client-card-small">Residuo attuale: {euro(residuo)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
         try:
             pag = load_pagamenti()
         except Exception:
             pag = pd.DataFrame()
+
         if pag.empty:
             st.info("Nessun pagamento registrato.")
         else:
@@ -436,20 +659,21 @@ def cliente_area_view(cliente):
                 st.dataframe(view[[c for c in cols if c in view.columns]], use_container_width=True, hide_index=True)
 
     with tab4:
-        st.subheader("Stato percorso")
-        st.write(f"**Certificato medico:** {cliente.get('certificato_medico','')}")
-        st.write(f"**Scadenza certificato:** {format_date_it(cliente.get('scadenza_certificato'))}")
-        st.write(f"**Lezioni totali:** {numero_lezioni}")
-        st.write(f"**Lezioni utilizzate:** {lezioni_usate}")
-        st.write(f"**Lezioni residue:** {lezioni_residue}")
-        st.write(f"**Stato cliente:** {cliente.get('stato_cliente','')}")
-        if cliente.get("note"):
-            st.write(f"**Note:** {cliente.get('note')}")
+        st.markdown('<div class="premium-section-title">Stato del tuo percorso</div>', unsafe_allow_html=True)
+        s1, s2 = st.columns(2)
+        with s1:
+            st.markdown(premium_metric_card("Certificato medico", cliente.get("certificato_medico",""), f"Scadenza {format_date_it(cliente.get('scadenza_certificato'))}"), unsafe_allow_html=True)
+            st.markdown(premium_metric_card("Stato cliente", cliente.get("stato_cliente",""), "Situazione amministrativa"), unsafe_allow_html=True)
+        with s2:
+            st.markdown(premium_metric_card("Lezioni totali", numero_lezioni, f"{lezioni_usate} utilizzate"), unsafe_allow_html=True)
+            st.markdown(premium_metric_card("Lezioni residue", lezioni_residue, "Disponibilità attuale"), unsafe_allow_html=True)
 
+    st.markdown("---")
     if st.button("Logout cliente"):
         st.session_state.logged_in_cliente = False
         st.session_state.cliente_user = None
         st.rerun()
+
 
 
 def cliente_login_gate():
@@ -460,8 +684,8 @@ def cliente_login_gate():
         cliente_area_view(st.session_state.cliente_user)
         return True
 
-    st.title("KREO Area Cliente")
-    st.caption("Accesso personale cliente")
+    area_cliente_premium_style()
+    st.markdown("""<div class="client-hero"><div class="client-hero-title">KREO Area Cliente</div><div class="client-hero-subtitle">Accedi al tuo percorso personale wellness.</div></div>""", unsafe_allow_html=True)
 
     username = st.text_input("Username cliente")
     password = st.text_input("Password cliente", type="password")
