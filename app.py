@@ -3964,11 +3964,122 @@ def delete_pagamenti_duplicati_keep_first():
     return True, f"Pulizia completata. Eliminati {deleted} pagamenti duplicati, lasciando una sola riga per movimento."
 
 
+
+def badge_sconosciuti_da_accessi():
+    accessi = load_accessi_tornello()
+    if accessi.empty or "badge_uid" not in accessi.columns:
+        return pd.DataFrame()
+
+    badges = load_badge_clienti()
+    known = set()
+    if not badges.empty and "badge_uid" in badges.columns:
+        known = set(badges[badges.get("attivo", True) == True]["badge_uid"].astype(str).str.strip().tolist())
+
+    df = accessi.copy()
+    df["badge_uid"] = df["badge_uid"].fillna("").astype(str).str.strip()
+    df = df[df["badge_uid"] != ""]
+    df = df[~df["badge_uid"].isin(known)]
+
+    if df.empty:
+        return pd.DataFrame()
+
+    agg = (
+        df.groupby("badge_uid")
+        .agg(
+            accessi=("id", "count"),
+            primo_accesso=("created_at", "min"),
+            ultimo_accesso=("created_at", "max"),
+            ultimo_stato=("stato_accesso", "last"),
+            ultimo_tornello=("tornello", "last"),
+            ultima_nota=("note", "last"),
+        )
+        .reset_index()
+        .sort_values("ultimo_accesso", ascending=False)
+    )
+
+    return agg
+
+
+def associa_badge_sconosciuto_a_cliente(badge_uid, cliente_id, note="Associazione da accessi sconosciuti"):
+    ok, msg = assegna_badge_cliente(cliente_id, badge_uid, note)
+    if not ok:
+        return False, msg
+
+    # Aggiorna retroattivamente gli accessi già presenti con quel badge
+    sb = get_supabase()
+    try:
+        sb.table("accessi_tornello").update({
+            "cliente_id": int(cliente_id),
+            "stato_accesso": "REGISTRATO_ASSOCIATO",
+            "note": f"Accesso associato retroattivamente al cliente ID {cliente_id}",
+        }).eq("badge_uid", str(badge_uid)).execute()
+
+        insert_history(
+            int(cliente_id),
+            "associazione badge accessi",
+            "",
+            str(badge_uid),
+            f"Badge associato e accessi precedenti aggiornati. Note: {note}"
+        )
+
+        return True, "Badge associato e accessi precedenti aggiornati."
+    except Exception as e:
+        return False, f"Badge associato, ma errore aggiornamento accessi precedenti: {e}"
+
+
+def render_associazione_badge_smart():
+    st.subheader("Associazione badge smart")
+    st.caption("Qui trovi i badge/ID PerfectGym già rilevati dagli accessi ma non ancora collegati a un cliente KREO.")
+
+    sconosciuti = badge_sconosciuti_da_accessi()
+
+    if sconosciuti.empty:
+        st.success("Nessun badge sconosciuto da associare.")
+        return
+
+    st.warning(f"Badge/ID non associati trovati: {len(sconosciuti)}")
+    st.dataframe(sconosciuti, use_container_width=True, hide_index=True)
+
+    clienti = load_clienti()
+    if clienti.empty:
+        st.info("Nessun cliente KREO presente.")
+        return
+
+    badge_labels = (
+        sconosciuti["badge_uid"].astype(str)
+        + " | accessi: " + sconosciuti["accessi"].astype(str)
+        + " | ultimo: " + sconosciuti["ultimo_accesso"].astype(str)
+    ).tolist()
+
+    selected_badge = st.selectbox("Badge/ID PerfectGym da associare", badge_labels, key="smart_badge_to_link")
+    badge_uid = selected_badge.split(" | ")[0].strip()
+
+    clienti_sorted = clienti.sort_values(["cognome", "nome"]).copy()
+    client_labels = (
+        clienti_sorted["id"].astype(str)
+        + " - " + clienti_sorted["nome"].fillna("").astype(str)
+        + " " + clienti_sorted["cognome"].fillna("").astype(str)
+    ).tolist()
+
+    selected_cliente = st.selectbox("Cliente KREO da collegare", client_labels, key="smart_cliente_to_link")
+    cliente_id = int(selected_cliente.split(" - ")[0])
+
+    note = st.text_area("Note associazione", value=f"Associazione badge/ID PerfectGym {badge_uid}")
+
+    if st.button("🔗 Associa badge al cliente e aggiorna accessi precedenti", key="smart_associa_badge_btn"):
+        ok, msg = associa_badge_sconosciuto_a_cliente(badge_uid, cliente_id, note)
+        if ok:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(msg)
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -4035,6 +4146,9 @@ def render_accessi_tornello_page():
 
             cols = ["id", "cliente", "badge_uid", "attivo", "note", "updated_by", "updated_at"]
             st.dataframe(badges[[c for c in cols if c in badges.columns]], use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            render_associazione_badge_smart()
 
             if is_admin():
                 with st.expander("Disattiva badge"):
@@ -4106,6 +4220,9 @@ def render_accessi_tornello_page():
                 day_df = accessi.groupby("data_accesso", as_index=False)["id"].count().rename(columns={"id": "accessi"})
                 st.plotly_chart(px.line(day_df, x="data_accesso", y="accessi", title="Accessi per giorno"), use_container_width=True)
 
+
+    with tab5:
+        render_associazione_badge_smart()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
