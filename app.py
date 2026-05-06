@@ -2957,6 +2957,55 @@ def importo_pagato_rata(cliente_id, rata_num):
     return float(pd.to_numeric(sub["importo"], errors="coerce").fillna(0).sum())
 
 
+
+def pagato_allocato_su_rata(cliente, rata):
+    """
+    Logica corretta:
+    l'importo_pagato salvato sul cliente copre le rate in ordine cronologico.
+    Così, se in iscrizione il cliente ha già pagato tutto, tutte le rate risultano pagate
+    anche se non esiste ancora uno storico pagamento collegato a ogni rata.
+    """
+    try:
+        totale_pagato_cliente = float(cliente.get("importo_pagato") or 0)
+    except Exception:
+        totale_pagato_cliente = 0.0
+
+    piano = build_piano_rate(cliente)
+    paid_remaining = totale_pagato_cliente
+
+    for r in piano:
+        quota = float(r.get("importo_rata") or 0)
+        allocato = min(max(paid_remaining, 0), quota)
+
+        if int(r.get("rata_num")) == int(rata.get("rata_num")):
+            # Se ci sono pagamenti specificamente collegati alla rata e superano l'allocazione,
+            # prendo il valore maggiore. In condizioni normali l'allocazione basta.
+            try:
+                pagato_specifico = importo_pagato_rata(int(cliente.get("id")), int(rata.get("rata_num")))
+            except Exception:
+                pagato_specifico = 0.0
+            return max(allocato, pagato_specifico)
+
+        paid_remaining -= quota
+
+    return 0.0
+
+
+def stato_rata_cliente(cliente, rata, today=None):
+    today = today or date.today()
+    pagato = pagato_allocato_su_rata(cliente, rata)
+    residuo = max(float(rata["importo_rata"]) - pagato, 0)
+    if residuo <= 0.01:
+        stato = "PAGATA"
+    elif rata["scadenza"] < today:
+        stato = "SCADUTA"
+    elif rata["scadenza"] == today:
+        stato = "IN SCADENZA OGGI"
+    else:
+        stato = "DA PAGARE"
+    return stato, pagato, residuo
+
+
 def stato_rata(cliente_id, rata, today=None):
     today = today or date.today()
     pagato = importo_pagato_rata(cliente_id, rata["rata_num"])
@@ -3007,7 +3056,7 @@ def render_piano_rate_cliente(cliente):
     """, unsafe_allow_html=True)
 
     for rata in piano:
-        stato, pagato, residuo = stato_rata(cliente_id, rata)
+        stato, pagato, residuo = stato_rata_cliente(cliente, rata)
         css = "rate-paid" if stato == "PAGATA" else "rate-overdue" if stato == "SCADUTA" else "rate-due"
         st.markdown(
             f"""
@@ -3034,7 +3083,7 @@ def situazione_rate_cliente(cliente):
     aperte = 0
 
     for rata in piano:
-        stato, pagato, residuo = stato_rata(cliente_id, rata)
+        stato, pagato, residuo = stato_rata_cliente(cliente, rata)
         if rata["scadenza"] <= date.today():
             dovuto_oggi += float(rata["importo_rata"])
         pagato_su_rate += pagato
@@ -4154,7 +4203,9 @@ def main():
                     k3.metric("Residuo totale", euro(residuo_totale))
                     k4.metric("Rate aperte", situazione["rate_aperte"])
 
-                    if situazione["scoperto_oggi"] > 0:
+                    if residuo_totale <= 0:
+                        st.success("Cliente completamente saldato: tutte le rate risultano coperte.")
+                    elif situazione["scoperto_oggi"] > 0:
                         st.warning(f"Scoperto su rate dovute ad oggi: {euro(situazione['scoperto_oggi'])}")
                     else:
                         st.success("Rate dovute ad oggi coperte.")
@@ -4162,7 +4213,7 @@ def main():
                     piano = build_piano_rate(cliente)
                     rata_options = []
                     for rata in piano:
-                        stato, pagato_rata, residuo_rata = stato_rata(cliente_id, rata)
+                        stato, pagato_rata, residuo_rata = stato_rata_cliente(cliente, rata)
                         rata_options.append(
                             f"{rata['rata_num']} - {rata['rata_label']} | scad. {rata['scadenza_it']} | {stato} | residuo {euro(residuo_rata)}"
                         )
@@ -4170,7 +4221,7 @@ def main():
                     selected_rata = st.selectbox("Seleziona rata che il cliente sta pagando", rata_options, key="selected_rata_incasso")
                     rata_num = int(selected_rata.split(" - ")[0])
                     rata = [r for r in piano if r["rata_num"] == rata_num][0]
-                    stato_sel, pagato_sel, residuo_sel = stato_rata(cliente_id, rata)
+                    stato_sel, pagato_sel, residuo_sel = stato_rata_cliente(cliente, rata)
 
                     st.info(
                         f"Rata selezionata: {rata['rata_label']} | scadenza {rata['scadenza_it']} | "

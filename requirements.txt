@@ -5,3 +5,5 @@ openpyxl
 supabase
 reportlab
 streamlit-calendar
+requests
+python-dotenv
