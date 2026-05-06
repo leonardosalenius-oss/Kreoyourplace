@@ -2225,14 +2225,144 @@ def document_card_html(doc, empty_label="non caricato"):
 
 
 
-def genesis_info():
+
+def azienda_info():
     return {
-        "ragione_sociale": get_setting("genesis_ragione_sociale", "GENESIS SRLS"),
-        "brand": get_setting("genesis_brand", "KREO Your Place"),
-        "indirizzo": get_setting("genesis_indirizzo", "Indirizzo sede da completare"),
-        "piva": get_setting("genesis_piva", "P.IVA da completare"),
-        "email": get_setting("genesis_email", "Email da completare"),
-        "telefono": get_setting("genesis_telefono", "Telefono da completare"),
+        "ragione_sociale": get_setting("azienda_ragione_sociale", "GENESIS SRLS"),
+        "brand": get_setting("azienda_brand", "KREO Your Place"),
+        "piva": get_setting("azienda_piva", "10628371212"),
+        "codice_fiscale": get_setting("azienda_codice_fiscale", ""),
+        "sede_legale": get_setting("azienda_sede_legale", "VIA TOLEDO 383, NAPOLI"),
+        "sede_operativa": get_setting("azienda_sede_operativa", "Secondo piano Hotel San Mauro, Casalnuovo"),
+        "pec": get_setting("azienda_pec", "genesissrls24@pec.it"),
+        "email": get_setting("azienda_email", "infokreostudiopersonal@gmail.com"),
+        "telefono": get_setting("azienda_telefono", ""),
+        "whatsapp": get_setting("azienda_whatsapp", ""),
+        "iban": get_setting("azienda_iban", ""),
+        "sdi": get_setting("azienda_sdi", ""),
+        "rea": get_setting("azienda_rea", ""),
+        "note": get_setting("azienda_note", ""),
+    }
+
+
+def salva_azienda_info(data):
+    mapping = {
+        "azienda_ragione_sociale": ("ragione_sociale", "Ragione sociale azienda"),
+        "azienda_brand": ("brand", "Brand commerciale"),
+        "azienda_piva": ("piva", "Partita IVA"),
+        "azienda_codice_fiscale": ("codice_fiscale", "Codice fiscale azienda"),
+        "azienda_sede_legale": ("sede_legale", "Sede legale"),
+        "azienda_sede_operativa": ("sede_operativa", "Sede operativa"),
+        "azienda_pec": ("pec", "PEC"),
+        "azienda_email": ("email", "Email"),
+        "azienda_telefono": ("telefono", "Telefono"),
+        "azienda_whatsapp": ("whatsapp", "WhatsApp"),
+        "azienda_iban": ("iban", "IBAN"),
+        "azienda_sdi": ("sdi", "Codice SDI"),
+        "azienda_rea": ("rea", "REA"),
+        "azienda_note": ("note", "Note azienda"),
+    }
+    for key, (field, desc) in mapping.items():
+        set_setting(key, data.get(field, ""), desc)
+
+    # Compatibilità con le ricevute già esistenti
+    set_setting("genesis_ragione_sociale", data.get("ragione_sociale", ""), "Ragione sociale per ricevute PDF")
+    set_setting("genesis_brand", data.get("brand", ""), "Brand per ricevute PDF")
+    set_setting("genesis_indirizzo", data.get("sede_legale", ""), "Indirizzo per ricevute PDF")
+    set_setting("genesis_piva", data.get("piva", ""), "Partita IVA per ricevute PDF")
+    set_setting("genesis_email", data.get("email", ""), "Email per ricevute PDF")
+    set_setting("genesis_telefono", data.get("telefono", ""), "Telefono per ricevute PDF")
+
+
+def render_anagrafica_azienda_page():
+    if not is_admin():
+        st.error("Funzione riservata all’amministratore.")
+        return
+
+    st.header("Anagrafica azienda")
+    st.caption("Questi dati alimentano ricevute PDF, intestazioni e futuri documenti contrattuali.")
+
+    info = azienda_info()
+
+    with st.form("anagrafica_azienda_form"):
+        st.subheader("Dati principali")
+        c1, c2 = st.columns(2)
+        with c1:
+            ragione_sociale = st.text_input("Ragione sociale", value=info["ragione_sociale"])
+            brand = st.text_input("Brand / insegna commerciale", value=info["brand"])
+            piva = st.text_input("Partita IVA", value=info["piva"])
+            codice_fiscale = st.text_input("Codice fiscale", value=info["codice_fiscale"])
+        with c2:
+            pec = st.text_input("PEC", value=info["pec"])
+            email = st.text_input("Email", value=info["email"])
+            telefono = st.text_input("Telefono", value=info["telefono"])
+            whatsapp = st.text_input("WhatsApp", value=info["whatsapp"])
+
+        st.subheader("Sedi")
+        sede_legale = st.text_area("Sede legale", value=info["sede_legale"])
+        sede_operativa = st.text_area("Sede operativa", value=info["sede_operativa"])
+
+        st.subheader("Dati amministrativi opzionali")
+        c3, c4, c5 = st.columns(3)
+        with c3:
+            iban = st.text_input("IBAN", value=info["iban"])
+        with c4:
+            sdi = st.text_input("Codice SDI", value=info["sdi"])
+        with c5:
+            rea = st.text_input("REA", value=info["rea"])
+
+        note = st.text_area("Note azienda / diciture documenti", value=info["note"])
+
+        submitted = st.form_submit_button("Salva anagrafica azienda")
+
+        if submitted:
+            salva_azienda_info({
+                "ragione_sociale": ragione_sociale,
+                "brand": brand,
+                "piva": piva,
+                "codice_fiscale": codice_fiscale,
+                "sede_legale": sede_legale,
+                "sede_operativa": sede_operativa,
+                "pec": pec,
+                "email": email,
+                "telefono": telefono,
+                "whatsapp": whatsapp,
+                "iban": iban,
+                "sdi": sdi,
+                "rea": rea,
+                "note": note,
+            })
+            st.success("Anagrafica azienda salvata correttamente.")
+            st.rerun()
+
+    st.markdown("---")
+    st.subheader("Anteprima dati usati in ricevuta")
+    preview = azienda_info()
+    st.info(
+        f"{preview['ragione_sociale']} | {preview['brand']} | P.IVA {preview['piva']} | "
+        f"Sede legale: {preview['sede_legale']} | Sede operativa: {preview['sede_operativa']} | "
+        f"Email: {preview['email']} | PEC: {preview['pec']} | Tel: {preview['telefono']}"
+    )
+
+
+def genesis_info():
+    azienda = azienda_info()
+    return {
+        "ragione_sociale": azienda.get("ragione_sociale", "GENESIS SRLS"),
+        "brand": azienda.get("brand", "KREO Your Place"),
+        "indirizzo": azienda.get("sede_legale", ""),
+        "sede_legale": azienda.get("sede_legale", ""),
+        "sede_operativa": azienda.get("sede_operativa", ""),
+        "piva": azienda.get("piva", ""),
+        "codice_fiscale": azienda.get("codice_fiscale", ""),
+        "pec": azienda.get("pec", ""),
+        "email": azienda.get("email", ""),
+        "telefono": azienda.get("telefono", ""),
+        "whatsapp": azienda.get("whatsapp", ""),
+        "iban": azienda.get("iban", ""),
+        "sdi": azienda.get("sdi", ""),
+        "rea": azienda.get("rea", ""),
+        "note": azienda.get("note", ""),
     }
 
 
@@ -2322,8 +2452,10 @@ def make_ricevuta_pdf(cliente, pagamento):
 
     story.append(Paragraph("Ricevuta pagamento", styles["KreoTitle"]))
     story.append(Paragraph(f"{info['ragione_sociale']} - {info['brand']}", styles["KreoSub"]))
-    story.append(Paragraph(f"{info['indirizzo']} | {info['piva']}", styles["KreoSub"]))
-    story.append(Paragraph(f"{info['email']} | {info['telefono']}", styles["KreoSub"]))
+    story.append(Paragraph(f"Sede legale: {info.get('sede_legale', info.get('indirizzo', ''))}", styles["KreoSub"]))
+    story.append(Paragraph(f"Sede operativa: {info.get('sede_operativa', '')}", styles["KreoSub"]))
+    story.append(Paragraph(f"P.IVA: {info.get('piva', '')} | PEC: {info.get('pec', '')}", styles["KreoSub"]))
+    story.append(Paragraph(f"Email: {info.get('email', '')} | Tel: {info.get('telefono', '')} | WhatsApp: {info.get('whatsapp', '')}", styles["KreoSub"]))
     story.append(Spacer(1, 16))
 
     pagamento_id = pagamento.get("id", "")
@@ -3134,6 +3266,7 @@ def main():
         "📅 Calendario lezioni",
         "⚙️ Disponibilità calendario",
         "⚙️ Settaggi KREO",
+        "🏢 Anagrafica azienda",
         "🗓 Planner Slot",
         "🗓 Premium Calendar",
         "📲 Notifiche WhatsApp",
@@ -3710,6 +3843,11 @@ def main():
         st.header("Planner settimanale slot")
         settimana = st.date_input("Settimana da visualizzare", value=date.today(), format="DD/MM/YYYY", key="planner_week_page")
         render_weekly_planner(settimana)
+
+
+
+    elif menu == "🏢 Anagrafica azienda":
+        render_anagrafica_azienda_page()
 
 
     elif menu == "⚙️ Settaggi KREO":
