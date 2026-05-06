@@ -4090,7 +4090,9 @@ def render_accessi_tornello_page():
             clienti = load_clienti()
             if not clienti.empty and "cliente_id" in accessi.columns:
                 clienti_map = clienti[["id", "nome", "cognome"]].copy()
-                clienti_map["cliente"] = clienti_map["nome"] + " " + clienti_map["cognome"]
+                clienti_map["id"] = pd.to_numeric(clienti_map["id"], errors="coerce").astype("Int64")
+                accessi["cliente_id"] = pd.to_numeric(accessi["cliente_id"], errors="coerce").astype("Int64")
+                clienti_map["cliente"] = clienti_map["nome"].fillna("").astype(str) + " " + clienti_map["cognome"].fillna("").astype(str)
                 accessi = accessi.merge(clienti_map[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
 
             c1, c2, c3 = st.columns(3)
@@ -4141,7 +4143,9 @@ def render_accessi_tornello_page():
             clienti = load_clienti()
             if not clienti.empty:
                 cm = clienti[["id", "nome", "cognome"]].copy()
-                cm["cliente"] = cm["nome"] + " " + cm["cognome"]
+                cm["id"] = pd.to_numeric(cm["id"], errors="coerce").astype("Int64")
+                badges["cliente_id"] = pd.to_numeric(badges["cliente_id"], errors="coerce").astype("Int64")
+                cm["cliente"] = cm["nome"].fillna("").astype(str) + " " + cm["cognome"].fillna("").astype(str)
                 badges = badges.merge(cm[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
 
             cols = ["id", "cliente", "badge_uid", "attivo", "note", "updated_by", "updated_at"]
@@ -4624,7 +4628,10 @@ def main():
                                 st.warning(f"Trovati {len(duplicati)} movimenti coinvolti in duplicazioni.")
                                 cols_dup = ["id", "cliente_id", "cliente", "data_pagamento_it", "importo", "metodo_pagamento", "rata_label", "created_at"]
                                 try:
-                                    dup_view = duplicati.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+                                    tmp_clienti_df = clienti_df[["id", "cliente"]].copy()
+                                    tmp_clienti_df["id"] = pd.to_numeric(tmp_clienti_df["id"], errors="coerce").astype("Int64")
+                                    duplicati["cliente_id"] = pd.to_numeric(duplicati["cliente_id"], errors="coerce").astype("Int64")
+                                    dup_view = duplicati.merge(tmp_clienti_df, left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
                                 except Exception:
                                     dup_view = duplicati
                                 st.dataframe(dup_view[[c for c in cols_dup if c in dup_view.columns]], use_container_width=True, hide_index=True)
