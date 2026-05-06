@@ -495,6 +495,58 @@ def area_cliente_premium_style():
         font-size: 13px;
         margin-top: 12px;
     }
+
+    /* Selectbox sidebar: valore selezionato sempre leggibile */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] div,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] input {
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] svg {
+        fill: #111111 !important;
+        color: #111111 !important;
+    }
+
+    /* Radio sidebar leggibili */
+    section[data-testid="stSidebar"] [role="radiogroup"] label span {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+    }
+
+    /* Pulsanti sidebar, incluso Logout */
+    section[data-testid="stSidebar"] button {
+        background: #d4af37 !important;
+        color: #111111 !important;
+        border: 1px solid #f3d77a !important;
+        border-radius: 12px !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+    }
+
+    section[data-testid="stSidebar"] button p,
+    section[data-testid="stSidebar"] button span,
+    section[data-testid="stSidebar"] button div {
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+    }
+
+    section[data-testid="stSidebar"] button:hover {
+        background: #f3d77a !important;
+        color: #111111 !important;
+        border-color: #ffffff !important;
+    }
+
+    /* Etichette */
+    section[data-testid="stSidebar"] label {
+        color: #ffffff !important;
+        font-weight: 900 !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -3310,7 +3362,7 @@ def render_v32_navigation():
         hidden = {"⬇️ Export Excel", "👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati"}
         items = [x for x in items if x not in hidden]
 
-    selected = st.sidebar.selectbox("👇 Scegli funzione", items, key="v32_sub_nav")
+    selected = st.sidebar.selectbox("👇 Scegli la funzione operativa", items, key="v32_sub_nav")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**Area:** {macro}")
