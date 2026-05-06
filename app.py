@@ -4151,9 +4151,6 @@ def render_accessi_tornello_page():
             cols = ["id", "cliente", "badge_uid", "attivo", "note", "updated_by", "updated_at"]
             st.dataframe(badges[[c for c in cols if c in badges.columns]], use_container_width=True, hide_index=True)
 
-            st.markdown("---")
-            render_associazione_badge_smart()
-
             if is_admin():
                 with st.expander("Disattiva badge"):
                     badge_id = st.number_input("ID badge da disattivare", min_value=1, step=1)
