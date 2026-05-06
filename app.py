@@ -684,7 +684,7 @@ def cliente_area_view(cliente):
 
     with tab_prenota:
         st.markdown('<div class="premium-section-title">Prenota una lezione</div>', unsafe_allow_html=True)
-        st.info("Clicca direttamente sullo slot che desideri prenotare. La richiesta viene inviata allo staff e confluisce nel calendario KREO.")
+        st.info("Scegli uno slot libero. Il sistema considera automaticamente gli impegni già presenti del trainer.")
 
         ok_week, msg_week = cliente_puo_prenotare_settimana(int(cliente.get("id")), date.today())
         if ok_week:
@@ -698,72 +698,87 @@ def cliente_area_view(cliente):
         else:
             st.error(msg_pag)
 
-        slots = slot_disponibili_per_cliente(int(cliente.get("id")))
-        if slots.empty:
+        tipo_cliente = tipo_slot_da_cliente(cliente)
+        if tipo_cliente == "COACHING IN SEDE":
+            st.info("Il tuo pacchetto prevede coaching in sede / libero utilizzo attrezzi: non occupa il trainer.")
+        else:
+            st.info(f"Tipologia prenotabile per il tuo pacchetto: {tipo_cliente}. Durata standard: 1 ora.")
+
+        cdate1, cdate2 = st.columns(2)
+        with cdate1:
+            data_da = st.date_input("Mostra disponibilità da", value=date.today(), format="DD/MM/YYYY", key="cliente_smart_data_da")
+        with cdate2:
+            giorni = st.number_input("Giorni da mostrare", min_value=1, max_value=21, value=7, step=1, key="cliente_smart_giorni")
+
+        slots_liberi = genera_slot_intelligenti_cliente(cliente, data_da, int(giorni))
+
+        if slots_liberi.empty:
             st.warning("Al momento non ci sono disponibilità prenotabili.")
         else:
-            slots_liberi = slots[slots["stato_slot"] == "LIBERO"].copy()
-            if slots_liberi.empty:
-                st.warning("Tutti gli slot risultano occupati.")
-            else:
-                st.markdown("""
-                <style>
-                .booking-card {
-                    background: white;
-                    border: 1px solid rgba(212,175,55,.45);
-                    border-radius: 18px;
-                    padding: 16px;
-                    margin-bottom: 12px;
-                    box-shadow: 0 6px 18px rgba(0,0,0,.06);
-                }
-                .booking-title {
-                    font-weight: 900;
-                    font-size: 18px;
-                    color: #111!important;
-                }
-                .booking-meta {
-                    font-size: 14px;
-                    color: #5f5749!important;
-                    line-height: 1.55;
-                    margin-top: 7px;
-                }
-                </style>
-                """, unsafe_allow_html=True)
+            st.markdown("""
+            <style>
+            .booking-card {
+                background: white;
+                border: 1px solid rgba(212,175,55,.45);
+                border-radius: 18px;
+                padding: 16px;
+                margin-bottom: 12px;
+                box-shadow: 0 6px 18px rgba(0,0,0,.06);
+            }
+            .booking-title {
+                font-weight: 900;
+                font-size: 18px;
+                color: #111!important;
+            }
+            .booking-meta {
+                font-size: 14px;
+                color: #5f5749!important;
+                line-height: 1.55;
+                margin-top: 7px;
+            }
+            </style>
+            """, unsafe_allow_html=True)
 
-                slots_liberi = slots_liberi.sort_values(["data_slot", "ora_inizio"]).copy()
+            slots_liberi = slots_liberi.sort_values(["data_slot", "ora_inizio"]).copy()
 
-                for _, slot_row in slots_liberi.iterrows():
-                    sid = int(slot_row["id"])
-                    tipo = slot_row.get("tipo_slot", "")
-                    data_it = slot_row.get("data_slot_it", "")
-                    ora_i = slot_row.get("ora_inizio", "")
-                    ora_f = slot_row.get("ora_fine", "")
-                    trainer = slot_row.get("trainer", "")
-                    posti_liberi = int(slot_row.get("posti_liberi") or 0)
+            for _, slot_row in slots_liberi.iterrows():
+                data_slot = slot_row.get("data_slot")
+                data_it = slot_row.get("data_slot_it", "")
+                ora_i = slot_row.get("ora_inizio", "")
+                ora_f = slot_row.get("ora_fine", "")
+                trainer = slot_row.get("trainer", "")
+                tipo = slot_row.get("tipo_slot", "")
+                key_base = f"{data_slot}_{ora_i}_{tipo}".replace(":", "").replace(" ", "_")
 
-                    st.markdown(
-                        f"""
-                        <div class="booking-card">
-                            <div class="booking-title">📅 {data_it} · {ora_i} - {ora_f}</div>
-                            <div class="booking-meta">
-                                Tipologia: <b>{tipo}</b><br>
-                                Trainer/area: <b>{trainer}</b><br>
-                                Posti disponibili: <b>{posti_liberi}</b>
-                            </div>
+                st.markdown(
+                    f"""
+                    <div class="booking-card">
+                        <div class="booking-title">📅 {data_it} · {ora_i} - {ora_f}</div>
+                        <div class="booking-meta">
+                            Tipologia: <b>{tipo}</b><br>
+                            Trainer/area: <b>{trainer}</b><br>
+                            Origine: disponibilità automatica
                         </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
 
-                    note_key = f"note_prenotazione_cliente_{sid}"
-                    note_cliente = st.text_input("Note per lo staff", key=note_key, placeholder="Opzionale")
-                    if st.button(f"Prenota questo slot · {data_it} {ora_i}", key=f"book_slot_{sid}"):
-                        ok, msg = richiesta_prenotazione_cliente(int(cliente.get("id")), sid, note_cliente)
-                        if ok:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
+                note_cliente = st.text_input("Note per lo staff", key=f"note_smart_{key_base}", placeholder="Opzionale")
+                if st.button(f"Richiedi questo slot · {data_it} {ora_i}", key=f"book_smart_{key_base}"):
+                    ok, msg = richiesta_prenotazione_intelligente_cliente(
+                        int(cliente.get("id")),
+                        data_slot,
+                        ora_i,
+                        ora_f,
+                        tipo,
+                        note_cliente
+                    )
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
     with tab2:
         st.markdown('<div class="premium-section-title">I tuoi documenti</div>', unsafe_allow_html=True)
@@ -1514,6 +1529,258 @@ def build_premium_calendar_events():
                 continue
 
     return events
+
+
+
+def time_to_minutes(t):
+    if hasattr(t, "hour"):
+        return int(t.hour) * 60 + int(t.minute)
+    s = str(t)[:5]
+    h, m = s.split(":")
+    return int(h) * 60 + int(m)
+
+
+def minutes_to_hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def intervals_overlap(start_a, end_a, start_b, end_b):
+    return start_a < end_b and start_b < end_a
+
+
+def slot_occupazione_trainer(tipo_slot):
+    tipo = (tipo_slot or "").upper()
+    return "COACHING" not in tipo
+
+
+def tipo_slot_da_cliente(cliente):
+    tipo = pacchetto_tipo(cliente.get("pacchetto", ""))
+    if tipo == "LUXURY":
+        return "ONE TO ONE"
+    if tipo == "GOLD":
+        return "TWO TO ONE"
+    if tipo == "VIP":
+        return "THREE TO ONE"
+    if tipo == "COACHING":
+        return "COACHING IN SEDE"
+    return "ONE TO ONE"
+
+
+def lezioni_trainer_occupate(data_slot, trainer=None):
+    try:
+        lez = load_lezioni()
+    except Exception:
+        return pd.DataFrame()
+
+    if lez.empty:
+        return lez
+
+    trainer = trainer or get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+
+    tmp = lez.copy()
+    tmp = tmp[
+        (tmp["data_lezione"].astype(str) == str(data_slot)) &
+        (~tmp["stato"].isin(["ANNULLATO", "ASSENTE"]))
+    ].copy()
+
+    if tmp.empty:
+        return tmp
+
+    # Se il trainer è "Libero utilizzo attrezzi" o coaching, non occupa PT.
+    if "trainer" in tmp.columns:
+        tmp = tmp[tmp["trainer"].astype(str).str.upper() != "LIBERO UTILIZZO ATTREZZI"]
+
+    if "trainer" in tmp.columns:
+        tmp = tmp[
+            (tmp["trainer"].astype(str).str.upper() == str(trainer).upper()) |
+            (tmp["trainer"].isna())
+        ]
+
+    return tmp
+
+
+def slot_pt_libero(data_slot, ora_inizio, ora_fine, trainer=None):
+    trainer = trainer or get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+    start_new = time_to_minutes(ora_inizio)
+    end_new = time_to_minutes(ora_fine)
+
+    lez = lezioni_trainer_occupate(data_slot, trainer)
+    if lez.empty:
+        return True, ""
+
+    for _, r in lez.iterrows():
+        try:
+            start_old = time_to_minutes(r.get("ora_inizio"))
+            end_old = time_to_minutes(r.get("ora_fine"))
+        except Exception:
+            continue
+
+        if intervals_overlap(start_new, end_new, start_old, end_old):
+            cliente_nome = "altro cliente"
+            try:
+                c = get_cliente(int(r.get("cliente_id")))
+                if c:
+                    cliente_nome = f"{c.get('nome','')} {c.get('cognome','')}".strip()
+            except Exception:
+                pass
+            return False, f"Trainer occupato dalle {minutes_to_hhmm(start_old)} alle {minutes_to_hhmm(end_old)} con {cliente_nome}."
+
+    return True, ""
+
+
+def genera_slot_intelligenti_cliente(cliente, data_slot=None, giorni=7):
+    settings = get_kreo_settings()
+    apertura = settings.get("apertura", "07:30")
+    chiusura = settings.get("chiusura", "20:00")
+    durata = int(settings.get("durata_slot_pt_minuti", 60) or 60)
+    step = int(get_setting("step_slot_prenotazione_minuti", "30") or 30)
+    trainer = settings.get("trainer_default", "Vincenzo Crinisio")
+
+    tipo_slot = tipo_slot_da_cliente(cliente)
+    occupa_trainer = slot_occupazione_trainer(tipo_slot)
+
+    start_day = data_slot or date.today()
+    open_min = time_to_minutes(apertura)
+    close_min = time_to_minutes(chiusura)
+
+    results = []
+    for i in range(int(giorni)):
+        d = start_day + timedelta(days=i)
+        current = open_min
+        while current + durata <= close_min:
+            start_str = minutes_to_hhmm(current)
+            end_str = minutes_to_hhmm(current + durata)
+
+            if d == date.today():
+                now_min = datetime.now().hour * 60 + datetime.now().minute
+                if current <= now_min:
+                    current += step
+                    continue
+
+            libero = True
+            if occupa_trainer:
+                libero, _ = slot_pt_libero(d, start_str, end_str, trainer)
+
+            if libero:
+                results.append({
+                    "data_slot": str(d),
+                    "data_slot_it": d.strftime("%d/%m/%Y"),
+                    "ora_inizio": start_str,
+                    "ora_fine": end_str,
+                    "trainer": trainer if occupa_trainer else "Libero utilizzo attrezzi",
+                    "tipo_slot": tipo_slot,
+                    "posti_liberi": max_posti_per_pacchetto(cliente.get("pacchetto", "")),
+                    "origine": "DISPONIBILITÀ AUTOMATICA",
+                })
+
+            current += step
+
+    return pd.DataFrame(results)
+
+
+def richiesta_prenotazione_intelligente_cliente(cliente_id, data_slot, ora_inizio, ora_fine, tipo_slot, note_cliente=""):
+    cliente = get_cliente(cliente_id)
+    if not cliente:
+        return False, "Cliente non trovato."
+
+    ok_pag, msg_pag = cliente_in_regola_pagamenti(cliente)
+    if not ok_pag:
+        return False, msg_pag
+
+    ok_week, msg_week = cliente_puo_prenotare_settimana(cliente_id, parse_date(data_slot, date.today()))
+    if not ok_week:
+        return False, msg_week
+
+    trainer = get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+    if slot_occupazione_trainer(tipo_slot):
+        libero, motivo = slot_pt_libero(parse_date(data_slot, date.today()), ora_inizio, ora_fine, trainer)
+        if not libero:
+            return False, motivo
+    else:
+        trainer = "Libero utilizzo attrezzi"
+
+    sb = get_supabase()
+    sb.table("lezioni").insert({
+        "cliente_id": int(cliente_id),
+        "data_lezione": str(data_slot),
+        "ora_inizio": str(ora_inizio),
+        "ora_fine": str(ora_fine),
+        "trainer": trainer,
+        "stato": "RICHIESTA CLIENTE",
+        "note": note_cliente,
+        "creata_da": f"Cliente: {cliente.get('nome','')} {cliente.get('cognome','')}",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }).execute()
+
+    insert_history(
+        cliente_id,
+        "richiesta prenotazione smart",
+        "",
+        f"{format_date_it(data_slot)} {ora_inizio}-{ora_fine}",
+        f"Richiesta prenotazione automatica da area cliente | Tipo: {tipo_slot} | Trainer: {trainer}"
+    )
+    return True, "Richiesta prenotazione inviata allo staff."
+
+
+def render_calendario_unificato_staff():
+    st.header("Calendario unificato")
+    st.caption("Disponibilità automatica del trainer + prenotazioni clienti + coaching in sede.")
+
+    tab1, tab2, tab3 = st.tabs(["Agenda premium", "Disponibilità automatica", "Impostazioni"])
+
+    with tab1:
+        render_premium_calendar()
+
+    with tab2:
+        st.subheader("Simula disponibilità automatica")
+        st.info("Gli slot sono calcolati in automatico considerando lezioni già occupate e orari palestra.")
+
+        dfc = load_clienti()
+        if dfc.empty:
+            st.warning("Nessun cliente presente.")
+        else:
+            labels = (dfc["id"].astype(str) + " - " + dfc["nome"] + " " + dfc["cognome"]).tolist()
+            selected = st.selectbox("Cliente", labels, key="simula_disponibilita_cliente")
+            cid = int(selected.split(" - ")[0])
+            cliente = get_cliente(cid)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                data_da = st.date_input("Da data", value=date.today(), format="DD/MM/YYYY", key="simula_data_da")
+            with c2:
+                giorni = st.number_input("Giorni da mostrare", min_value=1, max_value=30, value=7, step=1)
+
+            slots = genera_slot_intelligenti_cliente(cliente, data_da, int(giorni))
+            if slots.empty:
+                st.warning("Nessuna disponibilità trovata.")
+            else:
+                st.dataframe(slots, use_container_width=True, hide_index=True)
+
+    with tab3:
+        st.subheader("Regole disponibilità")
+        s = get_kreo_settings()
+
+        with st.form("impostazioni_calendario_unificato"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                apertura = st.text_input("Orario apertura", value=s.get("apertura", "07:30"))
+            with c2:
+                chiusura = st.text_input("Orario chiusura", value=s.get("chiusura", "20:00"))
+            with c3:
+                step = st.number_input("Step prenotazioni in minuti", min_value=15, max_value=120, value=int(get_setting("step_slot_prenotazione_minuti", "30") or 30), step=15)
+
+            trainer = st.text_input("Trainer default", value=s.get("trainer_default", "Vincenzo Crinisio"))
+            durata = st.number_input("Durata slot PT in minuti", min_value=30, max_value=180, value=int(s.get("durata_slot_pt_minuti", 60) or 60), step=15)
+
+            if st.form_submit_button("Salva impostazioni calendario"):
+                set_setting("orario_apertura", apertura, "Orario apertura palestra")
+                set_setting("orario_chiusura", chiusura, "Orario chiusura palestra")
+                set_setting("trainer_default", trainer, "Trainer default")
+                set_setting("durata_slot_pt_minuti", durata, "Durata slot personal trainer")
+                set_setting("step_slot_prenotazione_minuti", step, "Step slot prenotazioni")
+                st.success("Impostazioni calendario salvate.")
+                st.rerun()
 
 
 def render_premium_calendar():
@@ -3347,8 +3614,9 @@ def render_v32_navigation():
 
     submenu_map = {
         "🏠 Dashboard": ["📊 Dashboard", "🚨 Alert clienti"],
-        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati", "👤 Area Cliente", "🕘 Cronologia"],
-        "🗓 Calendario": ["🗓 Premium Calendar", "🗓 Planner Slot", "📅 Calendario lezioni", "⚙️ Disponibilità calendario"],
+        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
+        "🚪 Accessi tornello", "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
+        "🗓 Calendario": ["🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
         "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
@@ -3369,6 +3637,304 @@ def render_v32_navigation():
     st.sidebar.markdown(f"**Funzione:** {selected}")
 
     return selected
+
+
+
+def load_badge_clienti():
+    sb = get_supabase()
+    try:
+        data = sb.table("badge_clienti").select("*").order("id", desc=True).execute().data
+    except Exception:
+        data = []
+    return pd.DataFrame(data)
+
+
+def load_accessi_tornello():
+    sb = get_supabase()
+    try:
+        data = sb.table("accessi_tornello").select("*").order("id", desc=True).execute().data
+    except Exception:
+        data = []
+    df = pd.DataFrame(data)
+    if not df.empty:
+        if "data_accesso" in df.columns:
+            df["data_accesso_it"] = df["data_accesso"].apply(format_date_it)
+        if "created_at" in df.columns:
+            df["created_at_it"] = df["created_at"].apply(lambda x: pd.to_datetime(x).strftime("%d/%m/%Y %H:%M") if x else "")
+    return df
+
+
+def get_cliente_by_badge_uid(badge_uid):
+    if not badge_uid:
+        return None
+    sb = get_supabase()
+    try:
+        badge = (
+            sb.table("badge_clienti")
+            .select("*")
+            .eq("badge_uid", str(badge_uid).strip())
+            .eq("attivo", True)
+            .limit(1)
+            .execute()
+            .data
+        )
+    except Exception:
+        badge = []
+    if not badge:
+        return None
+    return get_cliente(int(badge[0].get("cliente_id")))
+
+
+def assegna_badge_cliente(cliente_id, badge_uid, note=""):
+    if not badge_uid:
+        return False, "Inserisci un codice badge/transponder."
+
+    sb = get_supabase()
+    badge_uid = str(badge_uid).strip()
+
+    try:
+        existing = sb.table("badge_clienti").select("*").eq("badge_uid", badge_uid).limit(1).execute().data
+        if existing and int(existing[0].get("cliente_id")) != int(cliente_id):
+            return False, "Questo badge risulta già assegnato a un altro cliente."
+    except Exception:
+        pass
+
+    try:
+        existing_cliente = sb.table("badge_clienti").select("*").eq("cliente_id", int(cliente_id)).eq("badge_uid", badge_uid).limit(1).execute().data
+        if existing_cliente:
+            sb.table("badge_clienti").update({
+                "attivo": True,
+                "note": note,
+                "updated_at": now_iso(),
+                "updated_by": user_label(),
+            }).eq("id", int(existing_cliente[0].get("id"))).execute()
+        else:
+            sb.table("badge_clienti").insert({
+                "cliente_id": int(cliente_id),
+                "badge_uid": badge_uid,
+                "attivo": True,
+                "note": note,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+                "updated_by": user_label(),
+            }).execute()
+
+        insert_history(cliente_id, "badge tornello", "", badge_uid, f"Badge assegnato da {user_label()} - {note}")
+        return True, "Badge assegnato correttamente."
+    except Exception as e:
+        return False, f"Errore assegnazione badge: {e}"
+
+
+def disattiva_badge(badge_id):
+    if not is_admin():
+        return False, "Operazione riservata all'amministratore."
+    sb = get_supabase()
+    try:
+        data = sb.table("badge_clienti").select("*").eq("id", int(badge_id)).limit(1).execute().data
+        if not data:
+            return False, "Badge non trovato."
+        badge = data[0]
+        sb.table("badge_clienti").update({
+            "attivo": False,
+            "updated_at": now_iso(),
+            "updated_by": user_label(),
+        }).eq("id", int(badge_id)).execute()
+        insert_history(int(badge.get("cliente_id")), "badge tornello", badge.get("badge_uid", ""), "DISATTIVATO", f"Badge disattivato da {user_label()}")
+        return True, "Badge disattivato."
+    except Exception as e:
+        return False, f"Errore disattivazione badge: {e}"
+
+
+def registra_accesso_tornello(badge_uid, data_accesso=None, ora_accesso=None, direzione="INGRESSO", tornello="HIKVISION", stato_accesso="REGISTRATO", raw_payload=None):
+    """
+    Funzione usabile sia dall'app sia dal bridge locale.
+    Registra l'accesso senza comandare il tornello.
+    """
+    data_accesso = data_accesso or str(date.today())
+    ora_accesso = ora_accesso or datetime.now().strftime("%H:%M:%S")
+    badge_uid = str(badge_uid).strip() if badge_uid else ""
+
+    cliente = get_cliente_by_badge_uid(badge_uid)
+    cliente_id = int(cliente.get("id")) if cliente else None
+
+    note = ""
+    alert_flags = []
+
+    if cliente:
+        alerts = get_cliente_alerts(cliente)
+        if alerts:
+            alert_flags = list(alerts.keys())
+            note = " | ".join([f"{k}: {v[1]}" for k, v in alerts.items()])
+    else:
+        stato_accesso = "BADGE_NON_ASSOCIATO"
+        note = "Badge non associato ad alcun cliente KREO."
+
+    sb = get_supabase()
+    try:
+        payload = {
+            "cliente_id": cliente_id,
+            "badge_uid": badge_uid,
+            "data_accesso": str(data_accesso),
+            "ora_accesso": str(ora_accesso),
+            "direzione": direzione,
+            "tornello": tornello,
+            "stato_accesso": stato_accesso,
+            "alert_flags": ",".join(alert_flags),
+            "note": note,
+            "raw_payload": str(raw_payload)[:2500] if raw_payload is not None else "",
+            "created_at": now_iso(),
+        }
+        sb.table("accessi_tornello").insert(payload).execute()
+
+        if cliente_id:
+            insert_history(cliente_id, "accesso tornello", "", f"{format_date_it(data_accesso)} {ora_accesso}", f"{direzione} - {stato_accesso} - {note}")
+
+        return True, "Accesso registrato.", cliente_id
+    except Exception as e:
+        return False, f"Errore registrazione accesso: {e}", cliente_id
+
+
+def render_accessi_tornello_page():
+    st.header("Accessi tornello")
+    st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi"])
+
+    with tab1:
+        st.subheader("Registro accessi")
+        accessi = load_accessi_tornello()
+        if accessi.empty:
+            st.info("Nessun accesso registrato.")
+        else:
+            clienti = load_clienti()
+            if not clienti.empty and "cliente_id" in accessi.columns:
+                clienti_map = clienti[["id", "nome", "cognome"]].copy()
+                clienti_map["cliente"] = clienti_map["nome"] + " " + clienti_map["cognome"]
+                accessi = accessi.merge(clienti_map[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                filtro_data = st.date_input("Data", value=date.today(), format="DD/MM/YYYY", key="filtro_accessi_data")
+            with c2:
+                solo_alert = st.checkbox("Solo accessi con alert", value=False)
+            with c3:
+                solo_non_associati = st.checkbox("Solo badge non associati", value=False)
+
+            view = accessi.copy()
+            if "data_accesso" in view.columns:
+                view = view[view["data_accesso"].astype(str) == str(filtro_data)]
+            if solo_alert and "alert_flags" in view.columns:
+                view = view[view["alert_flags"].fillna("").astype(str).str.len() > 0]
+            if solo_non_associati and "stato_accesso" in view.columns:
+                view = view[view["stato_accesso"] == "BADGE_NON_ASSOCIATO"]
+
+            cols = ["id", "data_accesso_it", "ora_accesso", "cliente", "badge_uid", "direzione", "tornello", "stato_accesso", "alert_flags", "note"]
+            st.dataframe(view[[c for c in cols if c in view.columns]], use_container_width=True, hide_index=True)
+
+    with tab2:
+        st.subheader("Associazione badge / transponder")
+        df = load_clienti()
+        if df.empty:
+            st.info("Nessun cliente presente.")
+        else:
+            labels = (df["id"].astype(str) + " - " + df["nome"] + " " + df["cognome"]).tolist()
+            selected = st.selectbox("Cliente", labels, key="badge_cliente_select")
+            cliente_id = int(selected.split(" - ")[0])
+            badge_uid = st.text_input("Codice badge/transponder", placeholder="Avvicina/leggi badge oppure incolla codice")
+            note = st.text_area("Note badge")
+
+            if st.button("Assegna badge al cliente"):
+                ok, msg = assegna_badge_cliente(cliente_id, badge_uid, note)
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        st.markdown("---")
+        st.subheader("Badge registrati")
+        badges = load_badge_clienti()
+        if badges.empty:
+            st.info("Nessun badge registrato.")
+        else:
+            clienti = load_clienti()
+            if not clienti.empty:
+                cm = clienti[["id", "nome", "cognome"]].copy()
+                cm["cliente"] = cm["nome"] + " " + cm["cognome"]
+                badges = badges.merge(cm[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+
+            cols = ["id", "cliente", "badge_uid", "attivo", "note", "updated_by", "updated_at"]
+            st.dataframe(badges[[c for c in cols if c in badges.columns]], use_container_width=True, hide_index=True)
+
+            if is_admin():
+                with st.expander("Disattiva badge"):
+                    badge_id = st.number_input("ID badge da disattivare", min_value=1, step=1)
+                    if st.button("Disattiva badge selezionato"):
+                        ok, msg = disattiva_badge(badge_id)
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+    with tab3:
+        st.subheader("Check-in manuale / test ponte tornello")
+        st.info("Usa questa funzione per provare la logica prima del collegamento automatico Hikvision.")
+        badge_test = st.text_input("Badge UID letto", key="badge_test_input")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            data_test = st.date_input("Data accesso", value=date.today(), format="DD/MM/YYYY", key="data_test_accesso")
+        with c2:
+            ora_test = st.time_input("Ora accesso", value=datetime.now().time().replace(microsecond=0), key="ora_test_accesso")
+        with c3:
+            direzione = st.selectbox("Direzione", ["INGRESSO", "USCITA"], key="direzione_test_accesso")
+
+        if st.button("Registra accesso test"):
+            ok, msg, cid = registra_accesso_tornello(
+                badge_test,
+                str(data_test),
+                ora_test.strftime("%H:%M:%S"),
+                direzione=direzione,
+                tornello="TEST MANUALE",
+                stato_accesso="TEST",
+                raw_payload={"source": "manual_test"},
+            )
+            if ok:
+                st.success(msg)
+                if cid:
+                    st.info(f"Cliente associato ID: {cid}")
+                else:
+                    st.warning("Badge non associato.")
+                st.rerun()
+            else:
+                st.error(msg)
+
+    with tab4:
+        st.subheader("Dashboard accessi")
+        accessi = load_accessi_tornello()
+        if accessi.empty:
+            st.info("Nessun dato accessi.")
+        else:
+            today_str = str(date.today())
+            accessi_oggi = accessi[accessi["data_accesso"].astype(str) == today_str] if "data_accesso" in accessi.columns else pd.DataFrame()
+            non_assoc = accessi[accessi["stato_accesso"] == "BADGE_NON_ASSOCIATO"] if "stato_accesso" in accessi.columns else pd.DataFrame()
+            con_alert = accessi[accessi["alert_flags"].fillna("").astype(str).str.len() > 0] if "alert_flags" in accessi.columns else pd.DataFrame()
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Accessi oggi", len(accessi_oggi))
+            k2.metric("Accessi totali", len(accessi))
+            k3.metric("Badge non associati", len(non_assoc))
+            k4.metric("Accessi con alert", len(con_alert))
+
+            if "ora_accesso" in accessi.columns:
+                tmp = accessi.copy()
+                tmp["ora"] = tmp["ora_accesso"].astype(str).str[:2]
+                ora_df = tmp.groupby("ora", as_index=False)["id"].count().rename(columns={"id": "accessi"})
+                st.plotly_chart(px.bar(ora_df, x="ora", y="accessi", title="Accessi per fascia oraria"), use_container_width=True)
+
+            if "data_accesso" in accessi.columns:
+                day_df = accessi.groupby("data_accesso", as_index=False)["id"].count().rename(columns={"id": "accessi"})
+                st.plotly_chart(px.line(day_df, x="data_accesso", y="accessi", title="Accessi per giorno"), use_container_width=True)
 
 
 def main():
@@ -3806,6 +4372,11 @@ def main():
 
 
 
+
+    elif menu == "🚪 Accessi tornello":
+        render_accessi_tornello_page()
+
+
     elif menu == "👤 Area Cliente":
         st.header("Gestione Area Cliente")
 
@@ -3945,6 +4516,11 @@ def main():
 
 
 
+
+
+
+    elif menu == "🗓 Calendario unificato":
+        render_calendario_unificato_staff()
 
 
     elif menu == "🗓 Premium Calendar":
