@@ -2175,6 +2175,91 @@ def render_alerts(alerts):
         st.markdown(f"<div class='{cls}'>{icon} <b>{msg}</b></div>", unsafe_allow_html=True)
 
 
+
+def render_alert_table_full(alert_df):
+    if alert_df.empty:
+        st.success("Nessun alert presente.")
+        return
+
+    view = alert_df.copy()
+
+    rename_map = {
+        "Cellulare": "Cell.",
+        "Alert": "Segnalazione",
+        "Scadenza abbonamento": "Scad. abb.",
+        "Scadenza certificato": "Scad. cert.",
+    }
+    view = view.rename(columns={k: v for k, v in rename_map.items() if k in view.columns})
+
+    preferred = ["Priorità", "ID", "Cliente", "Cell.", "Pacchetto", "Segnalazione", "Scad. abb.", "Scad. cert.", "Residuo"]
+    cols = [c for c in preferred if c in view.columns] + [c for c in view.columns if c not in preferred]
+    view = view[cols]
+
+    st.markdown("""
+    <style>
+    .alert-dashboard-box {
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(212,175,55,0.35);
+        border-radius: 18px;
+        padding: 14px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+        margin-top: 10px;
+    }
+    .alert-table-note {
+        font-size: 13px;
+        opacity: .75;
+        margin-bottom: 8px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="alert-dashboard-box">', unsafe_allow_html=True)
+    st.markdown('<div class="alert-table-note">Vista compatta: colonne principali ottimizzate per stare a schermo.</div>', unsafe_allow_html=True)
+
+    column_config = {
+        "Priorità": st.column_config.TextColumn("Priorità", width="small"),
+        "ID": st.column_config.NumberColumn("ID", width="small"),
+        "Cliente": st.column_config.TextColumn("Cliente", width="medium"),
+        "Cell.": st.column_config.TextColumn("Cell.", width="small"),
+        "Pacchetto": st.column_config.TextColumn("Pacchetto", width="medium"),
+        "Segnalazione": st.column_config.TextColumn("Segnalazione", width="large"),
+        "Scad. abb.": st.column_config.TextColumn("Scad. abb.", width="small"),
+        "Scad. cert.": st.column_config.TextColumn("Scad. cert.", width="small"),
+        "Residuo": st.column_config.TextColumn("Residuo", width="small"),
+    }
+    column_config = {k: v for k, v in column_config.items() if k in view.columns}
+
+    st.dataframe(
+        view,
+        use_container_width=True,
+        hide_index=True,
+        height=min(720, 38 * (len(view) + 1)),
+        column_config=column_config,
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    with st.expander("Vista completa / export"):
+        st.dataframe(alert_df, use_container_width=True, hide_index=True)
+        csv = alert_df.to_csv(index=False).encode("utf-8")
+        st.download_button("Scarica alert CSV", csv, "alert_clienti.csv", "text/csv")
+
+
+def wide_table_style():
+    st.markdown("""
+    <style>
+    .block-container {
+        max-width: 1500px !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+    div[data-testid="stDataFrame"] {
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 def build_alert_dashboard(df):
     rows, seen = [], set()
     for _, r in df.iterrows():
