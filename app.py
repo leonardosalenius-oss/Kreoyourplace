@@ -3021,6 +3021,48 @@ def stato_rata(cliente_id, rata, today=None):
     return stato, pagato, residuo
 
 
+
+def date_pagamento_rata(cliente, rata):
+    """
+    Restituisce la/e date pagamento collegate alla rata.
+    Se non esiste rata_num nello storico, ma la rata risulta coperta dall'importo_pagato cliente,
+    usa una data indicativa:
+    - data pagamento del movimento cliente se presente
+    - altrimenti data iscrizione / inizio pacchetto
+    """
+    cliente_id = int(cliente.get("id"))
+    rata_num = int(rata.get("rata_num"))
+
+    dfp = pagamenti_cliente(cliente_id)
+    date_list = []
+
+    if not dfp.empty:
+        if "rata_num" in dfp.columns:
+            sub = dfp[pd.to_numeric(dfp["rata_num"], errors="coerce").fillna(0).astype(int) == rata_num].copy()
+            if not sub.empty and "data_pagamento" in sub.columns:
+                for d in sub["data_pagamento"].dropna().astype(str).unique().tolist():
+                    date_list.append(format_date_it(d))
+
+        # fallback: se non ci sono date sulla rata specifica, usa i pagamenti più vecchi
+        if not date_list and "data_pagamento" in dfp.columns:
+            dfp_sorted = dfp.sort_values("id").copy()
+            for d in dfp_sorted["data_pagamento"].dropna().astype(str).unique().tolist():
+                date_list.append(format_date_it(d))
+
+    if not date_list:
+        fallback = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione") or ""
+        if fallback:
+            date_list.append(format_date_it(fallback))
+
+    # evita duplicati mantenendo ordine
+    clean = []
+    for d in date_list:
+        if d and d not in clean:
+            clean.append(d)
+
+    return ", ".join(clean) if clean else "non disponibile"
+
+
 def render_piano_rate_cliente(cliente):
     cliente_id = int(cliente.get("id"))
     piano = build_piano_rate(cliente)
@@ -3066,6 +3108,7 @@ def render_piano_rate_cliente(cliente):
                     Scadenza: <b>{rata['scadenza_it']}</b><br>
                     Importo rata: <b>{euro(rata['importo_rata'])}</b><br>
                     Pagato su questa rata: <b>{euro(pagato)}</b><br>
+                    Data pagamento: <b>{date_pagamento_rata(cliente, rata) if float(pagato or 0) > 0 else "-"}</b><br>
                     Residuo rata: <b>{euro(residuo)}</b>
                 </div>
             </div>
@@ -3119,21 +3162,43 @@ def load_pagamenti():
 
 
 def registra_acconto_iniziale_if_needed(cliente_id, data):
+    """
+    Registra l'acconto iniziale UNA SOLA VOLTA.
+    Evita duplicati se la scheda cliente viene salvata più volte o se Streamlit ricarica.
+    """
     try:
         acconto = float(data.get("importo_pagato") or 0)
     except Exception:
         acconto = 0
+
     if acconto <= 0:
         return
 
     try:
-        data_pag = data.get("data_iscrizione") or date.today()
+        data_pag = str(data.get("data_iscrizione") or date.today())
+        sb = get_supabase()
+
+        existing = (
+            sb.table("pagamenti")
+            .select("*")
+            .eq("cliente_id", int(cliente_id))
+            .eq("data_pagamento", data_pag)
+            .eq("importo", float(acconto))
+            .eq("metodo_pagamento", "ACCONTO ISCRIZIONE")
+            .limit(1)
+            .execute()
+            .data
+        )
+
+        if existing:
+            return
+
         insert_pagamento(
             cliente_id,
             data_pag,
             acconto,
             "ACCONTO ISCRIZIONE",
-            "Acconto registrato in fase di iscrizione/modifica cliente",
+            "Acconto registrato in fase di iscrizione cliente",
             rata_num=1,
             rata_label="Acconto iscrizione / Rata 1",
         )
@@ -3843,6 +3908,62 @@ def registra_accesso_tornello(badge_uid, data_accesso=None, ora_accesso=None, di
         return False, f"Errore registrazione accesso: {e}", cliente_id
 
 
+
+def find_pagamenti_duplicati():
+    dfp = load_pagamenti()
+    if dfp.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    work = dfp.copy()
+    for col in ["cliente_id", "data_pagamento", "importo", "metodo_pagamento"]:
+        if col not in work.columns:
+            work[col] = ""
+
+    work["dup_key"] = (
+        work["cliente_id"].astype(str) + "|" +
+        work["data_pagamento"].astype(str) + "|" +
+        pd.to_numeric(work["importo"], errors="coerce").fillna(0).round(2).astype(str) + "|" +
+        work["metodo_pagamento"].astype(str)
+    )
+
+    counts = work.groupby("dup_key").size().reset_index(name="conteggio")
+    dup_keys = counts[counts["conteggio"] > 1]["dup_key"].tolist()
+
+    duplicati = work[work["dup_key"].isin(dup_keys)].sort_values(["dup_key", "id"]).copy()
+    summary = counts[counts["conteggio"] > 1].copy()
+    return duplicati, summary
+
+
+def delete_pagamenti_duplicati_keep_first():
+    if not is_admin():
+        return False, "Operazione riservata all'amministratore."
+
+    duplicati, summary = find_pagamenti_duplicati()
+    if duplicati.empty:
+        return True, "Nessun duplicato trovato."
+
+    ids_to_delete = []
+    for dup_key, group in duplicati.groupby("dup_key"):
+        group = group.sort_values("id")
+        keep_id = int(group.iloc[0]["id"])
+        for _, row in group.iloc[1:].iterrows():
+            ids_to_delete.append(int(row["id"]))
+
+    deleted = 0
+    errors = []
+    for pid in ids_to_delete:
+        ok, msg = delete_pagamento(pid)
+        if ok:
+            deleted += 1
+        else:
+            errors.append(f"ID {pid}: {msg}")
+
+    if errors:
+        return False, f"Eliminati {deleted} duplicati, ma alcuni hanno dato errore: {'; '.join(errors[:3])}"
+
+    return True, f"Pulizia completata. Eliminati {deleted} pagamenti duplicati, lasciando una sola riga per movimento."
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -4351,6 +4472,7 @@ def main():
 
             with tab4:
                 st.subheader("Storico pagamenti")
+                st.caption("Qui vedi solo i movimenti realmente registrati nella tabella pagamenti. Gli importi scritti solo nella scheda cliente non compaiono come righe di storico finché non vengono registrati come pagamento.")
                 pag_df = load_pagamenti()
                 if pag_df.empty:
                     st.info("Nessun pagamento registrato.")
@@ -4374,6 +4496,30 @@ def main():
                     pagamento_pdf = get_pagamento_by_id(pagamento_id_pdf)
                     if pagamento_pdf:
                         download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), pagamento_id_pdf, "storico")
+
+                    if is_admin():
+                        with st.expander("Pulizia duplicati pagamenti"):
+                            st.caption("Rileva movimenti identici per cliente, data, importo e metodo. Lascia una sola riga ed elimina le copie.")
+                            duplicati, summary_dup = find_pagamenti_duplicati()
+                            if duplicati.empty:
+                                st.success("Nessun pagamento duplicato trovato.")
+                            else:
+                                st.warning(f"Trovati {len(duplicati)} movimenti coinvolti in duplicazioni.")
+                                cols_dup = ["id", "cliente_id", "cliente", "data_pagamento_it", "importo", "metodo_pagamento", "rata_label", "created_at"]
+                                try:
+                                    dup_view = duplicati.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+                                except Exception:
+                                    dup_view = duplicati
+                                st.dataframe(dup_view[[c for c in cols_dup if c in dup_view.columns]], use_container_width=True, hide_index=True)
+
+                                conferma = st.checkbox("Confermo di voler eliminare i duplicati lasciando una sola riga per movimento")
+                                if conferma and st.button("🧹 Elimina duplicati pagamenti"):
+                                    ok, msg = delete_pagamenti_duplicati_keep_first()
+                                    if ok:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
 
                     if is_admin():
                         with st.expander("Elimina pagamento (solo admin)"):
