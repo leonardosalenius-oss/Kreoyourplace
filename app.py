@@ -3236,8 +3236,56 @@ def login_gate():
 
 
 def render_v32_navigation():
+    st.sidebar.markdown("""
+    <style>
+    section[data-testid="stSidebar"] {
+        background: #0f0f0f !important;
+    }
+
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div {
+        color: #ffffff !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+        border: 2px solid #d4af37 !important;
+        border-radius: 12px !important;
+        min-height: 46px !important;
+        color: #111111 !important;
+        font-weight: 800 !important;
+        box-shadow: 0 0 0 2px rgba(212,175,55,0.15) !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+        color: #111111 !important;
+        font-weight: 800 !important;
+        font-size: 15px !important;
+    }
+
+    section[data-testid="stSidebar"] input {
+        color: #111111 !important;
+        font-weight: 800 !important;
+    }
+
+    .kreo-nav-help {
+        background: rgba(212,175,55,0.14);
+        border: 1px solid rgba(212,175,55,0.55);
+        border-radius: 12px;
+        padding: 10px 12px;
+        margin: 10px 0 16px 0;
+        color: #ffffff !important;
+        font-size: 13px;
+        line-height: 1.35;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.sidebar.markdown("## KREO Gestionale")
     st.sidebar.caption("Navigazione semplificata V32")
+    st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
         "Sezione",
@@ -3262,7 +3310,7 @@ def render_v32_navigation():
         hidden = {"⬇️ Export Excel", "👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati"}
         items = [x for x in items if x not in hidden]
 
-    selected = st.sidebar.selectbox("Funzione", items, key="v32_sub_nav")
+    selected = st.sidebar.selectbox("👇 Scegli funzione", items, key="v32_sub_nav")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**Area:** {macro}")
