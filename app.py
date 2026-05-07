@@ -2902,7 +2902,84 @@ def durata_abbonamento_mesi(tipologia_abbonamento):
         return 3
     if "SEMESTRALE" in t:
         return 6
-    return 12
+    if "ANNUALE" in t:
+        return 12
+    return None
+
+
+def is_pacchetto_personalizzato(pacchetto):
+    return "PERSONALIZZATO" in str(pacchetto or "").upper()
+
+
+def calcola_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacchetto):
+    """
+    Regola KREO:
+    - Pacchetto personalizzato: nessuna scadenza automatica.
+    - Altri pacchetti: scadenza = data inizio pacchetto + durata tipologia abbonamento.
+    """
+    if is_pacchetto_personalizzato(pacchetto):
+        return None
+    mesi = durata_abbonamento_mesi(tipologia_abbonamento)
+    if mesi is None:
+        return None
+    return add_months(parse_date(data_inizio, date.today()), mesi)
+
+
+def label_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacchetto):
+    scad = calcola_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacchetto)
+    if scad is None:
+        if is_pacchetto_personalizzato(pacchetto):
+            return "Pacchetto personalizzato: nessuna scadenza automatica."
+        return "Scadenza automatica non calcolabile: verifica manuale."
+    return f"Scadenza automatica prevista: {format_date_it(scad)}"
+
+
+
+
+def aggiorna_scadenze_abbonamenti_retroattive():
+    sb = get_supabase()
+    clienti = load_clienti()
+    if clienti.empty:
+        return {"aggiornati": 0, "saltati": 0}
+
+    aggiornati = 0
+    saltati = 0
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+            pac = c.get("pacchetto", "")
+            tipo_abb = c.get("tipologia_abbonamento", "")
+            data_inizio = c.get("data_inizio_pacchetto") or c.get("data_iscrizione") or date.today()
+            scad = calcola_scadenza_abbonamento_auto(data_inizio, tipo_abb, pac)
+
+            payload = {"scadenza_abbonamento": None if scad is None else str(scad), "updated_at": now_iso()}
+            sb.table("clienti").update(payload).eq("id", cid).execute()
+            aggiornati += 1
+        except Exception:
+            saltati += 1
+
+    return {"aggiornati": aggiornati, "saltati": saltati}
+
+
+def render_scadenze_abbonamento_admin():
+    st.subheader("Scadenze abbonamento automatiche")
+    st.caption("Riallinea le scadenze pacchetto in base alla data inizio pacchetto e alla tipologia abbonamento.")
+
+    st.markdown("""
+    **Regole automatiche KREO**
+    - Mensile: +1 mese
+    - Trimestrale: +3 mesi
+    - Semestrale: +6 mesi
+    - Annuale: +12 mesi
+    - Pacchetto personalizzato: nessuna scadenza automatica
+    """)
+
+    conferma = st.checkbox("Confermo aggiornamento retroattivo scadenze clienti", key="retro_scadenze_confirm")
+    if conferma and st.button("📆 Aggiorna scadenze abbonamenti", key="retro_scadenze_btn"):
+        res = aggiorna_scadenze_abbonamenti_retroattive()
+        st.success(f"Scadenze aggiornate: {res['aggiornati']} | saltate: {res['saltati']}")
+        st.rerun()
 
 
 def frequenza_pagamento_mesi(tipologia_pagamento):
@@ -3577,8 +3654,11 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
         stato_def = defaults.get("stato_cliente", "ATTIVO")
         stato = st.selectbox("Stato cliente", STATI_CLIENTE, index=STATI_CLIENTE.index(stato_def) if stato_def in STATI_CLIENTE else 0, key=k("stato"))
 
-    scadenza_auto = add_months(data_iscrizione, durata_abbonamento_mesi(tipologia_abbonamento))
-    scadenza_abbonamento = st.date_input("Scadenza abbonamento / prossima rata", value=parse_date(defaults.get("scadenza_abbonamento"), scadenza_auto) if prefix != "new" else scadenza_auto, format="DD/MM/YYYY", key=k("scad_abb"))
+    scadenza_auto_calc = calcola_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto)
+    scadenza_auto = scadenza_auto_calc or parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto)
+
+    scadenza_abbonamento = st.date_input("Scadenza abbonamento / prossima rata", value=scadenza_auto if scadenza_auto_calc else parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto), format="DD/MM/YYYY", key=k("scad_abb"))
+    st.info(label_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto))
     note = st.text_area("Note", value=defaults.get("note", ""), key=k("note"))
 
     return {
@@ -3596,7 +3676,7 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
         "importo_pagato": float(importo_pagato),
         "data_iscrizione": str(data_iscrizione),
         "data_inizio_pacchetto": str(data_inizio),
-        "scadenza_abbonamento": str(scadenza_abbonamento),
+        "scadenza_abbonamento": (None if scadenza_auto_calc is None else str(scadenza_auto_calc)),
         "certificato_medico": certificato,
         "scadenza_certificato": str(scadenza_certificato),
         "consenso_foto_video": consenso,
@@ -5786,6 +5866,11 @@ def main():
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
+
+        if is_admin():
+            with st.expander("📆 Gestione scadenze abbonamento"):
+                render_scadenze_abbonamento_admin()
+
 
         if is_admin():
             with st.expander("🔄 Ricalcolo rapido settimanale"):
