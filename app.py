@@ -4141,6 +4141,244 @@ def enrich_accessi_with_cliente(accessi):
     return view
 
 
+
+def round_time_up_hhmm(time_str, step=30):
+    try:
+        s = str(time_str)[:5]
+        h, m = s.split(":")
+        total = int(h) * 60 + int(m)
+        rounded = ((total + step - 1) // step) * step
+        return f"{rounded // 60:02d}:{rounded % 60:02d}"
+    except Exception:
+        return "09:00"
+
+
+def add_minutes_hhmm(time_str, minutes=60):
+    try:
+        s = str(time_str)[:5]
+        h, m = s.split(":")
+        total = int(h) * 60 + int(m) + int(minutes)
+        return f"{total // 60:02d}:{total % 60:02d}"
+    except Exception:
+        return "10:00"
+
+
+def is_standard_weekly_package(pacchetto):
+    p = str(pacchetto or "").upper()
+    return any(x in p for x in ["LUXURY", "GOLD", "VIP", "COACHING"])
+
+
+def tipo_slot_from_pacchetto_app(pacchetto):
+    p = str(pacchetto or "").upper()
+    if "LUXURY" in p or "ONE TO ONE" in p:
+        return "ONE TO ONE"
+    if "GOLD" in p or "TWO TO ONE" in p:
+        return "TWO TO ONE"
+    if "VIP" in p or "THREE TO ONE" in p:
+        return "THREE TO ONE"
+    if "COACH" in p:
+        return "COACHING IN SEDE"
+    return "PERSONALIZZATO"
+
+
+def trainer_from_pacchetto_app(pacchetto):
+    p = str(pacchetto or "").upper()
+    if "COACH" in p:
+        return "Libero utilizzo attrezzi"
+    try:
+        return get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+    except Exception:
+        return "Vincenzo Crinisio"
+
+
+def week_start_end(d):
+    d = parse_date(d, date.today())
+    start = d - timedelta(days=d.weekday())
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def count_presenti_settimana(cliente_id, data_ref):
+    try:
+        start, end = week_start_end(data_ref)
+        lez = load_lezioni()
+        if lez.empty:
+            return 0
+        tmp = lez[
+            (pd.to_numeric(lez["cliente_id"], errors="coerce").fillna(0).astype(int) == int(cliente_id)) &
+            (lez["data_lezione"].astype(str) >= str(start)) &
+            (lez["data_lezione"].astype(str) <= str(end)) &
+            (lez["stato"].astype(str).str.upper() == "PRESENTE")
+        ]
+        return len(tmp)
+    except Exception:
+        return 0
+
+
+def trova_lezione_giorno(cliente_id, data_lezione):
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return None
+        tmp = lez[
+            (pd.to_numeric(lez["cliente_id"], errors="coerce").fillna(0).astype(int) == int(cliente_id)) &
+            (lez["data_lezione"].astype(str) == str(data_lezione))
+        ].copy()
+        if tmp.empty:
+            return None
+        stati = ["PRENOTATO", "RICHIESTA CLIENTE", "CONFERMATA", "RICHIESTA"]
+        tmp["stato_upper"] = tmp["stato"].astype(str).str.upper()
+        cand = tmp[tmp["stato_upper"].isin(stati)]
+        if not cand.empty:
+            return cand.iloc[0].to_dict()
+        return None
+    except Exception:
+        return None
+
+
+def recupera_accessi_retroattivi(data_da=None, data_a=None, solo_cliente_id=None):
+    """
+    Prende accessi tornello già presenti e crea/conferma lezioni mancanti.
+    Non duplica: se per quella data esiste già una lezione PRESENTE creata da tornello o una presenza, salta.
+    """
+    sb = get_supabase()
+    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    if accessi.empty:
+        return {"processati": 0, "creati": 0, "confermati": 0, "saltati": 0, "extra": 0}
+
+    if data_da:
+        accessi = accessi[accessi["data_accesso"].astype(str) >= str(data_da)]
+    if data_a:
+        accessi = accessi[accessi["data_accesso"].astype(str) <= str(data_a)]
+
+    if solo_cliente_id:
+        accessi["cliente_id"] = pd.to_numeric(accessi["cliente_id"], errors="coerce").astype("Int64")
+        accessi = accessi[accessi["cliente_id"] == int(solo_cliente_id)]
+
+    stats = {"processati": 0, "creati": 0, "confermati": 0, "saltati": 0, "extra": 0}
+
+    # ordina cronologicamente per far funzionare bene il conteggio settimanale
+    sort_cols = [c for c in ["data_accesso", "ora_accesso", "id"] if c in accessi.columns]
+    accessi = accessi.sort_values(sort_cols)
+
+    for _, a in accessi.iterrows():
+        try:
+            cid_raw = a.get("cliente_id")
+            if cid_raw in [None, "", "None"] or pd.isna(cid_raw):
+                stats["saltati"] += 1
+                continue
+
+            cid = int(cid_raw)
+            data_acc = str(a.get("data_accesso"))
+            ora_acc = str(a.get("ora_accesso") or "09:00")[:5]
+            access_id = int(a.get("id"))
+
+            cliente = get_cliente(cid)
+            if not cliente:
+                stats["saltati"] += 1
+                continue
+
+            stats["processati"] += 1
+
+            # se esiste già una lezione presente con nota dello stesso accesso, salta
+            lezioni = load_lezioni()
+            if not lezioni.empty:
+                same = lezioni[
+                    (pd.to_numeric(lezioni["cliente_id"], errors="coerce").fillna(0).astype(int) == cid) &
+                    (lezioni["data_lezione"].astype(str) == data_acc) &
+                    (lezioni["note"].fillna("").astype(str).str.contains(f"access_id={access_id}", regex=False))
+                ]
+                if not same.empty:
+                    stats["saltati"] += 1
+                    continue
+
+            booking = trova_lezione_giorno(cid, data_acc)
+            if booking:
+                old_note = str(booking.get("note") or "")
+                sb.table("lezioni").update({
+                    "stato": "PRESENTE",
+                    "updated_at": now_iso(),
+                    "note": (old_note + f" | Check-in retroattivo tornello ore {ora_acc} access_id={access_id}").strip(" |"),
+                }).eq("id", int(booking.get("id"))).execute()
+                stats["confermati"] += 1
+                continue
+
+            used_before = count_presenti_settimana(cid, data_acc)
+            pac = cliente.get("pacchetto", "")
+            standard = is_standard_weekly_package(pac)
+            stato = "PRESENTE"
+            if standard and used_before >= 3:
+                stato = "ACCESSO EXTRA DA VERIFICARE"
+                stats["extra"] += 1
+
+            start = round_time_up_hhmm(ora_acc, 30)
+            end = add_minutes_hhmm(start, 60)
+
+            sb.table("lezioni").insert({
+                "cliente_id": cid,
+                "data_lezione": data_acc,
+                "ora_inizio": start,
+                "ora_fine": end,
+                "trainer": trainer_from_pacchetto_app(pac),
+                "stato": stato,
+                "note": f"Lezione creata retroattivamente da accesso tornello ore {ora_acc}. Slot {start}-{end}. Pacchetto: {pac}. Tipo: {tipo_slot_from_pacchetto_app(pac)}. access_id={access_id}",
+                "creata_da": "Recupero retroattivo accessi tornello",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }).execute()
+
+            stats["creati"] += 1
+
+        except Exception:
+            stats["saltati"] += 1
+
+    # aggiorna contatori anagrafica per pacchetti standard, basati sulla settimana corrente
+    try:
+        clienti = load_clienti()
+        if not clienti.empty:
+            for _, c in clienti.iterrows():
+                pac = c.get("pacchetto", "")
+                if is_standard_weekly_package(pac):
+                    cid = int(c.get("id"))
+                    used = min(count_presenti_settimana(cid, date.today()), 3)
+                    sb.table("clienti").update({
+                        "numero_lezioni_totali": 3,
+                        "lezioni_utilizzate": used,
+                        "updated_at": now_iso(),
+                    }).eq("id", cid).execute()
+    except Exception:
+        pass
+
+    return stats
+
+
+def render_recupero_retroattivo_accessi():
+    st.subheader("Recupero retroattivo accessi → lezioni")
+    st.caption("Usalo per trasformare gli accessi già registrati dal tornello in lezioni/presenze. Non duplica le lezioni già create con lo stesso access_id.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        data_da = st.date_input("Da data", value=date.today(), format="DD/MM/YYYY", key="retro_data_da")
+    with c2:
+        data_a = st.date_input("A data", value=date.today(), format="DD/MM/YYYY", key="retro_data_a")
+
+    clienti = load_clienti()
+    solo_cliente_id = None
+    if not clienti.empty:
+        labels = ["Tutti i clienti"] + (clienti["id"].astype(str) + " - " + clienti["nome"].fillna("").astype(str) + " " + clienti["cognome"].fillna("").astype(str)).tolist()
+        selected = st.selectbox("Cliente", labels, key="retro_cliente")
+        if selected != "Tutti i clienti":
+            solo_cliente_id = int(selected.split(" - ")[0])
+
+    st.warning("Questa funzione crea/conferma lezioni partendo dagli accessi già registrati. Usala dopo aver associato i badge ai clienti.")
+    conferma = st.checkbox("Confermo di voler recuperare gli accessi nel periodo selezionato", key="retro_confirm")
+
+    if conferma and st.button("♻️ Recupera accessi e aggiorna lezioni", key="retro_run"):
+        stats = recupera_accessi_retroattivi(str(data_da), str(data_a), solo_cliente_id)
+        st.success(f"Recupero completato: processati {stats['processati']} | creati {stats['creati']} | confermati {stats['confermati']} | extra {stats['extra']} | saltati {stats['saltati']}")
+        st.rerun()
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -4155,7 +4393,7 @@ def render_accessi_tornello_page():
         with col_sync2:
             st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -4300,6 +4538,9 @@ def render_accessi_tornello_page():
 
     with tab5:
         render_associazione_badge_smart()
+
+    with tab6:
+        render_recupero_retroattivo_accessi()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
