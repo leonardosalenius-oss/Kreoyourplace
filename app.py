@@ -3654,6 +3654,9 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
         stato_def = defaults.get("stato_cliente", "ATTIVO")
         stato = st.selectbox("Stato cliente", STATI_CLIENTE, index=STATI_CLIENTE.index(stato_def) if stato_def in STATI_CLIENTE else 0, key=k("stato"))
 
+    # Alias di sicurezza: nel form la variabile reale è data_inizio,
+    # ma alcune parti storiche usano ancora data_inizio_pacchetto.
+    data_inizio_pacchetto = data_inizio
     scadenza_auto_calc = calcola_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto)
     scadenza_auto = scadenza_auto_calc or parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto)
 
