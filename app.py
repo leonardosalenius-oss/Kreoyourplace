@@ -3660,7 +3660,32 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
     scadenza_auto_calc = calcola_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto)
     scadenza_auto = scadenza_auto_calc or parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto)
 
-    scadenza_abbonamento = st.date_input("Scadenza abbonamento / prossima rata", value=scadenza_auto if scadenza_auto_calc else parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto), format="DD/MM/YYYY", key=k("scad_abb"))
+    # La key dinamica forza Streamlit ad aggiornare il valore quando cambia
+    # data inizio / tipologia abbonamento / pacchetto.
+    scad_key_dynamic = k(
+        "scad_abb_"
+        + str(data_inizio_pacchetto)
+        + "_"
+        + str(tipologia_abbonamento).replace(" ", "_")
+        + "_"
+        + str(pacchetto).replace(" ", "_")
+    )
+
+    if scadenza_auto_calc is not None:
+        scadenza_abbonamento = st.date_input(
+            "Scadenza abbonamento / prossima rata",
+            value=scadenza_auto_calc,
+            format="DD/MM/YYYY",
+            key=scad_key_dynamic,
+        )
+    else:
+        scadenza_abbonamento = st.date_input(
+            "Scadenza abbonamento / prossima rata",
+            value=parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto),
+            format="DD/MM/YYYY",
+            key=scad_key_dynamic,
+        )
+
     st.info(label_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto))
     note = st.text_area("Note", value=defaults.get("note", ""), key=k("note"))
 
