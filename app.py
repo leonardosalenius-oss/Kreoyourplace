@@ -4075,15 +4075,91 @@ def render_associazione_badge_smart():
             st.error(msg)
 
 
+
+def badge_cliente_map():
+    badges = load_badge_clienti()
+    mapping = {}
+    if badges.empty:
+        return mapping
+    try:
+        active = badges[badges["attivo"] == True].copy() if "attivo" in badges.columns else badges.copy()
+        for _, r in active.iterrows():
+            badge = str(r.get("badge_uid", "")).strip()
+            cid = r.get("cliente_id")
+            if badge and cid is not None and str(cid) not in ["", "nan", "None"]:
+                mapping[badge] = int(float(cid))
+    except Exception:
+        pass
+    return mapping
+
+
+def sync_accessi_cliente_da_badge():
+    sb = get_supabase()
+    accessi = load_accessi_tornello()
+    mapping = badge_cliente_map()
+    if accessi.empty or not mapping:
+        return 0
+    updated = 0
+    for _, r in accessi.iterrows():
+        try:
+            current_cliente = r.get("cliente_id")
+            if current_cliente not in [None, "", "None"] and not pd.isna(current_cliente):
+                continue
+            badge = str(r.get("badge_uid", "")).strip()
+            if not badge or badge not in mapping:
+                continue
+            cid = mapping[badge]
+            sb.table("accessi_tornello").update({
+                "cliente_id": int(cid),
+                "stato_accesso": "REGISTRATO_ASSOCIATO",
+                "note": "Accesso collegato automaticamente da badge associato",
+            }).eq("id", int(r.get("id"))).execute()
+            updated += 1
+        except Exception:
+            continue
+    return updated
+
+
+def enrich_accessi_with_cliente(accessi):
+    if accessi.empty:
+        return accessi
+    mapping = badge_cliente_map()
+    if not mapping or "badge_uid" not in accessi.columns:
+        return accessi
+    view = accessi.copy()
+    if "cliente_id" not in view.columns:
+        view["cliente_id"] = None
+    for idx, r in view.iterrows():
+        try:
+            current_cliente = r.get("cliente_id")
+            if current_cliente in [None, "", "None"] or pd.isna(current_cliente):
+                badge = str(r.get("badge_uid", "")).strip()
+                if badge in mapping:
+                    view.at[idx, "cliente_id"] = mapping[badge]
+        except Exception:
+            continue
+    return view
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
+
+    if is_admin():
+        col_sync1, col_sync2 = st.columns([1, 3])
+        with col_sync1:
+            if st.button("🔄 Sincronizza accessi-badge", key="sync_accessi_badge_btn"):
+                n = sync_accessi_cliente_da_badge()
+                st.success(f"Accessi collegati automaticamente: {n}")
+                st.rerun()
+        with col_sync2:
+            st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart"])
 
     with tab1:
         st.subheader("Registro accessi")
-        accessi = load_accessi_tornello()
+        accessi = enrich_accessi_with_cliente(load_accessi_tornello())
         if accessi.empty:
             st.info("Nessun accesso registrato.")
         else:
