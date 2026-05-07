@@ -5004,6 +5004,163 @@ def render_accessi_live_dashboard():
         st.dataframe(alerts, use_container_width=True, hide_index=True)
 
 
+
+def kreo_ok_beep_html():
+    return """
+    <script>
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 520;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0.001, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.18);
+    } catch(e) {}
+    </script>
+    """
+
+
+def kreo_alarm_beep_html():
+    return """
+    <script>
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+        function beep(freq, duration, delay) {
+            setTimeout(() => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.frequency.value = freq;
+                osc.type = "square";
+                gain.gain.setValueAtTime(0.001, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.45, ctx.currentTime + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + duration / 1000);
+            }, delay);
+        }
+        beep(980, 180, 0);
+        beep(520, 180, 220);
+        beep(980, 180, 440);
+        beep(520, 240, 660);
+    } catch(e) {}
+    </script>
+    """
+
+
+def get_latest_accesso_live():
+    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    if accessi.empty:
+        return None
+
+    df = accessi.copy()
+    try:
+        if "created_at" in df.columns:
+            df["created_dt"] = pd.to_datetime(df["created_at"], errors="coerce")
+            df = df.sort_values(["created_dt", "id"], ascending=[False, False])
+        else:
+            df = df.sort_values("id", ascending=False)
+    except Exception:
+        df = df.sort_values("id", ascending=False)
+
+    return df.iloc[0].to_dict()
+
+
+def get_accesso_cliente_label(row):
+    cid = row.get("cliente_id")
+    if cid not in [None, "", "None"] and not pd.isna(cid):
+        try:
+            c = get_cliente(int(cid))
+            if c:
+                return f"{c.get('nome','')} {c.get('cognome','')}".strip()
+        except Exception:
+            pass
+    cliente = row.get("cliente", "")
+    if cliente and str(cliente).lower() != "nan":
+        return str(cliente)
+    return "BADGE NON ASSOCIATO"
+
+
+def render_realtime_tornello_monitor():
+    st.subheader("Monitor live tornello")
+    st.caption("Schermata reception: lascia questa pagina aperta. Aggiornamento rapido e suono lato browser.")
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        refresh_sec = st.number_input("Refresh secondi", min_value=2, max_value=30, value=3, step=1, key="rt_refresh_sec")
+    with c2:
+        sound_mode = st.selectbox("Suono", ["Solo alert", "Sempre", "Muto"], key="rt_sound_mode")
+    with c3:
+        st.info("Consiglio: tieni questa pagina aperta su PC reception con volume attivo.")
+
+    latest = get_latest_accesso_live()
+
+    if not latest:
+        st.warning("Nessun accesso registrato.")
+    else:
+        alerts = accesso_alerts_for_row(pd.Series(latest))
+        has_high = any(a[0] == "ALTA" for a in alerts)
+        has_any = len(alerts) > 0
+
+        cliente_label = get_accesso_cliente_label(latest)
+        data_acc = latest.get("data_accesso", "")
+        ora_acc = str(latest.get("ora_accesso", ""))[:8]
+        stato = latest.get("stato_accesso", "")
+        badge = latest.get("badge_uid", "")
+
+        if has_any:
+            if sound_mode in ["Solo alert", "Sempre"]:
+                st.components.v1.html(kreo_alarm_beep_html(), height=0)
+
+            st.markdown(f"""
+            <div style="background:#ffe7e7;border:3px solid #ff3333;border-radius:22px;padding:28px;margin:18px 0;">
+                <div style="font-size:18px;font-weight:800;color:#a40000;">🚨 ACCESSO DA VERIFICARE</div>
+                <div style="font-size:42px;font-weight:900;color:#111;margin-top:8px;">{cliente_label}</div>
+                <div style="font-size:22px;margin-top:8px;">Badge: <b>{badge}</b> | Ora: <b>{ora_acc}</b> | Stato: <b>{stato}</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            alert_rows = []
+            for prio, tipo, msg in alerts:
+                alert_rows.append({"priorità": prio, "tipo": tipo, "messaggio": msg})
+            st.dataframe(pd.DataFrame(alert_rows), use_container_width=True, hide_index=True)
+
+        else:
+            if sound_mode == "Sempre":
+                st.components.v1.html(kreo_ok_beep_html(), height=0)
+
+            st.markdown(f"""
+            <div style="background:#e8fff0;border:3px solid #13b56b;border-radius:22px;padding:28px;margin:18px 0;">
+                <div style="font-size:18px;font-weight:800;color:#07713d;">✅ ACCESSO REGISTRATO</div>
+                <div style="font-size:42px;font-weight:900;color:#111;margin-top:8px;">{cliente_label}</div>
+                <div style="font-size:22px;margin-top:8px;">Badge: <b>{badge}</b> | Ora: <b>{ora_acc}</b> | Stato: <b>{stato}</b></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("### Ultimi accessi")
+        recent = get_recent_accessi(120)
+        if not recent.empty:
+            cols = ["data_accesso", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "note"]
+            st.dataframe(recent[[c for c in cols if c in recent.columns]].head(15), use_container_width=True, hide_index=True)
+
+    st.markdown(f"""
+    <script>
+    setTimeout(function(){{
+        window.location.reload();
+    }}, {int(refresh_sec) * 1000});
+    </script>
+    """, unsafe_allow_html=True)
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -5018,7 +5175,7 @@ def render_accessi_tornello_page():
         with col_sync2:
             st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori", "Alert live", "Live dashboard"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori", "Alert live", "Live dashboard", "Monitor live"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -5178,6 +5335,9 @@ def render_accessi_tornello_page():
 
     with tab10:
         render_accessi_live_dashboard()
+
+    with tab11:
+        render_realtime_tornello_monitor()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
