@@ -4459,6 +4459,35 @@ def render_recalcolo_settimanale_widget():
 
 
 
+
+def safe_update_cliente_contatori(cliente_id, totale, usate, residue):
+    """
+    Aggiorna i contatori cliente senza far crashare l'app se una colonna non esiste
+    o se Supabase rifiuta un singolo campo.
+    """
+    sb = get_supabase()
+    cid = int(cliente_id)
+
+    payloads = [
+        {"numero_lezioni": int(totale), "lezioni_utilizzate": int(usate), "lezioni_residue": int(residue), "updated_at": now_iso()},
+        {"numero_lezioni_totali": int(totale), "lezioni_utilizzate": int(usate), "lezioni_residue": int(residue), "updated_at": now_iso()},
+        {"numero_lezioni": int(totale), "lezioni_utilizzate": int(usate), "updated_at": now_iso()},
+        {"numero_lezioni_totali": int(totale), "lezioni_utilizzate": int(usate), "updated_at": now_iso()},
+        {"lezioni_utilizzate": int(usate), "updated_at": now_iso()},
+    ]
+
+    last_error = None
+    for payload in payloads:
+        try:
+            sb.table("clienti").update(payload).eq("id", cid).execute()
+            return True, "Contatori aggiornati."
+        except Exception as e:
+            last_error = e
+            continue
+
+    return False, f"Non sono riuscito ad aggiornare i contatori. Ultimo errore: {last_error}"
+
+
 def normalize_status_text(x):
     return str(x or "").strip().upper()
 
@@ -4588,15 +4617,11 @@ def ricalcola_contatori_settimanali_clienti_robust(data_ref=None):
             totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref)
 
             # aggiorno tutti: standard e personalizzati, così la tabella resta coerente
-            sb.table("clienti").update({
-                "numero_lezioni": int(totale),
-                "numero_lezioni_totali": int(totale),
-                "lezioni_utilizzate": int(usate),
-                "lezioni_residue": int(residue),
-                "updated_at": now_iso(),
-            }).eq("id", cid).execute()
-
-            updated += 1
+            ok_update, _msg_update = safe_update_cliente_contatori(cid, totale, usate, residue)
+            if ok_update:
+                updated += 1
+            else:
+                skipped += 1
         except Exception:
             skipped += 1
 
@@ -4657,16 +4682,12 @@ def render_diagnostica_contatori_cliente():
     st.write("Giorni con accessi tornello:", sorted(list(access_days)))
 
     if st.button("🔧 Aggiorna questo cliente", key="diag_update_one"):
-        sb = get_supabase()
-        sb.table("clienti").update({
-            "numero_lezioni": int(totale),
-            "numero_lezioni_totali": int(totale),
-            "lezioni_utilizzate": int(usate),
-            "lezioni_residue": int(residue),
-            "updated_at": now_iso(),
-        }).eq("id", cid).execute()
-        st.success("Cliente aggiornato.")
-        st.rerun()
+        ok_update, msg_update = safe_update_cliente_contatori(cid, totale, usate, residue)
+        if ok_update:
+            st.success(msg_update)
+            st.rerun()
+        else:
+            st.error(msg_update)
 
 
 def contatori_reali_cliente_da_lezioni(cliente_id, pacchetto=None, data_ref=None):
