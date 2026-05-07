@@ -4379,6 +4379,84 @@ def render_recupero_retroattivo_accessi():
         st.rerun()
 
 
+
+def is_weekly_quota_package_app(pacchetto):
+    p = str(pacchetto or "").upper()
+    return any(x in p for x in ["LUXURY", "GOLD", "VIP", "COACHING"])
+
+
+def ricalcola_contatori_settimanali_clienti(data_ref=None):
+    """
+    Ricalcola i contatori che appaiono nel Database clienti:
+    - numero_lezioni = 3 per Luxury/Gold/VIP/Coaching
+    - lezioni_utilizzate = lezioni PRESENTE della settimana corrente
+    - lezioni_residue = max(3 - usate, 0)
+    Le lezioni non usate non si accumulano.
+    """
+    data_ref = data_ref or date.today()
+    start, end = week_start_end(data_ref) if "week_start_end" in globals() else (data_ref - timedelta(days=data_ref.weekday()), data_ref + timedelta(days=6-data_ref.weekday()))
+
+    clienti = load_clienti()
+    lezioni = load_lezioni()
+    sb = get_supabase()
+
+    if clienti.empty:
+        return {"aggiornati": 0, "saltati": 0}
+
+    updated = 0
+    skipped = 0
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+            pac = c.get("pacchetto", "")
+
+            if not is_weekly_quota_package_app(pac):
+                skipped += 1
+                continue
+
+            used = 0
+            if not lezioni.empty:
+                tmp = lezioni.copy()
+                tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+                tmp = tmp[
+                    (tmp["cliente_id_num"] == cid) &
+                    (tmp["data_lezione"].astype(str) >= str(start)) &
+                    (tmp["data_lezione"].astype(str) <= str(end)) &
+                    (tmp["stato"].astype(str).str.upper() == "PRESENTE")
+                ]
+                used = len(tmp)
+
+            used_capped = min(int(used), 3)
+            residue = max(3 - used_capped, 0)
+
+            sb.table("clienti").update({
+                "numero_lezioni": 3,
+                "numero_lezioni_totali": 3,
+                "lezioni_utilizzate": used_capped,
+                "lezioni_residue": residue,
+                "updated_at": now_iso(),
+            }).eq("id", cid).execute()
+
+            updated += 1
+        except Exception:
+            skipped += 1
+
+    return {"aggiornati": updated, "saltati": skipped}
+
+
+def render_recalcolo_settimanale_widget():
+    st.markdown("### Ricalcolo lezioni settimanali")
+    st.caption("Aggiorna i contatori del Database clienti in base alle lezioni PRESENTE della settimana. Per Luxury/Gold/VIP/Coaching riparte sempre da 3 ogni lunedì.")
+
+    data_ref = st.date_input("Settimana di riferimento", value=date.today(), format="DD/MM/YYYY", key="ricalcolo_week_ref")
+
+    if st.button("🔄 Ricalcola contatori settimanali", key="ricalcola_contatori_settimanali_btn"):
+        res = ricalcola_contatori_settimanali_clienti(data_ref)
+        st.success(f"Ricalcolo completato. Clienti aggiornati: {res['aggiornati']} | saltati/non standard: {res['saltati']}")
+        st.rerun()
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -4393,7 +4471,7 @@ def render_accessi_tornello_page():
         with col_sync2:
             st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -4541,6 +4619,9 @@ def render_accessi_tornello_page():
 
     with tab6:
         render_recupero_retroattivo_accessi()
+
+    with tab7:
+        render_recalcolo_settimanale_widget()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
@@ -4989,6 +5070,11 @@ def main():
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
+
+        if is_admin():
+            with st.expander("🔄 Ricalcolo rapido settimanale"):
+                render_recalcolo_settimanale_widget()
+
         if df.empty:
             st.info("Nessun cliente inserito.")
         else:
