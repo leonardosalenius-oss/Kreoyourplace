@@ -4452,10 +4452,221 @@ def render_recalcolo_settimanale_widget():
     data_ref = st.date_input("Settimana di riferimento", value=date.today(), format="DD/MM/YYYY", key="ricalcolo_week_ref")
 
     if st.button("🔄 Ricalcola contatori settimanali", key="ricalcola_contatori_settimanali_btn"):
-        res = ricalcola_contatori_settimanali_clienti(data_ref)
+        res = ricalcola_contatori_settimanali_clienti_robust(data_ref)
         st.success(f"Ricalcolo completato. Clienti aggiornati: {res['aggiornati']} | saltati/non standard: {res['saltati']}")
         st.rerun()
 
+
+
+
+def normalize_status_text(x):
+    return str(x or "").strip().upper()
+
+
+def cliente_weekly_access_dates(cliente_id, data_ref=None):
+    """
+    Fonte alternativa robusta: accessi_tornello associati al cliente nella settimana.
+    Conta max 1 accesso/giorno come presenza utile, salvo che esistano più lezioni PRESENTE reali.
+    """
+    data_ref = data_ref or date.today()
+    try:
+        start, end = week_start_end(data_ref)
+    except Exception:
+        start = data_ref - timedelta(days=data_ref.weekday())
+        end = start + timedelta(days=6)
+
+    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    if accessi.empty or "cliente_id" not in accessi.columns:
+        return set()
+
+    tmp = accessi.copy()
+    tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+    tmp = tmp[
+        (tmp["cliente_id_num"] == int(cliente_id)) &
+        (tmp["data_accesso"].astype(str) >= str(start)) &
+        (tmp["data_accesso"].astype(str) <= str(end))
+    ]
+
+    if tmp.empty:
+        return set()
+
+    # Escludo accessi chiaramente negati, ma tengo REGISTRATO/REGISTRATO_ASSOCIATO
+    if "stato_accesso" in tmp.columns:
+        tmp["stato_norm"] = tmp["stato_accesso"].apply(normalize_status_text)
+        tmp = tmp[~tmp["stato_norm"].str.contains("NEGATO", na=False)]
+
+    return set(tmp["data_accesso"].astype(str).tolist())
+
+
+def cliente_weekly_present_lessons(cliente_id, data_ref=None):
+    """
+    Conta lezioni PRESENTE da calendario nella settimana.
+    Ritorna sia conteggio sia giorni.
+    """
+    data_ref = data_ref or date.today()
+    try:
+        start, end = week_start_end(data_ref)
+    except Exception:
+        start = data_ref - timedelta(days=data_ref.weekday())
+        end = start + timedelta(days=6)
+
+    lezioni = load_lezioni()
+    if lezioni.empty:
+        return 0, set()
+
+    tmp = lezioni.copy()
+    tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+    tmp["stato_norm"] = tmp["stato"].apply(normalize_status_text)
+
+    tmp = tmp[
+        (tmp["cliente_id_num"] == int(cliente_id)) &
+        (tmp["data_lezione"].astype(str) >= str(start)) &
+        (tmp["data_lezione"].astype(str) <= str(end)) &
+        (tmp["stato_norm"] == "PRESENTE")
+    ]
+
+    if tmp.empty:
+        return 0, set()
+
+    return len(tmp), set(tmp["data_lezione"].astype(str).tolist())
+
+
+def contatori_reali_robust_cliente(cliente_id, pacchetto=None, data_ref=None):
+    """
+    Conta reale robusto:
+    - usa lezioni PRESENTE se presenti;
+    - integra con accessi tornello associati;
+    - per Luxury/Gold/VIP/Coaching totale = 3 non cumulabile;
+    - per personalizzati totale = anagrafica.
+    """
+    data_ref = data_ref or date.today()
+    if pacchetto is None:
+        c = get_cliente(int(cliente_id))
+        pacchetto = c.get("pacchetto", "") if c else ""
+
+    lez_count, lez_days = cliente_weekly_present_lessons(cliente_id, data_ref)
+    access_days = cliente_weekly_access_dates(cliente_id, data_ref)
+
+    # Se una giornata ha accesso ma non lezione PRESENTE, la considero comunque presenza utile.
+    merged_days = set(lez_days) | set(access_days)
+    used = max(int(lez_count), len(merged_days))
+
+    if is_weekly_quota_package_app(pacchetto):
+        totale = 3
+        usate = min(used, 3)
+        residue = max(3 - usate, 0)
+        extra = max(used - 3, 0)
+        return totale, usate, residue, extra
+
+    try:
+        c = get_cliente(int(cliente_id))
+        totale = int(float(c.get("numero_lezioni") or c.get("numero_lezioni_totali") or 0)) if c else 0
+    except Exception:
+        totale = 0
+
+    usate = int(used)
+    residue = max(totale - usate, 0) if totale > 0 else 0
+    extra = max(usate - totale, 0) if totale > 0 else 0
+    return totale, usate, residue, extra
+
+
+def ricalcola_contatori_settimanali_clienti_robust(data_ref=None):
+    data_ref = data_ref or date.today()
+    clienti = load_clienti()
+    sb = get_supabase()
+
+    if clienti.empty:
+        return {"aggiornati": 0, "saltati": 0}
+
+    updated = 0
+    skipped = 0
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+            pac = c.get("pacchetto", "")
+            totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref)
+
+            # aggiorno tutti: standard e personalizzati, così la tabella resta coerente
+            sb.table("clienti").update({
+                "numero_lezioni": int(totale),
+                "numero_lezioni_totali": int(totale),
+                "lezioni_utilizzate": int(usate),
+                "lezioni_residue": int(residue),
+                "updated_at": now_iso(),
+            }).eq("id", cid).execute()
+
+            updated += 1
+        except Exception:
+            skipped += 1
+
+    return {"aggiornati": updated, "saltati": skipped}
+
+
+def dataframe_clienti_con_contatori_reali_robust(df, data_ref=None):
+    if df.empty:
+        return df
+
+    out = df.copy()
+    for col in ["numero_lezioni", "lezioni_utilizzate", "lezioni_residue"]:
+        if col not in out.columns:
+            out[col] = 0
+
+    for idx, row in out.iterrows():
+        try:
+            cid = int(row.get("id"))
+            pac = row.get("pacchetto", "")
+            totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref or date.today())
+            out.at[idx, "numero_lezioni"] = totale
+            out.at[idx, "lezioni_utilizzate"] = usate
+            out.at[idx, "lezioni_residue"] = residue
+        except Exception:
+            continue
+
+    return out
+
+
+def render_diagnostica_contatori_cliente():
+    st.markdown("### Diagnostica contatori")
+    st.caption("Mostra da dove arrivano le presenze: calendario e accessi tornello.")
+
+    clienti = load_clienti()
+    if clienti.empty:
+        st.info("Nessun cliente.")
+        return
+
+    labels = (clienti["id"].astype(str) + " - " + clienti["nome"].fillna("").astype(str) + " " + clienti["cognome"].fillna("").astype(str)).tolist()
+    selected = st.selectbox("Cliente", labels, key="diag_contatore_cliente")
+    cid = int(selected.split(" - ")[0])
+    data_ref = st.date_input("Settimana", value=date.today(), format="DD/MM/YYYY", key="diag_contatore_data")
+
+    c = get_cliente(cid)
+    pac = c.get("pacchetto", "") if c else ""
+
+    lez_count, lez_days = cliente_weekly_present_lessons(cid, data_ref)
+    access_days = cliente_weekly_access_dates(cid, data_ref)
+    totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Totale settimana", totale)
+    c2.metric("Usate", usate)
+    c3.metric("Residue", residue)
+    c4.metric("Extra", extra)
+
+    st.write("Giorni con lezioni PRESENTE:", sorted(list(lez_days)))
+    st.write("Giorni con accessi tornello:", sorted(list(access_days)))
+
+    if st.button("🔧 Aggiorna questo cliente", key="diag_update_one"):
+        sb = get_supabase()
+        sb.table("clienti").update({
+            "numero_lezioni": int(totale),
+            "numero_lezioni_totali": int(totale),
+            "lezioni_utilizzate": int(usate),
+            "lezioni_residue": int(residue),
+            "updated_at": now_iso(),
+        }).eq("id", cid).execute()
+        st.success("Cliente aggiornato.")
+        st.rerun()
 
 
 def contatori_reali_cliente_da_lezioni(cliente_id, pacchetto=None, data_ref=None):
@@ -4519,7 +4730,7 @@ def contatori_reali_cliente_da_lezioni(cliente_id, pacchetto=None, data_ref=None
     return totale, usate, residue, extra
 
 
-def dataframe_clienti_con_contatori_reali(df):
+def dataframe_clienti_con_contatori_reali_robust(df):
     """
     Aggiorna la tabella visualizzata dei clienti con contatori reali da calendario.
     """
@@ -4561,7 +4772,7 @@ def render_accessi_tornello_page():
         with col_sync2:
             st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -4712,6 +4923,9 @@ def render_accessi_tornello_page():
 
     with tab7:
         render_recalcolo_settimanale_widget()
+
+    with tab8:
+        render_diagnostica_contatori_cliente()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
