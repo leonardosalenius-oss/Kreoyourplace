@@ -4779,6 +4779,231 @@ def dataframe_clienti_con_contatori_reali_robust(df):
     return out
 
 
+
+def kreo_beep_html():
+    """
+    Suono browser semplice, senza file esterni.
+    Viene attivato quando la pagina si carica e c'è almeno un alert live.
+    """
+    return """
+    <script>
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+        function beep(freq, duration, delay) {
+            setTimeout(() => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.frequency.value = freq;
+                osc.type = "sine";
+                gain.gain.setValueAtTime(0.001, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
+                osc.start(ctx.currentTime);
+                osc.stop(ctx.currentTime + duration / 1000);
+            }, delay);
+        }
+        beep(880, 220, 0);
+        beep(660, 220, 280);
+        beep(880, 220, 560);
+    } catch(e) {}
+    </script>
+    """
+
+
+def get_recent_accessi(minutes=10):
+    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    if accessi.empty:
+        return accessi
+
+    df = accessi.copy()
+    if "created_at" not in df.columns:
+        return df.head(20)
+
+    try:
+        df["created_dt"] = pd.to_datetime(df["created_at"], errors="coerce")
+        cutoff = pd.Timestamp.now(tz=None) - pd.Timedelta(minutes=int(minutes))
+        # se timezone mismatch, fallback ultimi record
+        recent = df[df["created_dt"].dt.tz_localize(None) >= cutoff]
+        if recent.empty:
+            return df.sort_values("id", ascending=False).head(20)
+        return recent.sort_values("created_dt", ascending=False)
+    except Exception:
+        return df.sort_values("id", ascending=False).head(20)
+
+
+def accesso_alerts_for_row(row):
+    """
+    Genera alert live usando:
+    - stato accesso PerfectGym/KREO
+    - cliente associato
+    - certificato
+    - residuo economico
+    - lezioni residue settimanali
+    """
+    alerts = []
+    cid = row.get("cliente_id")
+
+    stato_accesso = str(row.get("stato_accesso") or "").upper()
+    if "NEGATO" in stato_accesso or "VERIFICARE" in stato_accesso or "EXTRA" in stato_accesso:
+        alerts.append(("ALTA", "Accesso da verificare", f"Stato accesso: {row.get('stato_accesso')}"))
+
+    if cid in [None, "", "None"] or pd.isna(cid):
+        alerts.append(("ALTA", "Badge non associato", f"Badge/ID {row.get('badge_uid')} non collegato a nessun cliente KREO."))
+        return alerts
+
+    try:
+        cliente = get_cliente(int(cid))
+    except Exception:
+        cliente = None
+
+    if not cliente:
+        alerts.append(("ALTA", "Cliente non trovato", f"cliente_id {cid} non presente in anagrafica."))
+        return alerts
+
+    nome_cliente = f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip()
+
+    # certificato
+    cert = str(cliente.get("certificato_medico", cliente.get("certificato_medico_consegnato", "")) or "").upper()
+    if cert not in ["SI", "SÌ", "YES", "OK"]:
+        alerts.append(("ALTA", "Certificato medico mancante", f"{nome_cliente}: certificato medico non consegnato/non valido."))
+
+    # residuo economico
+    try:
+        residuo = float(cliente.get("residuo") or cliente.get("residuo_pagamento") or 0)
+    except Exception:
+        try:
+            importo = float(cliente.get("importo") or 0)
+            pagato = float(cliente.get("importo_pagato") or 0)
+            residuo = max(importo - pagato, 0)
+        except Exception:
+            residuo = 0
+
+    if residuo > 0.01:
+        alerts.append(("MEDIA", "Residuo economico aperto", f"{nome_cliente}: residuo € {residuo:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")))
+
+    # lezioni residue settimanali
+    try:
+        data_ref = row.get("data_accesso") or date.today()
+        totale, usate, residue, extra = contatori_reali_robust_cliente(int(cid), cliente.get("pacchetto", ""), parse_date(data_ref, date.today()))
+        if is_weekly_quota_package_app(cliente.get("pacchetto", "")):
+            if residue <= 0:
+                alerts.append(("ALTA", "Lezioni settimanali esaurite", f"{nome_cliente}: {usate}/{totale} lezioni usate questa settimana."))
+            if extra > 0:
+                alerts.append(("ALTA", "Accesso extra oltre quota", f"{nome_cliente}: extra settimana = {extra}."))
+    except Exception:
+        pass
+
+    return alerts
+
+
+def build_alert_accessi_live(minutes=30):
+    recent = get_recent_accessi(minutes)
+    if recent.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for _, r in recent.iterrows():
+        alerts = accesso_alerts_for_row(r)
+        if not alerts:
+            continue
+
+        cliente_label = r.get("cliente", "")
+        if not cliente_label or str(cliente_label) == "nan":
+            cid = r.get("cliente_id")
+            if cid not in [None, "", "None"] and not pd.isna(cid):
+                try:
+                    c = get_cliente(int(cid))
+                    cliente_label = f"{c.get('nome','')} {c.get('cognome','')}".strip() if c else ""
+                except Exception:
+                    cliente_label = ""
+
+        for priorita, tipo, msg in alerts:
+            rows.append({
+                "priorita": priorita,
+                "tipo_alert": tipo,
+                "messaggio": msg,
+                "cliente": cliente_label or "NON ASSOCIATO",
+                "badge_uid": r.get("badge_uid", ""),
+                "data_accesso": r.get("data_accesso", ""),
+                "ora_accesso": r.get("ora_accesso", ""),
+                "stato_accesso": r.get("stato_accesso", ""),
+                "accesso_id": r.get("id", ""),
+            })
+
+    return pd.DataFrame(rows)
+
+
+def render_alert_accessi_live_widget():
+    st.subheader("Alert accessi live")
+    st.caption("Controllo immediato sugli accessi recenti: lezioni esaurite, certificato, residuo, badge non associati.")
+
+    c1, c2, c3 = st.columns([1,1,2])
+    with c1:
+        minutes = st.number_input("Minuti da controllare", min_value=5, max_value=240, value=60, step=5)
+    with c2:
+        sound_enabled = st.checkbox("Suono alert", value=True)
+    with c3:
+        auto_refresh = st.checkbox("Auto-refresh 15 sec", value=False)
+
+    alerts = build_alert_accessi_live(minutes)
+
+    if alerts.empty:
+        st.success("Nessun alert sugli accessi recenti.")
+    else:
+        alte = len(alerts[alerts["priorita"] == "ALTA"]) if "priorita" in alerts.columns else 0
+        medie = len(alerts[alerts["priorita"] == "MEDIA"]) if "priorita" in alerts.columns else 0
+
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Alert totali", len(alerts))
+        k2.metric("Priorità alta", alte)
+        k3.metric("Priorità media", medie)
+
+        if sound_enabled and alte > 0:
+            st.components.v1.html(kreo_beep_html(), height=0)
+
+        st.error("⚠️ Ci sono accessi da verificare.")
+        st.dataframe(alerts, use_container_width=True, hide_index=True)
+
+    if auto_refresh:
+        st.markdown("""
+        <script>
+        setTimeout(function(){ window.location.reload(); }, 15000);
+        </script>
+        """, unsafe_allow_html=True)
+
+
+def render_accessi_live_dashboard():
+    st.subheader("Dashboard accessi live")
+    st.caption("Vista operativa per reception/staff.")
+
+    recent = get_recent_accessi(240)
+    alerts = build_alert_accessi_live(240)
+
+    today = str(date.today())
+    try:
+        today_accessi = recent[recent["data_accesso"].astype(str) == today] if not recent.empty else pd.DataFrame()
+    except Exception:
+        today_accessi = pd.DataFrame()
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Accessi oggi", len(today_accessi))
+    k2.metric("Accessi recenti", len(recent))
+    k3.metric("Alert recenti", len(alerts))
+    k4.metric("Badge non associati", len(alerts[alerts["tipo_alert"] == "Badge non associato"]) if not alerts.empty and "tipo_alert" in alerts.columns else 0)
+
+    if not recent.empty:
+        cols = ["data_accesso", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "note"]
+        st.markdown("#### Ultimi accessi")
+        st.dataframe(recent[[c for c in cols if c in recent.columns]].head(25), use_container_width=True, hide_index=True)
+
+    if not alerts.empty:
+        st.markdown("#### Accessi da verificare")
+        st.dataframe(alerts, use_container_width=True, hide_index=True)
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -4793,7 +5018,7 @@ def render_accessi_tornello_page():
         with col_sync2:
             st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori", "Alert live", "Live dashboard"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -4947,6 +5172,12 @@ def render_accessi_tornello_page():
 
     with tab8:
         render_diagnostica_contatori_cliente()
+
+    with tab9:
+        render_alert_accessi_live_widget()
+
+    with tab10:
+        render_accessi_live_dashboard()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
