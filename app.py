@@ -4457,6 +4457,96 @@ def render_recalcolo_settimanale_widget():
         st.rerun()
 
 
+
+def contatori_reali_cliente_da_lezioni(cliente_id, pacchetto=None, data_ref=None):
+    """
+    Fonte vera: tabella lezioni.
+    Per pacchetti Luxury/Gold/VIP/Coaching:
+    - totale settimana = 3
+    - usate = lezioni PRESENTE nella settimana corrente
+    - residue = max(3 - usate, 0)
+    - non cumulabili
+    """
+    data_ref = data_ref or date.today()
+
+    try:
+        start, end = week_start_end(data_ref)
+    except Exception:
+        start = data_ref - timedelta(days=data_ref.weekday())
+        end = start + timedelta(days=6)
+
+    try:
+        lezioni = load_lezioni()
+    except Exception:
+        lezioni = pd.DataFrame()
+
+    used = 0
+    if not lezioni.empty:
+        tmp = lezioni.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["data_lezione"].astype(str) >= str(start)) &
+            (tmp["data_lezione"].astype(str) <= str(end)) &
+            (tmp["stato"].astype(str).str.upper() == "PRESENTE")
+        ]
+        used = len(tmp)
+
+    if pacchetto is None:
+        try:
+            c = get_cliente(int(cliente_id))
+            pacchetto = c.get("pacchetto", "") if c else ""
+        except Exception:
+            pacchetto = ""
+
+    if is_weekly_quota_package_app(pacchetto):
+        totale = 3
+        usate = min(int(used), 3)
+        residue = max(totale - usate, 0)
+        extra = max(int(used) - 3, 0)
+        return totale, usate, residue, extra
+
+    # pacchetti personalizzati: usa anagrafica come totale, ma usate da lezioni PRESENTE
+    try:
+        c = get_cliente(int(cliente_id))
+        totale = int(float(c.get("numero_lezioni") or c.get("numero_lezioni_totali") or 0)) if c else 0
+    except Exception:
+        totale = 0
+
+    usate = int(used)
+    residue = max(totale - usate, 0) if totale > 0 else 0
+    extra = max(usate - totale, 0) if totale > 0 else 0
+    return totale, usate, residue, extra
+
+
+def dataframe_clienti_con_contatori_reali(df):
+    """
+    Aggiorna la tabella visualizzata dei clienti con contatori reali da calendario.
+    """
+    if df.empty:
+        return df
+
+    out = df.copy()
+    for col in ["numero_lezioni", "lezioni_utilizzate", "lezioni_residue"]:
+        if col not in out.columns:
+            out[col] = 0
+
+    for idx, row in out.iterrows():
+        try:
+            cid = int(row.get("id"))
+            pac = row.get("pacchetto", "")
+            totale, usate, residue, extra = contatori_reali_cliente_da_lezioni(cid, pac)
+            out.at[idx, "numero_lezioni"] = totale
+            out.at[idx, "lezioni_utilizzate"] = usate
+            out.at[idx, "lezioni_residue"] = residue
+            if "lezioni_extra_settimana" in out.columns:
+                out.at[idx, "lezioni_extra_settimana"] = extra
+        except Exception:
+            continue
+
+    return out
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
