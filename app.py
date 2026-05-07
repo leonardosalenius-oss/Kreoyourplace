@@ -82,6 +82,42 @@ def add_months(d: date, months: int) -> date:
     return date(year, month, min(d.day, days[month - 1]))
 
 
+
+def mesi_scadenza_abbonamento_kreo(tipologia_abbonamento):
+    """
+    Funzione blindata per scadenza pacchetto.
+    Non usa frequenza pagamento e non usa vecchie logiche.
+    """
+    t = str(tipologia_abbonamento or "").strip().upper()
+    if t == "MENSILE" or "MENSILE" in t:
+        return 1
+    if t == "TRIMESTRALE" or "TRIMESTRALE" in t:
+        return 3
+    if t == "SEMESTRALE" or "SEMESTRALE" in t:
+        return 6
+    if t == "ANNUALE" or "ANNUALE" in t:
+        return 12
+    return None
+
+
+def calcola_scadenza_abbonamento_blindata(data_inizio, tipologia_abbonamento, pacchetto):
+    if "PERSONALIZZATO" in str(pacchetto or "").upper():
+        return None
+    mesi = mesi_scadenza_abbonamento_kreo(tipologia_abbonamento)
+    if mesi is None:
+        return None
+    return add_months(parse_date(data_inizio, date.today()), mesi)
+
+
+def label_scadenza_abbonamento_blindata(data_inizio, tipologia_abbonamento, pacchetto):
+    scad = calcola_scadenza_abbonamento_blindata(data_inizio, tipologia_abbonamento, pacchetto)
+    if scad is None:
+        if "PERSONALIZZATO" in str(pacchetto or "").upper():
+            return "Pacchetto personalizzato: nessuna scadenza automatica."
+        return "Scadenza automatica non calcolabile: verifica manuale."
+    return f"Scadenza automatica prevista: {format_date_it(scad)}"
+
+
 def parse_date(value, default=None):
     if not value:
         return default or date.today()
@@ -2911,7 +2947,7 @@ def is_pacchetto_personalizzato(pacchetto):
     return "PERSONALIZZATO" in str(pacchetto or "").upper()
 
 
-def calcola_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacchetto):
+def calcola_scadenza_abbonamento_blindata(data_inizio, tipologia_abbonamento, pacchetto):
     """
     Regola KREO:
     - Pacchetto personalizzato: nessuna scadenza automatica.
@@ -2925,8 +2961,8 @@ def calcola_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacche
     return add_months(parse_date(data_inizio, date.today()), mesi)
 
 
-def label_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacchetto):
-    scad = calcola_scadenza_abbonamento_auto(data_inizio, tipologia_abbonamento, pacchetto)
+def label_scadenza_abbonamento_blindata(data_inizio, tipologia_abbonamento, pacchetto):
+    scad = calcola_scadenza_abbonamento_blindata(data_inizio, tipologia_abbonamento, pacchetto)
     if scad is None:
         if is_pacchetto_personalizzato(pacchetto):
             return "Pacchetto personalizzato: nessuna scadenza automatica."
@@ -2951,7 +2987,7 @@ def aggiorna_scadenze_abbonamenti_retroattive():
             pac = c.get("pacchetto", "")
             tipo_abb = c.get("tipologia_abbonamento", "")
             data_inizio = c.get("data_inizio_pacchetto") or c.get("data_iscrizione") or date.today()
-            scad = calcola_scadenza_abbonamento_auto(data_inizio, tipo_abb, pac)
+            scad = calcola_scadenza_abbonamento_blindata(data_inizio, tipo_abb, pac)
 
             payload = {"scadenza_abbonamento": None if scad is None else str(scad), "updated_at": now_iso()}
             sb.table("clienti").update(payload).eq("id", cid).execute()
@@ -3654,14 +3690,10 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
         stato_def = defaults.get("stato_cliente", "ATTIVO")
         stato = st.selectbox("Stato cliente", STATI_CLIENTE, index=STATI_CLIENTE.index(stato_def) if stato_def in STATI_CLIENTE else 0, key=k("stato"))
 
-    # Alias di sicurezza: nel form la variabile reale è data_inizio,
-    # ma alcune parti storiche usano ancora data_inizio_pacchetto.
+    # Scadenza abbonamento automatica blindata.
     data_inizio_pacchetto = data_inizio
-    scadenza_auto_calc = calcola_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto)
-    scadenza_auto = scadenza_auto_calc or parse_date(defaults.get("scadenza_abbonamento"), data_inizio_pacchetto)
+    scadenza_auto_calc = calcola_scadenza_abbonamento_blindata(data_inizio_pacchetto, tipologia_abbonamento, pacchetto)
 
-    # La key dinamica forza Streamlit ad aggiornare il valore quando cambia
-    # data inizio / tipologia abbonamento / pacchetto.
     scad_key_dynamic = k(
         "scad_abb_"
         + str(data_inizio_pacchetto)
@@ -3686,7 +3718,7 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
             key=scad_key_dynamic,
         )
 
-    st.info(label_scadenza_abbonamento_auto(data_inizio_pacchetto, tipologia_abbonamento, pacchetto))
+    st.info(label_scadenza_abbonamento_blindata(data_inizio_pacchetto, tipologia_abbonamento, pacchetto))
     note = st.text_area("Note", value=defaults.get("note", ""), key=k("note"))
 
     return {
