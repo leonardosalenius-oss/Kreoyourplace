@@ -2330,6 +2330,31 @@ def storico_presenze_cliente(cliente_id):
         return pd.DataFrame()
 
 
+
+def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
+    """
+    Dopo una presenza di tipo LEZIONE:
+    - ricalcola totale/usate/residue
+    - aggiorna anagrafica cliente
+    Funziona per tutti i pacchetti.
+    """
+    try:
+        totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
+        if "safe_update_cliente_contatori" in globals():
+            safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
+        else:
+            sb = get_supabase()
+            sb.table("clienti").update({
+                "numero_lezioni": int(totale),
+                "lezioni_utilizzate": int(usate),
+                "lezioni_residue": int(residue),
+                "updated_at": now_iso(),
+            }).eq("id", int(cliente_id)).execute()
+        return True
+    except Exception:
+        return False
+
+
 def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note=""):
     """
     Inserisce una presenza manuale cliente.
@@ -2354,11 +2379,11 @@ def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, t
             note=note_finale,
         )
         if ok:
-            try:
-                totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
-                safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
-            except Exception:
-                pass
+            # Se è una LEZIONE, scala automaticamente dalle lezioni residue
+            # perché viene salvata come stato PRESENTE nella tabella lezioni.
+            if str(tipo_attivita).upper() == "LEZIONE":
+                aggiorna_contatori_dopo_presenza_lezione(int(cliente_id))
+
             insert_history(
                 int(cliente_id),
                 "presenza manuale",
@@ -2366,14 +2391,14 @@ def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, t
                 f"{format_date_it(data_presenza)} {ora_inizio}-{ora_fine}",
                 f"{tipo_attivita} | Trainer: {trainer} | {note}"
             )
-        return ok, "Presenza registrata correttamente." if ok else msg
+        return ok, "Presenza registrata correttamente. Lezione scalata dalle residue." if ok and str(tipo_attivita).upper() == "LEZIONE" else ("Presenza registrata correttamente." if ok else msg)
     except Exception as e:
         return False, f"Errore registrazione presenza: {e}"
 
 
 def render_presenze_cliente_section(cliente_id):
     st.markdown("### Presenze cliente")
-    st.caption("Registra una presenza manuale per questo cliente e consulta lo storico personale.")
+    st.caption("Registra una presenza manuale. Se scegli LEZIONE, viene scalata automaticamente dalle lezioni residue.")
 
     with st.expander("➕ Registra presenza cliente", expanded=False):
         p1, p2, p3 = st.columns(3)
