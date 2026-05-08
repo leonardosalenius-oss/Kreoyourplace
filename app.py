@@ -6363,6 +6363,11 @@ def main():
         st.header("Database clienti")
 
         if is_admin():
+            with st.expander("🏷️ White-label / Azienda"):
+                render_white_label_admin()
+
+
+        if is_admin():
             with st.expander("📆 Gestione scadenze abbonamento"):
                 render_scadenze_abbonamento_admin()
 
