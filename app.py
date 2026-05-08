@@ -3778,6 +3778,168 @@ def build_alert_dashboard(df):
     return out
 
 
+
+def is_pacchetto_settimanale_kreo(pacchetto):
+    """
+    Pacchetti con diritto automatico a 3 lezioni settimanali cumulative.
+    Esclude il pacchetto personalizzato.
+    """
+    p = str(pacchetto or "").upper()
+    if "PERSONALIZZATO" in p:
+        return False
+    return any(x in p for x in ["LUXURY", "GOLD", "VIP", "COACHING"])
+
+
+def lezioni_settimanali_base_da_pacchetto(pacchetto):
+    return 3 if is_pacchetto_settimanale_kreo(pacchetto) else 0
+
+
+def lunedi_settimana(d=None):
+    d = parse_date(d, date.today())
+    return d - timedelta(days=d.weekday())
+
+
+def settimane_da_inizio(data_inizio, data_ref=None):
+    start = lunedi_settimana(data_inizio)
+    end = lunedi_settimana(data_ref or date.today())
+    diff = (end - start).days // 7
+    return max(diff + 1, 1)
+
+
+def lezioni_maturate_cumulative(cliente, data_ref=None):
+    """
+    Regola nuova:
+    Pacchetti Luxury/Gold/VIP/Coaching maturano 3 lezioni ogni settimana
+    e le lezioni non usate si portano avanti.
+    """
+    if not cliente:
+        return 0
+
+    pac = cliente.get("pacchetto", "")
+    if not is_pacchetto_settimanale_kreo(pac):
+        try:
+            return int(float(cliente.get("numero_lezioni") or cliente.get("numero_lezioni_totali") or 0))
+        except Exception:
+            return 0
+
+    data_inizio = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione") or date.today()
+    settimane = settimane_da_inizio(data_inizio, data_ref or date.today())
+    return settimane * 3
+
+
+def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
+    """
+    Conta tutte le lezioni PRESENTE del cliente.
+    Se data_da è indicata, conta dal primo giorno pacchetto.
+    """
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return 0
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp["stato_norm"] = tmp["stato"].astype(str).str.upper()
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["stato_norm"] == "PRESENTE")
+        ]
+        if data_da:
+            tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
+        if data_a:
+            tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
+        return len(tmp)
+    except Exception:
+        return 0
+
+
+def contatori_cumulativi_cliente(cliente_id, data_ref=None):
+    cliente = get_cliente(int(cliente_id))
+    if not cliente:
+        return 0, 0, 0
+
+    pac = cliente.get("pacchetto", "")
+    if is_pacchetto_settimanale_kreo(pac):
+        totale = lezioni_maturate_cumulative(cliente, data_ref or date.today())
+        data_da = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione")
+        usate = lezioni_usate_totali_cliente(cliente_id, data_da=data_da, data_a=data_ref or date.today())
+        residue = max(int(totale) - int(usate), 0)
+        return int(totale), int(usate), int(residue)
+
+    try:
+        totale = int(float(cliente.get("numero_lezioni") or cliente.get("numero_lezioni_totali") or 0))
+    except Exception:
+        totale = 0
+    usate = lezioni_usate_totali_cliente(cliente_id)
+    residue = max(totale - usate, 0)
+    return int(totale), int(usate), int(residue)
+
+
+def aggiorna_contatori_cumulativi_clienti():
+    sb = get_supabase()
+    clienti = load_clienti()
+    if clienti.empty:
+        return {"aggiornati": 0, "saltati": 0}
+
+    aggiornati = 0
+    saltati = 0
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+            totale, usate, residue = contatori_cumulativi_cliente(cid)
+            ok_update, _ = safe_update_cliente_contatori(cid, totale, usate, residue) if "safe_update_cliente_contatori" in globals() else (False, "")
+            if not ok_update:
+                sb.table("clienti").update({
+                    "numero_lezioni": int(totale),
+                    "lezioni_utilizzate": int(usate),
+                    "lezioni_residue": int(residue),
+                    "updated_at": now_iso(),
+                }).eq("id", cid).execute()
+            aggiornati += 1
+        except Exception:
+            saltati += 1
+
+    return {"aggiornati": aggiornati, "saltati": saltati}
+
+
+def dataframe_clienti_con_contatori_cumulativi(df):
+    if df.empty:
+        return df
+    out = df.copy()
+    for col in ["numero_lezioni", "lezioni_utilizzate", "lezioni_residue"]:
+        if col not in out.columns:
+            out[col] = 0
+
+    for idx, row in out.iterrows():
+        try:
+            cid = int(row.get("id"))
+            totale, usate, residue = contatori_cumulativi_cliente(cid)
+            out.at[idx, "numero_lezioni"] = totale
+            out.at[idx, "lezioni_utilizzate"] = usate
+            out.at[idx, "lezioni_residue"] = residue
+        except Exception:
+            continue
+
+    return out
+
+
+def render_lezioni_cumulative_admin():
+    st.subheader("Ricalcolo lezioni cumulative")
+    st.caption("Luxury / Gold / VIP / Coaching maturano 3 lezioni ogni settimana. Le lezioni non utilizzate si sommano alle settimane successive.")
+
+    st.markdown("""
+    **Nuova regola KREO**
+    - Pacchetti standard: +3 lezioni ogni settimana
+    - Le lezioni non usate restano disponibili
+    - Pacchetto personalizzato: gestione manuale
+    """)
+
+    if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
+        res = aggiorna_contatori_cumulativi_clienti()
+        st.success(f"Ricalcolo completato. Aggiornati: {res['aggiornati']} | saltati: {res['saltati']}")
+        st.rerun()
+
+
 def cliente_form(prefix, defaults=None, unique_suffix=""):
     defaults = defaults or {}
     k = lambda name: f"{prefix}_{unique_suffix}_{name}"
@@ -3801,6 +3963,11 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
         tipologia_abbonamento = st.selectbox("Tipologia abbonamento", TIPOLOGIE_ABBONAMENTO, index=TIPOLOGIE_ABBONAMENTO.index(abb_def) if abb_def in TIPOLOGIE_ABBONAMENTO else 3, key=k("tipologia_abbonamento"))
         tip_def = defaults.get("tipologia_pagamento", "MENSILE")
         tipologia = st.selectbox("Tipologia pagamento", TIPOLOGIE_PAGAMENTO, index=TIPOLOGIE_PAGAMENTO.index(tip_def) if tip_def in TIPOLOGIE_PAGAMENTO else 0, key=k("tipologia"))
+        lezioni_base_auto_form = lezioni_settimanali_base_da_pacchetto(pacchetto)
+        if lezioni_base_auto_form > 0:
+            numero_lezioni_default_form = lezioni_base_auto_form
+        else:
+            numero_lezioni_default_form = int(defaults.get("numero_lezioni", 0) or 0)
         numero_lezioni = st.number_input("Numero lezioni totali", min_value=0, step=1, value=int(defaults.get("numero_lezioni") or 0), key=k("num_lez"))
         lezioni_utilizzate = st.number_input("Lezioni già utilizzate", min_value=0, step=1, value=int(defaults.get("lezioni_utilizzate") or 0), key=k("lez_usate"))
 
@@ -3870,7 +4037,7 @@ def cliente_form(prefix, defaults=None, unique_suffix=""):
         "pacchetto": pacchetto,
         "tipologia_abbonamento": tipologia_abbonamento,
         "tipologia_pagamento": tipologia,
-        "numero_lezioni": int(numero_lezioni),
+        "numero_lezioni": int(lezioni_base_auto_form if lezioni_base_auto_form > 0 else numero_lezioni),
         "lezioni_utilizzate": int(lezioni_utilizzate),
         "importo": float(importo),
         "importo_pagato": float(importo_pagato),
@@ -4840,7 +5007,7 @@ def cliente_weekly_present_lessons(cliente_id, data_ref=None):
     return len(tmp), set(tmp["data_lezione"].astype(str).tolist())
 
 
-def contatori_reali_robust_cliente(cliente_id, pacchetto=None, data_ref=None):
+def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
     Conta reale robusto:
     - usa lezioni PRESENTE se presenti;
@@ -4894,7 +5061,7 @@ def ricalcola_contatori_settimanali_clienti_robust(data_ref=None):
         try:
             cid = int(c.get("id"))
             pac = c.get("pacchetto", "")
-            totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref)
+            totale, usate, residue, extra = contatori_cumulativi_cliente(cid, pac, data_ref)
 
             # aggiorno tutti: standard e personalizzati, così la tabella resta coerente
             ok_update, _msg_update = safe_update_cliente_contatori(cid, totale, usate, residue)
@@ -4908,7 +5075,7 @@ def ricalcola_contatori_settimanali_clienti_robust(data_ref=None):
     return {"aggiornati": updated, "saltati": skipped}
 
 
-def dataframe_clienti_con_contatori_reali_robust(df, data_ref=None):
+def dataframe_clienti_con_contatori_cumulativi(df, data_ref=None):
     if df.empty:
         return df
 
@@ -4921,7 +5088,7 @@ def dataframe_clienti_con_contatori_reali_robust(df, data_ref=None):
         try:
             cid = int(row.get("id"))
             pac = row.get("pacchetto", "")
-            totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref or date.today())
+            totale, usate, residue, extra = contatori_cumulativi_cliente(cid, pac, data_ref or date.today())
             out.at[idx, "numero_lezioni"] = totale
             out.at[idx, "lezioni_utilizzate"] = usate
             out.at[idx, "lezioni_residue"] = residue
@@ -4950,7 +5117,7 @@ def render_diagnostica_contatori_cliente():
 
     lez_count, lez_days = cliente_weekly_present_lessons(cid, data_ref)
     access_days = cliente_weekly_access_dates(cid, data_ref)
-    totale, usate, residue, extra = contatori_reali_robust_cliente(cid, pac, data_ref)
+    totale, usate, residue, extra = contatori_cumulativi_cliente(cid, pac, data_ref)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Totale settimana", totale)
@@ -4970,7 +5137,7 @@ def render_diagnostica_contatori_cliente():
             st.error(msg_update)
 
 
-def contatori_reali_cliente_da_lezioni(cliente_id, pacchetto=None, data_ref=None):
+def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
     Fonte vera: tabella lezioni.
     Per pacchetti Luxury/Gold/VIP/Coaching:
@@ -5031,7 +5198,7 @@ def contatori_reali_cliente_da_lezioni(cliente_id, pacchetto=None, data_ref=None
     return totale, usate, residue, extra
 
 
-def dataframe_clienti_con_contatori_reali_robust(df):
+def dataframe_clienti_con_contatori_cumulativi(df):
     """
     Aggiorna la tabella visualizzata dei clienti con contatori reali da calendario.
     """
@@ -5047,7 +5214,7 @@ def dataframe_clienti_con_contatori_reali_robust(df):
         try:
             cid = int(row.get("id"))
             pac = row.get("pacchetto", "")
-            totale, usate, residue, extra = contatori_reali_cliente_da_lezioni(cid, pac)
+            totale, usate, residue, extra = contatori_cumulativi_cliente(cid, pac)
             out.at[idx, "numero_lezioni"] = totale
             out.at[idx, "lezioni_utilizzate"] = usate
             out.at[idx, "lezioni_residue"] = residue
@@ -5167,7 +5334,7 @@ def accesso_alerts_for_row(row):
     # lezioni residue settimanali
     try:
         data_ref = row.get("data_accesso") or date.today()
-        totale, usate, residue, extra = contatori_reali_robust_cliente(int(cid), cliente.get("pacchetto", ""), parse_date(data_ref, date.today()))
+        totale, usate, residue, extra = contatori_cumulativi_cliente(int(cid), cliente.get("pacchetto", ""), parse_date(data_ref, date.today()))
         if is_weekly_quota_package_app(cliente.get("pacchetto", "")):
             if residue <= 0:
                 alerts.append(("ALTA", "Lezioni settimanali esaurite", f"{nome_cliente}: {usate}/{totale} lezioni usate questa settimana."))
@@ -5495,7 +5662,7 @@ def valuta_stato_cliente_reception(cliente_id, accesso_row=None):
         data_ref = date.today()
         if accesso_row is not None and accesso_row.get("data_accesso"):
             data_ref = parse_date(accesso_row.get("data_accesso"), date.today())
-        totale, usate, residue, extra = contatori_reali_robust_cliente(int(cliente_id), cliente.get("pacchetto", ""), data_ref)
+        totale, usate, residue, extra = contatori_cumulativi_cliente(int(cliente_id), cliente.get("pacchetto", ""), data_ref)
         if is_weekly_quota_package_app(cliente.get("pacchetto", "")):
             if extra > 0:
                 messaggi_alta.append(f"Accessi extra oltre quota settimanale: {extra}.")
@@ -5591,7 +5758,7 @@ def render_cliente_reception_card(accesso):
         cliente = get_cliente(int(cid))
         if cliente:
             try:
-                totale, usate, residue, extra = contatori_reali_robust_cliente(int(cid), cliente.get("pacchetto", ""), parse_date(data_acc, date.today()))
+                totale, usate, residue, extra = contatori_cumulativi_cliente(int(cid), cliente.get("pacchetto", ""), parse_date(data_acc, date.today()))
             except Exception:
                 totale = cliente.get("numero_lezioni", 0)
                 usate = cliente.get("lezioni_utilizzate", 0)
@@ -6361,6 +6528,11 @@ def main():
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
+
+        if is_admin():
+            with st.expander("📈 Ricalcolo lezioni cumulative"):
+                render_lezioni_cumulative_admin()
+
 
         if is_admin():
             with st.expander("🏷️ White-label / Azienda"):
