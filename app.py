@@ -2308,6 +2308,123 @@ def insert_lezione(cliente_id, data_lezione, ora_inizio, ora_fine, trainer, stat
     return True, "Lezione/prenotazione creata correttamente."
 
 
+
+def storico_presenze_cliente(cliente_id):
+    """
+    Storico presenze del singolo cliente.
+    Usa la tabella lezioni filtrata per cliente e stato PRESENTE.
+    """
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return pd.DataFrame()
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp["stato_norm"] = tmp["stato"].astype(str).str.upper()
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["stato_norm"] == "PRESENTE")
+        ].sort_values(["data_lezione", "ora_inizio"], ascending=[False, False])
+        return tmp
+    except Exception:
+        return pd.DataFrame()
+
+
+def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note=""):
+    """
+    Inserisce una presenza manuale cliente.
+    Salva su lezioni con stato PRESENTE, così aggiorna anche contatori e calendario.
+    """
+    cliente = get_cliente(int(cliente_id))
+    if not cliente:
+        return False, "Cliente non trovato."
+
+    note_finale = f"Presenza manuale | Tipo attività: {tipo_attivita}"
+    if note:
+        note_finale += f" | Note: {note}"
+
+    try:
+        ok, msg = insert_lezione(
+            cliente_id=int(cliente_id),
+            data_lezione=data_presenza,
+            ora_inizio=str(ora_inizio),
+            ora_fine=str(ora_fine),
+            trainer=trainer,
+            stato="PRESENTE",
+            note=note_finale,
+        )
+        if ok:
+            try:
+                totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
+                safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
+            except Exception:
+                pass
+            insert_history(
+                int(cliente_id),
+                "presenza manuale",
+                "",
+                f"{format_date_it(data_presenza)} {ora_inizio}-{ora_fine}",
+                f"{tipo_attivita} | Trainer: {trainer} | {note}"
+            )
+        return ok, "Presenza registrata correttamente." if ok else msg
+    except Exception as e:
+        return False, f"Errore registrazione presenza: {e}"
+
+
+def render_presenze_cliente_section(cliente_id):
+    st.markdown("### Presenze cliente")
+    st.caption("Registra una presenza manuale per questo cliente e consulta lo storico personale.")
+
+    with st.expander("➕ Registra presenza cliente", expanded=False):
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            data_presenza = st.date_input("Data presenza", value=date.today(), format="DD/MM/YYYY", key=f"pres_data_{cliente_id}")
+        with p2:
+            ora_inizio = st.time_input("Ora inizio", value=datetime.strptime("09:00", "%H:%M").time(), key=f"pres_ora_ini_{cliente_id}")
+        with p3:
+            ora_fine = st.time_input("Ora fine", value=datetime.strptime("10:00", "%H:%M").time(), key=f"pres_ora_fine_{cliente_id}")
+
+        p4, p5 = st.columns(2)
+        with p4:
+            tipo_attivita = st.selectbox(
+                "Tipo attività",
+                ["LEZIONE", "COACHING IN SEDE", "RECUPERO", "ACCESSO EXTRA", "ALTRO"],
+                key=f"pres_tipo_{cliente_id}"
+            )
+        with p5:
+            try:
+                default_trainer = get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+            except Exception:
+                default_trainer = "Vincenzo Crinisio"
+            trainer = st.text_input("Trainer / riferimento", value=default_trainer, key=f"pres_trainer_{cliente_id}")
+
+        note_presenza = st.text_area("Note presenza", key=f"pres_note_{cliente_id}")
+
+        if st.button("✅ Salva presenza", key=f"save_pres_{cliente_id}"):
+            ok, msg = registra_presenza_cliente(
+                cliente_id=cliente_id,
+                data_presenza=data_presenza,
+                ora_inizio=ora_inizio.strftime("%H:%M"),
+                ora_fine=ora_fine.strftime("%H:%M"),
+                tipo_attivita=tipo_attivita,
+                trainer=trainer,
+                note=note_presenza,
+            )
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    with st.expander("📋 Storico presenze del cliente", expanded=True):
+        storico = storico_presenze_cliente(cliente_id)
+        if storico.empty:
+            st.info("Nessuna presenza registrata per questo cliente.")
+        else:
+            cols = ["data_lezione_it", "ora_inizio", "ora_fine", "trainer", "stato", "note", "creata_da", "created_at"]
+            st.dataframe(storico[[c for c in cols if c in storico.columns]], use_container_width=True, hide_index=True)
+
+
 def update_stato_lezione(lezione_id, nuovo_stato):
     sb = get_supabase()
     data = sb.table("lezioni").select("*").eq("id", int(lezione_id)).limit(1).execute().data
@@ -6170,6 +6287,9 @@ def main():
                 incrementa_lezioni(cliente_id, 1)
                 st.success("Lezione aggiornata.")
                 st.rerun()
+
+            st.markdown("---")
+            render_presenze_cliente_section(cliente_id)
 
             st.markdown("---")
             with st.form(f"modifica_cliente_{cliente_id}"):
