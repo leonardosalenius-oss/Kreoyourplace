@@ -831,7 +831,7 @@ def cliente_area_view(cliente):
                     f"""
                     <div class="doc-premium-card">
                         <b>📄 {r.get('tipo_documento','')}</b><br>
-                        File: {pdf_icon_link(r.get('public_url'), r.get('nome_file','PDF'))}<br>
+                        File: {pdf_icon_link(document_url_for_display(r), r.get('nome_file','PDF'))}<br>
                         <span style="opacity:.75;">Data caricamento: {r.get('created_at_it','')}</span>
                     </div>
                     """,
@@ -2426,6 +2426,146 @@ def build_staff_dashboard(df_clienti):
 
 
 
+
+DOCUMENTI_BUCKET_PRIVATO = "documenti_privati"
+ASSETS_BUCKET_PUBBLICO = "assets_pubblici"
+
+
+def signed_document_url(storage_path, expires_in=300):
+    """
+    Crea link temporaneo per documenti privati.
+    Durata default: 5 minuti.
+    """
+    if not storage_path:
+        return ""
+    try:
+        sb = get_supabase()
+        res = sb.storage.from_(DOCUMENTI_BUCKET_PRIVATO).create_signed_url(storage_path, expires_in)
+        if isinstance(res, dict):
+            return res.get("signedURL") or res.get("signedUrl") or res.get("url") or ""
+        return str(res)
+    except Exception:
+        return ""
+
+
+def document_url_for_display(row, expires_in=300):
+    """
+    Compatibilità:
+    - nuovi documenti: storage_path su bucket privato
+    - vecchi documenti: public_url su vecchio bucket documenti
+    """
+    storage_path = row.get("storage_path") if hasattr(row, "get") else ""
+    url = signed_document_url(storage_path, expires_in)
+    if url:
+        return url
+    return row.get("public_url", "") if hasattr(row, "get") else ""
+
+
+def get_azienda_config():
+    """
+    Configurazione white-label.
+    Usa tabella azienda_config se presente, altrimenti fallback KREO.
+    """
+    try:
+        sb = get_supabase()
+        data = sb.table("azienda_config").select("*").order("id", desc=True).limit(1).execute().data
+        if data:
+            return data[0]
+    except Exception:
+        pass
+
+    return {
+        "nome_gestionale": "Gestionale Clienti",
+        "nome_brand": "KREO Your Place",
+        "ragione_sociale": "Genesis SRLS",
+        "logo_url": "",
+    }
+
+
+def render_white_label_admin():
+    st.subheader("White-label gestionale")
+    st.caption("Qui prepariamo il gestionale per essere personalizzabile su aziende/clienti diversi.")
+
+    cfg = get_azienda_config()
+
+    nome_gestionale = st.text_input("Nome gestionale", value=cfg.get("nome_gestionale", "Gestionale Clienti"))
+    nome_brand = st.text_input("Nome brand/club", value=cfg.get("nome_brand", "KREO Your Place"))
+    ragione_sociale = st.text_input("Ragione sociale", value=cfg.get("ragione_sociale", "Genesis SRLS"))
+    sede_legale = st.text_input("Sede legale", value=cfg.get("sede_legale", ""))
+    sede_operativa = st.text_input("Sede operativa", value=cfg.get("sede_operativa", ""))
+    partita_iva = st.text_input("Partita IVA", value=cfg.get("partita_iva", ""))
+    email = st.text_input("Email aziendale", value=cfg.get("email", ""))
+    telefono = st.text_input("Telefono", value=cfg.get("telefono", ""))
+
+    logo_file = st.file_uploader("Logo azienda/club", type=["png", "jpg", "jpeg", "webp"], key="wl_logo_upload")
+    logo_url = cfg.get("logo_url", "")
+
+    if logo_file is not None:
+        try:
+            sb = get_supabase()
+            safe_name = logo_file.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+            path = f"loghi/{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
+            content_type = getattr(logo_file, "type", None) or "image/png"
+            sb.storage.from_(ASSETS_BUCKET_PUBBLICO).upload(
+                path,
+                logo_file.getvalue(),
+                {"content-type": content_type, "x-upsert": "true"}
+            )
+            logo_url = sb.storage.from_(ASSETS_BUCKET_PUBBLICO).get_public_url(path)
+            st.success("Logo caricato.")
+        except Exception as e:
+            st.error(f"Errore upload logo: {e}")
+
+    if logo_url:
+        st.image(logo_url, width=220)
+
+    if st.button("💾 Salva configurazione white-label", key="save_wl_config"):
+        payload = {
+            "nome_gestionale": nome_gestionale,
+            "nome_brand": nome_brand,
+            "ragione_sociale": ragione_sociale,
+            "sede_legale": sede_legale,
+            "sede_operativa": sede_operativa,
+            "partita_iva": partita_iva,
+            "email": email,
+            "telefono": telefono,
+            "logo_url": logo_url,
+            "updated_at": now_iso(),
+        }
+        try:
+            sb = get_supabase()
+            # Se esiste un record lo aggiorno, altrimenti inserisco
+            existing = sb.table("azienda_config").select("id").order("id", desc=True).limit(1).execute().data
+            if existing:
+                sb.table("azienda_config").update(payload).eq("id", int(existing[0]["id"])).execute()
+            else:
+                payload["created_at"] = now_iso()
+                sb.table("azienda_config").insert(payload).execute()
+            st.success("Configurazione salvata.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Serve creare la tabella azienda_config oppure errore Supabase: {e}")
+            st.code(SQL_AZIENDA_CONFIG)
+
+
+SQL_AZIENDA_CONFIG = """
+create table if not exists public.azienda_config (
+  id bigint generated by default as identity primary key,
+  nome_gestionale text,
+  nome_brand text,
+  ragione_sociale text,
+  sede_legale text,
+  sede_operativa text,
+  partita_iva text,
+  email text,
+  telefono text,
+  logo_url text,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone
+);
+"""
+
+
 def load_documenti(cliente_id=None):
     sb = get_supabase()
     q = sb.table("documenti_cliente").select("*").order("id", desc=True)
@@ -2456,7 +2596,7 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
     path = f"cliente_{cliente_id}/{tipo_documento.lower().replace(' ', '_')}_{timestamp}_{safe_name}"
 
     try:
-        sb.storage.from_("documenti").upload(
+        sb.storage.from_(DOCUMENTI_BUCKET_PRIVATO).upload(
             path,
             file.getvalue(),
             {"content-type": "application/pdf", "x-upsert": "true"}
@@ -2464,7 +2604,7 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
     except Exception as e:
         return False, f"Errore upload documento: {e}"
 
-    public_url = sb.storage.from_("documenti").get_public_url(path)
+    public_url = ""  # documento privato: link generato temporaneamente
 
     sb.table("documenti_cliente").insert({
         "cliente_id": int(cliente_id),
@@ -2511,7 +2651,7 @@ def delete_documento(documento_id):
 
     try:
         if storage_path:
-            sb.storage.from_("documenti").remove([storage_path])
+            sb.storage.from_(DOCUMENTI_BUCKET_PRIVATO).remove([storage_path])
     except Exception:
         # Se il file non viene trovato nello storage, elimino comunque il record dal database.
         pass
@@ -5301,6 +5441,298 @@ def render_realtime_tornello_monitor():
     """, unsafe_allow_html=True)
 
 
+
+def valuta_stato_cliente_reception(cliente_id, accesso_row=None):
+    """
+    Restituisce stato operativo reception:
+    OK / DA VERIFICARE / NON IN REGOLA / BADGE SCONOSCIUTO
+    """
+    if cliente_id in [None, "", "None"] or pd.isna(cliente_id):
+        return {
+            "stato": "BADGE SCONOSCIUTO",
+            "colore": "#111111",
+            "emoji": "⚫",
+            "messaggi": ["Badge non associato a cliente KREO."],
+            "priorita": "ALTA",
+        }
+
+    cliente = get_cliente(int(cliente_id))
+    if not cliente:
+        return {
+            "stato": "DA VERIFICARE",
+            "colore": "#f59e0b",
+            "emoji": "🟡",
+            "messaggi": ["Cliente non trovato in anagrafica."],
+            "priorita": "MEDIA",
+        }
+
+    messaggi_alta = []
+    messaggi_media = []
+
+    # Certificato
+    cert = str(cliente.get("certificato_medico", cliente.get("certificato_medico_consegnato", "")) or "").upper()
+    if cert not in ["SI", "SÌ", "YES", "OK"]:
+        messaggi_alta.append("Certificato medico mancante/non consegnato.")
+
+    # Stato cliente
+    stato_cliente = str(cliente.get("stato_cliente", "ATTIVO") or "").upper()
+    if stato_cliente and stato_cliente != "ATTIVO":
+        messaggi_alta.append(f"Cliente non attivo: {stato_cliente}.")
+
+    # Residuo
+    try:
+        importo = float(cliente.get("importo") or 0)
+        pagato = float(cliente.get("importo_pagato") or 0)
+        residuo = float(cliente.get("residuo") or max(importo - pagato, 0))
+    except Exception:
+        residuo = 0
+
+    if residuo > 0.01:
+        messaggi_media.append(f"Residuo economico aperto: € {residuo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+
+    # Lezioni settimanali
+    try:
+        data_ref = date.today()
+        if accesso_row is not None and accesso_row.get("data_accesso"):
+            data_ref = parse_date(accesso_row.get("data_accesso"), date.today())
+        totale, usate, residue, extra = contatori_reali_robust_cliente(int(cliente_id), cliente.get("pacchetto", ""), data_ref)
+        if is_weekly_quota_package_app(cliente.get("pacchetto", "")):
+            if extra > 0:
+                messaggi_alta.append(f"Accessi extra oltre quota settimanale: {extra}.")
+            elif residue <= 0:
+                messaggi_media.append(f"Lezioni settimanali esaurite: {usate}/{totale}.")
+    except Exception:
+        pass
+
+    # Stato accesso tornello
+    if accesso_row is not None:
+        stato_accesso = str(accesso_row.get("stato_accesso", "") or "").upper()
+        if "NEGATO" in stato_accesso or "VERIFICARE" in stato_accesso:
+            messaggi_alta.append(f"Accesso tornello da verificare: {accesso_row.get('stato_accesso')}.")
+
+    if messaggi_alta:
+        return {
+            "stato": "NON IN REGOLA",
+            "colore": "#dc2626",
+            "emoji": "🔴",
+            "messaggi": messaggi_alta + messaggi_media,
+            "priorita": "ALTA",
+        }
+
+    if messaggi_media:
+        return {
+            "stato": "DA VERIFICARE",
+            "colore": "#f59e0b",
+            "emoji": "🟡",
+            "messaggi": messaggi_media,
+            "priorita": "MEDIA",
+        }
+
+    return {
+        "stato": "OK",
+        "colore": "#16a34a",
+        "emoji": "🟢",
+        "messaggi": ["Cliente in regola."],
+        "priorita": "OK",
+    }
+
+
+def prossima_lezione_cliente(cliente_id):
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return None
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["data_lezione"].astype(str) >= str(date.today())) &
+            (~tmp["stato"].astype(str).str.upper().isin(["ANNULLATA", "CANCELLATA"]))
+        ].sort_values(["data_lezione", "ora_inizio"])
+        if tmp.empty:
+            return None
+        return tmp.iloc[0].to_dict()
+    except Exception:
+        return None
+
+
+def render_cliente_reception_card(accesso):
+    cid = accesso.get("cliente_id")
+    cliente_label = get_accesso_cliente_label(accesso)
+    stato = valuta_stato_cliente_reception(cid, accesso)
+
+    badge = accesso.get("badge_uid", "")
+    ora = str(accesso.get("ora_accesso", ""))[:8]
+    data_acc = accesso.get("data_accesso", "")
+    stato_accesso = accesso.get("stato_accesso", "")
+
+    st.markdown(f"""
+    <div style="border:3px solid {stato['colore']}; border-radius:24px; padding:26px; background:#fff; margin:12px 0 20px 0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:20px;">
+            <div>
+                <div style="font-size:18px; font-weight:900; color:{stato['colore']};">{stato['emoji']} {stato['stato']}</div>
+                <div style="font-size:42px; font-weight:950; color:#111; margin-top:6px;">{cliente_label}</div>
+                <div style="font-size:18px; color:#444; margin-top:8px;">Badge: <b>{badge}</b> · Accesso: <b>{data_acc} {ora}</b> · Stato: <b>{stato_accesso}</b></div>
+            </div>
+            <div style="font-size:70px;">{stato['emoji']}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    for msg in stato["messaggi"]:
+        if stato["priorita"] == "ALTA":
+            st.error("🚨 " + msg)
+        elif stato["priorita"] == "MEDIA":
+            st.warning("⚠️ " + msg)
+        else:
+            st.success("✅ " + msg)
+
+    if cid not in [None, "", "None"] and not pd.isna(cid):
+        cliente = get_cliente(int(cid))
+        if cliente:
+            try:
+                totale, usate, residue, extra = contatori_reali_robust_cliente(int(cid), cliente.get("pacchetto", ""), parse_date(data_acc, date.today()))
+            except Exception:
+                totale = cliente.get("numero_lezioni", 0)
+                usate = cliente.get("lezioni_utilizzate", 0)
+                residue = cliente.get("lezioni_residue", 0)
+                extra = 0
+
+            try:
+                importo = float(cliente.get("importo") or 0)
+                pagato = float(cliente.get("importo_pagato") or 0)
+                residuo = float(cliente.get("residuo") or max(importo - pagato, 0))
+            except Exception:
+                residuo = 0
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Pacchetto", str(cliente.get("pacchetto", ""))[:22])
+            c2.metric("Lezioni", f"{usate}/{totale}", f"Residue {residue}")
+            c3.metric("Residuo", f"€ {residuo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            c4.metric("Certificato", cliente.get("certificato_medico", "NO"))
+
+            prox = prossima_lezione_cliente(int(cid))
+            if prox:
+                st.info(f"Prossima lezione: {prox.get('data_lezione')} {prox.get('ora_inizio', '')}-{prox.get('ora_fine', '')} · {prox.get('stato', '')}")
+
+            with st.expander("⚡ Azioni rapide reception"):
+                a1, a2, a3, a4 = st.columns(4)
+
+                with a1:
+                    if st.button("✅ Autorizza extra", key=f"auth_extra_{accesso.get('id')}"):
+                        try:
+                            sb = get_supabase()
+                            sb.table("accessi_tornello").update({
+                                "stato_accesso": "AUTORIZZATO_EXTRA_DA_RECEPTION",
+                                "note": (str(accesso.get("note") or "") + " | Extra autorizzato da reception").strip(" |"),
+                            }).eq("id", int(accesso.get("id"))).execute()
+                            st.success("Accesso extra autorizzato.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore autorizzazione: {e}")
+
+                with a2:
+                    if st.button("📌 Segna presente", key=f"present_{accesso.get('id')}"):
+                        try:
+                            sb = get_supabase()
+                            today_lez = prossima_lezione_cliente(int(cid))
+                            if today_lez:
+                                sb.table("lezioni").update({
+                                    "stato": "PRESENTE",
+                                    "updated_at": now_iso(),
+                                    "note": (str(today_lez.get("note") or "") + " | Segnata presente da reception").strip(" |"),
+                                }).eq("id", int(today_lez.get("id"))).execute()
+                                st.success("Lezione segnata PRESENTE.")
+                                st.rerun()
+                            else:
+                                st.warning("Nessuna lezione trovata da segnare.")
+                        except Exception as e:
+                            st.error(f"Errore presenza: {e}")
+
+                with a3:
+                    pay_amount = st.number_input("Incasso rapido €", min_value=0.0, value=0.0, step=10.0, key=f"pay_amount_{accesso.get('id')}")
+                    if st.button("💳 Registra incasso", key=f"pay_btn_{accesso.get('id')}") and pay_amount > 0:
+                        try:
+                            sb = get_supabase()
+                            pagamento = {
+                                "cliente_id": int(cid),
+                                "data_pagamento": str(date.today()),
+                                "importo": float(pay_amount),
+                                "metodo_pagamento": "CONTANTI",
+                                "registrato_da": current_user_name(),
+                                "note": "Incasso rapido da Console Reception",
+                                "created_at": now_iso(),
+                            }
+                            sb.table("pagamenti").insert(pagamento).execute()
+                            nuovo_pagato = float(cliente.get("importo_pagato") or 0) + float(pay_amount)
+                            sb.table("clienti").update({
+                                "importo_pagato": nuovo_pagato,
+                                "updated_at": now_iso(),
+                            }).eq("id", int(cid)).execute()
+                            st.success("Incasso registrato.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore incasso: {e}")
+
+                with a4:
+                    if st.button("📄 Certificato consegnato", key=f"cert_ok_{accesso.get('id')}"):
+                        try:
+                            sb = get_supabase()
+                            sb.table("clienti").update({
+                                "certificato_medico": "SI",
+                                "updated_at": now_iso(),
+                            }).eq("id", int(cid)).execute()
+                            st.success("Certificato aggiornato.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore certificato: {e}")
+    else:
+        st.warning("Badge non associato. Vai nella sezione 'Associa badge smart' per collegarlo a un cliente.")
+
+
+def render_console_reception_premium():
+    st.header("Console Reception Premium")
+    st.caption("Pannello operativo unico per accessi, alert e azioni rapide.")
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        refresh_sec = st.number_input("Refresh", min_value=2, max_value=30, value=3, step=1, key="reception_refresh")
+    with c2:
+        sound_mode = st.selectbox("Suono", ["Solo alert", "Sempre", "Muto"], key="reception_sound")
+    with c3:
+        st.info("Lascia questa schermata aperta sul PC reception.")
+
+    latest = get_latest_accesso_live()
+
+    if not latest:
+        st.warning("Nessun accesso rilevato.")
+    else:
+        stato = valuta_stato_cliente_reception(latest.get("cliente_id"), latest)
+        if sound_mode == "Sempre":
+            if stato["priorita"] == "OK":
+                st.components.v1.html(kreo_ok_beep_html(), height=0)
+            else:
+                st.components.v1.html(kreo_alarm_beep_html(), height=0)
+        elif sound_mode == "Solo alert" and stato["priorita"] in ["ALTA", "MEDIA"]:
+            st.components.v1.html(kreo_alarm_beep_html(), height=0)
+
+        render_cliente_reception_card(latest)
+
+    st.markdown("### Ultimi accessi")
+    recent = get_recent_accessi(180)
+    if not recent.empty:
+        cols = ["data_accesso", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "note"]
+        st.dataframe(recent[[c for c in cols if c in recent.columns]].head(20), use_container_width=True, hide_index=True)
+
+    st.markdown(f"""
+    <script>
+    setTimeout(function(){{
+        window.location.reload();
+    }}, {int(refresh_sec) * 1000});
+    </script>
+    """, unsafe_allow_html=True)
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -5315,7 +5747,7 @@ def render_accessi_tornello_page():
         with col_sync2:
             st.caption("Usa questo pulsante se un badge è associato ma qualche nuovo accesso appare ancora con cliente None.")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori", "Alert live", "Live dashboard", "Monitor live"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs(["Registro accessi", "Badge clienti", "Check-in manuale/test", "Dashboard accessi", "Associa badge smart", "Recupero retroattivo", "Ricalcolo lezioni", "Diagnostica contatori", "Alert live", "Live dashboard", "Monitor live", "Console reception"])
 
     with tab1:
         st.subheader("Registro accessi")
@@ -5478,6 +5910,9 @@ def render_accessi_tornello_page():
 
     with tab11:
         render_realtime_tornello_monitor()
+
+    with tab12:
+        render_console_reception_premium()
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
@@ -5643,7 +6078,7 @@ def main():
                                     <b>{r.get('cliente','')}</b><br>
                                     ID documento: <b>{r.get('id','')}</b><br>
                                     Tipo: <b>{r.get('tipo_documento','')}</b><br>
-                                    File: {pdf_icon_link(r.get('public_url'), r.get('nome_file','PDF'))}<br>
+                                    File: {pdf_icon_link(document_url_for_display(r), r.get('nome_file','PDF'))}<br>
                                     Caricato da: {r.get('caricato_da','')}<br>
                                     Data: {r.get('created_at_it','')}<br>
                                     Note: {r.get('note','')}
