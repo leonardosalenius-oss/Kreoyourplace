@@ -17,8 +17,7 @@
 # Unauthorized redistribution or reproduction is prohibited.
 # ============================================================
 
-PLATFORM_NAME = "KREO Platform"
-PLATFORM_VERSION = "v35.4 Production Test"
+
 PLATFORM_AUTHOR = "Pentti Salenius"
 PLATFORM_COPYRIGHT = "Developed by Pentti Salenius © 2026"
 
@@ -7427,13 +7426,13 @@ def inject_kreo_luxury_sidebar_style():
 
         @media (max-width: 900px) {
             .pentti-footer {
-                left: 16px;
-                right: 16px;
-                bottom: 70px;
-                text-align: center;
-                font-size: 11px;
+    position: fixed;
+    bottom: 58px;
+    right: 22px;
+    z-index: 999999;
+    background: #050505;
+    color: #FFFFFF;
             }
-        }
         </style>
         <div class="pentti-footer">
             <span style="color:#FFFFFF !important;">Developed by Pentti Salenius © 2026</span>
