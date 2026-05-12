@@ -2334,16 +2334,31 @@ def storico_presenze_cliente(cliente_id):
 def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
     """
     Dopo una presenza di tipo LEZIONE:
-    - ricalcola totale/usate/residue
-    - aggiorna anagrafica cliente
-    Funziona per tutti i pacchetti.
+    - pacchetti automatici: ricalcola da presenze reali
+    - pacchetto personalizzato: incrementa manualmente lezioni_utilizzate di 1
     """
     try:
+        cliente = get_cliente(int(cliente_id))
+        if not cliente:
+            return False
+
+        sb = get_supabase()
+        if not is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")):
+            totale = int(float(cliente.get("numero_lezioni") or 0))
+            usate_old = int(float(cliente.get("lezioni_utilizzate") or 0))
+            usate = usate_old + 1
+            residue = max(totale - usate, 0)
+            sb.table("clienti").update({
+                "lezioni_utilizzate": int(usate),
+                "lezioni_residue": int(residue),
+                "updated_at": now_iso(),
+            }).eq("id", int(cliente_id)).execute()
+            return True
+
         totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
         if "safe_update_cliente_contatori" in globals():
             safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
         else:
-            sb = get_supabase()
             sb.table("clienti").update({
                 "numero_lezioni": int(totale),
                 "lezioni_utilizzate": int(usate),
@@ -2353,7 +2368,6 @@ def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
         return True
     except Exception:
         return False
-
 
 def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note=""):
     """
@@ -2414,16 +2428,29 @@ def elimina_presenza_lezione_cliente(lezione_id):
         sb.table("lezioni").delete().eq("id", int(lezione_id)).execute()
 
         try:
-            totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
-            if "safe_update_cliente_contatori" in globals():
-                safe_update_cliente_contatori(cliente_id, totale, usate, residue)
-            else:
+            cliente = get_cliente(cliente_id)
+            # personalizzato_delete_fix_v45
+            if cliente and not is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")) and str(lezione.get("stato","")).upper() == "PRESENTE":
+                totale = int(float(cliente.get("numero_lezioni") or 0))
+                usate_old = int(float(cliente.get("lezioni_utilizzate") or 0))
+                usate = max(usate_old - 1, 0)
+                residue = max(totale - usate, 0)
                 sb.table("clienti").update({
-                    "numero_lezioni": int(totale),
                     "lezioni_utilizzate": int(usate),
                     "lezioni_residue": int(residue),
                     "updated_at": now_iso(),
                 }).eq("id", cliente_id).execute()
+            else:
+                totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
+                if "safe_update_cliente_contatori" in globals():
+                    safe_update_cliente_contatori(cliente_id, totale, usate, residue)
+                else:
+                    sb.table("clienti").update({
+                        "numero_lezioni": int(totale),
+                        "lezioni_utilizzate": int(usate),
+                        "lezioni_residue": int(residue),
+                        "updated_at": now_iso(),
+                    }).eq("id", cliente_id).execute()
         except Exception:
             pass
 
@@ -4254,6 +4281,8 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         return 0, 0, 0
 
     pac = cliente.get("pacchetto", "")
+
+    # Pacchetti automatici: maturano 3 lezioni a settimana cumulative.
     if is_pacchetto_settimanale_kreo(pac):
         totale = lezioni_maturate_cumulative(cliente, data_ref or date.today())
         data_da = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione")
@@ -4261,26 +4290,49 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         residue = max(int(totale) - int(usate), 0)
         return int(totale), int(usate), int(residue)
 
+    # Pacchetto personalizzato: NON ricalcolare automaticamente.
+    # I contatori restano quelli salvati manualmente dallo staff.
     try:
         totale = int(float(cliente.get("numero_lezioni") or cliente.get("numero_lezioni_totali") or 0))
     except Exception:
         totale = 0
-    usate = lezioni_usate_totali_cliente(cliente_id)
-    residue = max(totale - usate, 0)
+    try:
+        usate = int(float(cliente.get("lezioni_utilizzate") or 0))
+    except Exception:
+        usate = 0
+    try:
+        residue_stored = cliente.get("lezioni_residue")
+        if residue_stored not in [None, ""]:
+            residue = int(float(residue_stored))
+        else:
+            residue = max(totale - usate, 0)
+    except Exception:
+        residue = max(totale - usate, 0)
+
     return int(totale), int(usate), int(residue)
 
 
 def aggiorna_contatori_cumulativi_clienti():
+    """
+    Ricalcola SOLO i pacchetti automatici.
+    I pacchetti personalizzati non vengono mai toccati da questo ricalcolo.
+    """
     sb = get_supabase()
     clienti = load_clienti()
     if clienti.empty:
-        return {"aggiornati": 0, "saltati": 0}
+        return {"aggiornati": 0, "saltati": 0, "personalizzati_ignorati": 0}
 
     aggiornati = 0
     saltati = 0
+    personalizzati_ignorati = 0
 
     for _, c in clienti.iterrows():
         try:
+            pac = c.get("pacchetto", "")
+            if not is_pacchetto_settimanale_kreo(pac):
+                personalizzati_ignorati += 1
+                continue
+
             cid = int(c.get("id"))
             totale, usate, residue = contatori_cumulativi_cliente(cid)
             ok_update, _ = safe_update_cliente_contatori(cid, totale, usate, residue) if "safe_update_cliente_contatori" in globals() else (False, "")
@@ -4295,7 +4347,7 @@ def aggiorna_contatori_cumulativi_clienti():
         except Exception:
             saltati += 1
 
-    return {"aggiornati": aggiornati, "saltati": saltati}
+    return {"aggiornati": aggiornati, "saltati": saltati, "personalizzati_ignorati": personalizzati_ignorati}
 
 
 def dataframe_clienti_con_contatori_cumulativi(df):
@@ -4332,7 +4384,7 @@ def render_lezioni_cumulative_admin():
 
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
         res = aggiorna_contatori_cumulativi_clienti()
-        st.success(f"Ricalcolo completato. Aggiornati: {res['aggiornati']} | saltati: {res['saltati']}")
+        st.success(f"Ricalcolo completato. Automatici aggiornati: {res['aggiornati']} | personalizzati ignorati: {res.get('personalizzati_ignorati', 0)} | saltati: {res['saltati']}")
         st.rerun()
 
 
@@ -6973,11 +7025,6 @@ def main():
         if is_admin():
             with st.expander("📆 Gestione scadenze abbonamento"):
                 render_scadenze_abbonamento_admin()
-
-
-        if is_admin():
-            with st.expander("🔄 Ricalcolo rapido settimanale"):
-                render_recalcolo_settimanale_widget()
 
         if df.empty:
             st.info("Nessun cliente inserito.")
