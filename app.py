@@ -55,50 +55,46 @@ def current_user():
     return st.session_state.get("user", None)
 
 
-def _user_identity_text():
-    u = current_user() or {}
-    return " ".join([
-        str(u.get("nome") or ""),
-        str(u.get("username") or ""),
-        str(u.get("email") or ""),
-        str(u.get("ruolo") or ""),
-    ]).strip().lower()
-
-
-def is_pentti_user():
-    ident = _user_identity_text()
-    return any(x in ident for x in ["pentti", "leonardo", "leonardosalenius"])
-
-
-def is_rosario_user():
-    ident = _user_identity_text()
-    return "rosario" in ident
-
-
-def is_reception_limited_user():
-    ident = _user_identity_text()
-    # Enzo / Vincenzo / Federica devono vedere solo Reception e Calendario,
-    # anche se in Supabase risultassero temporaneamente come admin.
-    return any(x in ident for x in ["federica", "vincenzo", " enzo", "enzo ", "enzo", "frontdesk", "reception"])
-
-
 def is_admin():
     u = current_user()
+    return bool(u and u.get("ruolo") == "admin")
+
+
+def current_user_name_norm():
+    u = current_user()
     if not u:
+        return ""
+    return norm(u.get("nome", ""))
+
+def current_username_norm():
+    u = current_user()
+    if not u:
+        return ""
+    return norm(u.get("username", ""))
+
+def is_pentti_user():
+    name = current_user_name_norm()
+    username = current_username_norm()
+    return "pentti" in name or "pentti" in username or "leonardo" in username or "salenius" in username
+
+def is_rosario_user():
+    name = current_user_name_norm()
+    username = current_username_norm()
+    return "rosario" in name or "rosario" in username
+
+def is_reception_limited_user():
+    """Federica / Enzo / Vincenzo: solo Reception + Calendario."""
+    if is_admin() or is_pentti_user() or is_rosario_user():
         return False
-    if is_reception_limited_user():
-        return False
-    return bool(u and str(u.get("ruolo") or "").lower() == "admin") or is_pentti_user() or is_rosario_user()
+    name = current_user_name_norm()
+    username = current_username_norm()
+    limited_tokens = ["federica", "enzo", "vincenzo", "crinisio"]
+    return any(t in name or t in username for t in limited_tokens) or (current_user() and current_user().get("ruolo") == "staff" and not is_rosario_user())
 
+def can_delete_records():
+    """Solo Pentti/admin proprietario può effettuare eliminazioni definitive."""
+    return is_admin() and is_pentti_user()
 
-def can_delete():
-    # Eliminazioni definitive consentite solo a Pentti.
-    # Rosario vede tutto e gestisce tutto, ma non elimina.
-    return is_pentti_user()
-
-
-def can_view_full_menu():
-    return is_pentti_user() or is_rosario_user() or is_admin()
 
 
 def user_label():
@@ -318,8 +314,6 @@ def update_cliente(cliente_id, new_data):
 
 
 def delete_cliente(cliente_id):
-    if not can_delete():
-        return False, "Eliminazione non autorizzata per questo profilo."
     sb = get_supabase()
     sb.table("clienti").delete().eq("id", int(cliente_id)).execute()
     sb.table("cronologia").delete().eq("cliente_id", int(cliente_id)).execute()
@@ -2282,8 +2276,6 @@ def create_slot_disponibilita(data_slot, ora_inizio, ora_fine, trainer, tipo_slo
 
 
 def delete_slot_disponibilita(slot_id):
-    if not can_delete():
-        return False, "Eliminazione non autorizzata per questo profilo."
     if not is_admin():
         return False, "Operazione riservata all’amministratore."
     sb = get_supabase()
@@ -2518,8 +2510,6 @@ def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, t
 
 
 def elimina_presenza_lezione_cliente(lezione_id):
-    if not can_delete():
-        return False, "Eliminazione non autorizzata per questo profilo."
     """
     Elimina una presenza/lezione del cliente dalla tabella lezioni
     e ricalcola i contatori del cliente.
@@ -2672,8 +2662,6 @@ def update_stato_lezione(lezione_id, nuovo_stato):
 
 
 def delete_lezione(lezione_id):
-    if not can_delete():
-        return False, "Eliminazione non autorizzata per questo profilo."
     if not is_admin():
         return False, "Operazione riservata all’amministratore."
     sb = get_supabase()
@@ -2964,8 +2952,6 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
 
 
 def delete_documento(documento_id):
-    if not can_delete():
-        return False, "Eliminazione non autorizzata per questo profilo."
     if not is_admin():
         return False, "Operazione riservata all'amministratore."
 
@@ -4018,8 +4004,6 @@ def insert_pagamento(cliente_id, data_pagamento, importo, metodo_pagamento, note
 
 
 def delete_pagamento(pagamento_id):
-    if not can_delete():
-        return False, "Eliminazione non autorizzata per questo profilo."
     sb = get_supabase()
     data = sb.table("pagamenti").select("*").eq("id", int(pagamento_id)).limit(1).execute().data
     if not data:
@@ -4667,50 +4651,43 @@ def login_gate():
 
 
 
+
 def render_v32_navigation():
     st.sidebar.markdown("""
     <style>
-    section[data-testid="stSidebar"] { background: #0f0f0f !important; }
+    section[data-testid="stSidebar"] {
+        background: #0f0f0f !important;
+    }
+
     section[data-testid="stSidebar"] label,
     section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] div { color: #ffffff !important; }
+    section[data-testid="stSidebar"] div {
+        color: #ffffff !important;
+    }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
         background-color: #050505 !important;
         border: 2px solid #d4af37 !important;
         border-radius: 12px !important;
         min-height: 46px !important;
-        color: #f7e7a6 !important;
-        font-weight: 900 !important;
+        color: #f4d675 !important;
+        font-weight: 800 !important;
         box-shadow: 0 0 0 2px rgba(212,175,55,0.15) !important;
     }
-    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+        color: #f4d675 !important;
+        font-weight: 800 !important;
+        font-size: 15px !important;
+    }
+
     section[data-testid="stSidebar"] input {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
-        font-weight: 900 !important;
-    }
-    section[data-testid="stSidebar"] button,
-    section[data-testid="stSidebar"] button[kind="secondary"],
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-        background: #050505 !important;
+        color: #f4d675 !important;
+        font-weight: 800 !important;
         background-color: #050505 !important;
-        color: #f7e7a6 !important;
-        border: 2px solid #d4af37 !important;
-        border-radius: 14px !important;
-        font-weight: 900 !important;
-        opacity: 1 !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.22), 0 8px 18px rgba(0,0,0,0.35) !important;
     }
-    section[data-testid="stSidebar"] button p,
-    section[data-testid="stSidebar"] button span,
-    section[data-testid="stSidebar"] button div {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
-        font-weight: 900 !important;
-        opacity: 1 !important;
-    }
+
     .kreo-nav-help {
         background: rgba(212,175,55,0.14);
         border: 1px solid rgba(212,175,55,0.55);
@@ -4725,29 +4702,41 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V35 · Agenda Luxury")
+    st.sidebar.caption("Navigazione semplificata V35 - Agenda Luxury")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu nero qui sotto.</div>', unsafe_allow_html=True)
 
-    full_macro_options = ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "📩 Comunicazioni", "👥 Staff", "🏢 Azienda", "📊 Analytics"]
-    reception_macro_options = ["🛎️ Reception", "🗓 Calendario"]
+    all_macros = ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "📩 Comunicazioni", "👥 Staff", "🏢 Azienda", "📊 Analytics"]
 
     if is_reception_limited_user():
-        macro_options = reception_macro_options
+        allowed_macros = ["🛎️ Reception", "🗓 Calendario"]
     else:
-        macro_options = full_macro_options
+        allowed_macros = all_macros
 
-    if st.session_state.get("v32_macro_nav") not in macro_options:
-        st.session_state["v32_macro_nav"] = macro_options[0]
-
-    macro = st.sidebar.radio("Sezione", macro_options, key="v32_macro_nav")
+    macro = st.sidebar.radio(
+        "Sezione",
+        allowed_macros,
+        key="v32_macro_nav"
+    )
 
     submenu_map = {
         "🏠 Dashboard": ["📊 Dashboard", "🚨 Alert clienti"],
-        "🛎️ Reception": ["🛎️ Console Reception", "➕ Nuovo cliente", "✏️ Modifica cliente", "💳 Gestione incassi", "🚨 Alert clienti", "🚪 Accessi tornello"],
-        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati", "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
-        "🗓 Calendario": ["🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
-        "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
-        "📩 Comunicazioni": ["📩 Notifiche WhatsApp", "🚨 Alert clienti"],
+        "🛎️ Reception": [
+            "🛎️ Reception rapida",
+            "🖥️ Console accessi",
+            "➕ Nuovo cliente",
+            "✏️ Modifica cliente",
+            "💳 Gestione incassi",
+            "🧾 Stampa ricevuta",
+            "📲 Notifiche WhatsApp",
+            "🚨 Alert clienti",
+            "🚪 Accessi tornello",
+            "🗓 Calendario unificato",
+        ],
+        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
+        "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
+        "🗓 Calendario": ["✨ Agenda Luxury", "🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
+        "💳 Incassi": ["💳 Gestione incassi", "🧾 Stampa ricevuta", "⬇️ Export Excel"],
+        "📩 Comunicazioni": ["📲 Notifiche WhatsApp", "🚨 Alert clienti"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
         "📊 Analytics": ["📈 Analytics direzionali", "🚨 Alert clienti"],
@@ -4755,28 +4744,44 @@ def render_v32_navigation():
 
     items = submenu_map.get(macro, ["📊 Dashboard"])
 
+    # Protezione permessi: Enzo/Vincenzo/Federica solo Reception e Calendario.
     if is_reception_limited_user():
-        allowed = {"🛎️ Console Reception", "🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni"}
-        items = [x for x in items if x in allowed]
-    elif not can_view_full_menu():
+        allowed_items = {
+            "🛎️ Reception rapida",
+            "🖥️ Console accessi",
+            "➕ Nuovo cliente",
+            "✏️ Modifica cliente",
+            "💳 Gestione incassi",
+            "🧾 Stampa ricevuta",
+            "📲 Notifiche WhatsApp",
+            "🚨 Alert clienti",
+            "🚪 Accessi tornello",
+            "🗓 Calendario unificato",
+            "✨ Agenda Luxury",
+            "📅 Calendario lezioni",
+        }
+        items = [x for x in items if x in allowed_items]
+
+    if not is_admin() and not is_rosario_user():
         hidden = {"⬇️ Export Excel", "👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati"}
         items = [x for x in items if x not in hidden]
 
     if not items:
-        items = ["🛎️ Console Reception"] if is_reception_limited_user() else ["📊 Dashboard"]
+        items = ["🛎️ Reception rapida"]
 
-    if st.session_state.get("v32_sub_nav") not in items:
-        st.session_state["v32_sub_nav"] = items[0]
+    # Gestione pulsanti rapidi: forza la voce al rerun senza modificare il widget dopo la sua creazione.
+    forced = st.session_state.pop("kreo_force_menu", None)
+    index = 0
+    if forced in items:
+        index = items.index(forced)
 
-    selected = st.sidebar.selectbox("👇 Scegli la funzione operativa", items, key="v32_sub_nav")
+    selected = st.sidebar.selectbox("👇 Scegli la funzione operativa", items, index=index, key="v32_sub_nav")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**Area:** {macro}")
     st.sidebar.markdown(f"**Funzione:** {selected}")
 
     return selected
-
-
 
 def load_badge_clienti():
     sb = get_supabase()
@@ -6658,8 +6663,120 @@ def render_accessi_tornello_page():
     with tab12:
         render_console_reception_premium()
 
-# ---- PLATFORM FOOTER ----
-def inject_platform_footer():
+
+def kreo_go_to(menu_name):
+    st.session_state["kreo_force_menu"] = menu_name
+    st.rerun()
+
+def render_reception_rapida():
+    st.header("🛎️ Reception rapida")
+    st.caption("Pannello operativo immediato: pochi pulsanti, azioni chiare, zero complessità.")
+
+    st.markdown("""
+    <style>
+    .kreo-reception-title {
+        font-size: 18px;
+        font-weight: 800;
+        margin-bottom: 8px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.info("Usa questa schermata per le attività quotidiane: cliente, incasso, ricevuta, messaggi, badge e agenda.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("➕ Nuovo cliente", use_container_width=True, key="rec_btn_new_client"):
+            kreo_go_to("➕ Nuovo cliente")
+        if st.button("🚨 Alert clienti", use_container_width=True, key="rec_btn_alert"):
+            kreo_go_to("🚨 Alert clienti")
+        if st.button("♻️ Ricalcolo lezioni", use_container_width=True, key="rec_btn_recalc"):
+            kreo_go_to("🚪 Accessi tornello")
+    with c2:
+        if st.button("✏️ Modifica cliente", use_container_width=True, key="rec_btn_edit_client"):
+            kreo_go_to("✏️ Modifica cliente")
+        if st.button("🎟️ Associa badge", use_container_width=True, key="rec_btn_badge"):
+            kreo_go_to("🚪 Accessi tornello")
+        if st.button("📅 Agenda / calendario", use_container_width=True, key="rec_btn_calendar"):
+            kreo_go_to("✨ Agenda Luxury")
+    with c3:
+        if st.button("💰 Registra incasso", use_container_width=True, key="rec_btn_payment"):
+            kreo_go_to("💳 Gestione incassi")
+        if st.button("🔄 Sync accessi / badge", use_container_width=True, key="rec_btn_sync_badge"):
+            kreo_go_to("🚪 Accessi tornello")
+        if st.button("✅ Check-in cliente", use_container_width=True, key="rec_btn_checkin"):
+            kreo_go_to("🖥️ Console accessi")
+
+    c4, c5, c6 = st.columns(3)
+    with c4:
+        if st.button("🧾 Stampa ricevuta", use_container_width=True, key="rec_btn_receipt"):
+            kreo_go_to("🧾 Stampa ricevuta")
+    with c5:
+        if st.button("📩 Messaggio cliente", use_container_width=True, key="rec_btn_message"):
+            kreo_go_to("📲 Notifiche WhatsApp")
+    with c6:
+        if st.button("🖥️ Console accessi premium", use_container_width=True, key="rec_btn_console"):
+            kreo_go_to("🖥️ Console accessi")
+
+    st.markdown("---")
+    st.subheader("Monitor rapido")
+    try:
+        render_console_reception_premium()
+    except Exception as e:
+        st.warning("Console accessi non disponibile in questa schermata rapida.")
+        st.caption(str(e))
+
+def render_stampa_ricevuta_rapida():
+    st.header("🧾 Stampa ricevuta")
+    st.caption("Ricerca rapidamente un pagamento e scarica la ricevuta PDF.")
+
+    pag_df = load_pagamenti()
+    clienti_df = load_clienti()
+
+    if pag_df.empty:
+        st.info("Nessun pagamento registrato.")
+        return
+
+    if not clienti_df.empty:
+        clienti_df = clienti_df[["id", "nome", "cognome"]].copy()
+        clienti_df["cliente"] = clienti_df["nome"].fillna("") + " " + clienti_df["cognome"].fillna("")
+        pag_df = pag_df.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+    else:
+        pag_df["cliente"] = ""
+
+    pag_df = pag_df.sort_values("id", ascending=False).copy()
+    if "data_pagamento_it" not in pag_df.columns and "data_pagamento" in pag_df.columns:
+        pag_df["data_pagamento_it"] = pag_df["data_pagamento"].apply(format_date_it)
+
+    filtro = st.text_input("Cerca cliente / ID pagamento", placeholder="es. Rossi oppure 125")
+    view = pag_df.copy()
+    if filtro:
+        f = filtro.strip().lower()
+        view = view[
+            view["cliente"].fillna("").str.lower().str.contains(f, na=False) |
+            view["id"].astype(str).str.contains(f, na=False)
+        ]
+
+    if view.empty:
+        st.warning("Nessun pagamento trovato.")
+        return
+
+    view["label_ricevuta"] = (
+        view["id"].astype(str) + " - " +
+        view["cliente"].fillna("").astype(str) + " - " +
+        view.get("data_pagamento_it", "").fillna("").astype(str) + " - " +
+        view["importo"].apply(lambda x: euro(float(x or 0)))
+    )
+
+    selected = st.selectbox("Pagamento", view["label_ricevuta"].tolist(), key="rec_select_ricevuta")
+    pagamento_id = int(selected.split(" - ")[0])
+    pagamento = get_pagamento_by_id(pagamento_id)
+    if pagamento:
+        download_ricevuta_button(int(pagamento.get("cliente_id")), pagamento_id, "reception_rapida")
+
+
+
+def inject_kreo_luxury_sidebar_style():
     st.markdown("""
     <style>
     .pentti-footer {
@@ -6684,7 +6801,7 @@ def inject_platform_footer():
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
     style()
-    inject_platform_footer()
+    inject_kreo_luxury_sidebar_style()
 
     if not login_gate():
         return
@@ -6707,11 +6824,23 @@ def main():
 
     df = load_clienti()
 
-    if menu == "🛎️ Console Reception":
-        render_console_reception_premium()
-        return
+    if menu == "🛎️ Reception rapida":
+        render_reception_rapida()
 
-    if menu == "➕ Nuovo cliente":
+    elif menu == "🖥️ Console accessi":
+        render_console_reception_premium()
+
+    elif menu == "🧾 Stampa ricevuta":
+        render_stampa_ricevuta_rapida()
+
+    elif menu == "✨ Agenda Luxury":
+        try:
+            render_agenda_luxury()
+        except NameError:
+            st.info("Agenda Luxury non disponibile in questa versione. Apro il calendario unificato.")
+            render_calendario_unificato_staff()
+
+    elif menu == "➕ Nuovo cliente":
         st.header("Nuova iscrizione / aggiornamento cliente")
         st.info("Se il cliente è già presente, questa schermata aggiorna la sua scheda invece di creare un duplicato.")
         with st.form("nuovo_cliente"):
@@ -7138,7 +7267,7 @@ def main():
                                     else:
                                         st.error(msg)
 
-                    if is_admin():
+                    if can_delete_records():
                         with st.expander("Elimina pagamento (solo admin)"):
                             pagamento_id = st.number_input("ID pagamento da eliminare", min_value=1, step=1)
                             if st.button("Elimina pagamento e ricalcola saldo"):
@@ -7362,8 +7491,8 @@ def main():
 
 
     elif menu == "🗓 Planner Slot":
-        if not is_admin():
-            st.error("Funzione riservata all’amministratore.")
+        if not can_delete_records():
+            st.error("Funzione riservata all’amministratore proprietario.")
             return
         st.header("Planner settimanale slot")
         settimana = st.date_input("Settimana da visualizzare", value=date.today(), format="DD/MM/YYYY", key="planner_week_page")
@@ -7376,8 +7505,8 @@ def main():
 
 
     elif menu == "⚙️ Settaggi KREO":
-        if not is_admin():
-            st.error("Funzione riservata all’amministratore.")
+        if not can_delete_records():
+            st.error("Funzione riservata all’amministratore proprietario.")
             return
 
         st.header("Settaggi base KREO")
@@ -7702,7 +7831,7 @@ def main():
                         else:
                             st.error(msg)
 
-                    if is_admin():
+                    if can_delete_records():
                         with st.expander("Elimina lezione (solo admin)"):
                             if st.button("Elimina questa lezione"):
                                 ok, msg = delete_lezione(lezione_id)
@@ -7746,8 +7875,8 @@ def main():
                 st.plotly_chart(px.pie(pag,names="stato_pagamento",values="residuo",title="Residui per stato pagamento"),use_container_width=True)
 
     elif menu == "🧹 Pulizia duplicati":
-        if not is_admin():
-            st.error("Funzione riservata all’amministratore.")
+        if not can_delete_records():
+            st.error("Funzione riservata all’amministratore proprietario.")
             return
         st.header("Pulizia clienti duplicati")
         if df.empty:
@@ -7781,8 +7910,8 @@ def main():
 
 
     elif menu == "👥 Gestione utenti":
-        if not is_admin():
-            st.error("Funzione riservata all’amministratore.")
+        if not can_delete_records():
+            st.error("Funzione riservata all’amministratore proprietario.")
             return
 
         st.header("Gestione utenti")
@@ -7803,8 +7932,8 @@ def main():
 
 
     elif menu == "⬇️ Export Excel":
-        if not is_admin():
-            st.error("Funzione riservata all’amministratore.")
+        if not can_delete_records():
+            st.error("Funzione riservata all’amministratore proprietario.")
             return
         st.header("Export Excel")
         if df.empty:
