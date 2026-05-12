@@ -4663,24 +4663,25 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V32")
+    st.sidebar.caption("Navigazione semplificata V33")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
         "Sezione",
-        ["🏠 Dashboard", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "👥 Staff", "🏢 Azienda", "📊 Analytics"],
+        ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "👥 Staff", "🏢 Azienda", "📊 Analytics"],
         key="v32_macro_nav"
     )
 
     submenu_map = {
         "🏠 Dashboard": ["📊 Dashboard", "🚨 Alert clienti"],
+        "🛎️ Reception": ["🛎️ Console Reception"],
         "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
         "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
-        "🗓 Calendario": ["🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
+        "🗓 Calendario": ["🗓 Calendario operativo", "⚙️ Disponibilità trainer"],
         "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
-        "📊 Analytics": ["📈 Analytics direzionali", "🚨 Alert clienti"],
+        "📊 Analytics": ["📈 Analytics direzionali"],
     }
 
     items = submenu_map.get(macro, ["📊 Dashboard"])
@@ -6605,7 +6606,52 @@ def main():
 
     df = load_clienti()
 
-    if menu == "➕ Nuovo cliente":
+    if menu == "🛎️ Console Reception":
+        st.header("🛎️ Reception KREO")
+        st.caption("Console operativa rapida per le attività quotidiane: pochi pulsanti, funzioni essenziali, zero complessità.")
+
+        st.markdown("### Operazioni rapide")
+        r1c1, r1c2, r1c3 = st.columns(3)
+        r2c1, r2c2, r2c3 = st.columns(3)
+        r3c1, r3c2, r3c3 = st.columns(3)
+
+        def reception_button(label, target, key):
+            if st.button(label, key=key, use_container_width=True):
+                st.session_state["reception_target"] = target
+                st.rerun()
+
+        with r1c1: reception_button("➕ Nuovo cliente", "➕ Nuovo cliente", "rec_new_cliente")
+        with r1c2: reception_button("✏️ Modifica cliente", "✏️ Modifica cliente", "rec_edit_cliente")
+        with r1c3: reception_button("💰 Registra incasso", "💳 Gestione incassi", "rec_incasso")
+        with r2c1: reception_button("🚨 Elenco alert", "🚨 Alert clienti", "rec_alert")
+        with r2c2: reception_button("🎟️ Associa badge", "🚪 Accessi tornello", "rec_badge")
+        with r2c3: reception_button("🔄 Sincronizza accessi / badge", "🚪 Accessi tornello", "rec_sync")
+        with r3c1: reception_button("♻️ Ricalcolo lezioni", "♻️ Ricalcolo lezioni", "rec_recalc")
+        with r3c2: reception_button("📅 Inserimento rapido lezione", "🗓 Calendario operativo", "rec_lezione")
+        with r3c3: reception_button("✅ Check-in cliente", "🚪 Accessi tornello", "rec_checkin")
+
+        target = st.session_state.get("reception_target")
+        if target:
+            st.markdown("---")
+            st.info(f"Funzione selezionata: {target}. Usa il menu laterale per aprirla in modalità completa.")
+            if target == "♻️ Ricalcolo lezioni":
+                st.subheader("Ricalcolo lezioni")
+                if is_admin():
+                    render_recalcolo_settimanale_widget()
+                    with st.expander("Ricalcolo cumulativo avanzato"):
+                        render_lezioni_cumulative_admin()
+                else:
+                    st.error("Funzione riservata all’amministratore.")
+            elif target == "🚨 Alert clienti":
+                alert_df = build_alert_dashboard(df)
+                if alert_df.empty:
+                    st.success("Nessun alert presente.")
+                else:
+                    st.dataframe(alert_df, use_container_width=True, hide_index=True)
+            else:
+                st.warning("Per questa funzione usa il relativo pulsante/voce nel menu laterale: la V33 mantiene la funzione completa nella sua area originale per evitare duplicazioni di codice.")
+
+    elif menu == "➕ Nuovo cliente":
         st.header("Nuova iscrizione / aggiornamento cliente")
         st.info("Se il cliente è già presente, questa schermata aggiorna la sua scheda invece di creare un duplicato.")
         with st.form("nuovo_cliente"):
@@ -6932,11 +6978,17 @@ def main():
                 if not pag_df.empty:
                     c1, c2 = st.columns(2)
                     with c1:
-                        metodo_df = pag_df.groupby("metodo_pagamento", as_index=False)["importo"].sum()
-                        st.plotly_chart(px.pie(metodo_df, names="metodo_pagamento", values="importo", title="Incassi per metodo"), use_container_width=True)
+                        mese_df = pag_df.groupby("mese", as_index=False)["importo"].sum().sort_values("mese")
+                        st.plotly_chart(px.bar(mese_df, x="mese", y="importo", title="Andamento incassi mensili"), use_container_width=True)
                     with c2:
-                        mese_df = pag_df.groupby("mese", as_index=False)["importo"].sum()
-                        st.plotly_chart(px.bar(mese_df, x="mese", y="importo", title="Incassi per mese"), use_container_width=True)
+                        clienti_tmp = df[["id", "nome", "cognome", "pacchetto"]].copy() if {"id", "nome", "cognome", "pacchetto"}.issubset(df.columns) else pd.DataFrame()
+                        if not clienti_tmp.empty and "cliente_id" in pag_df.columns:
+                            clienti_tmp["cliente"] = clienti_tmp["nome"].fillna("") + " " + clienti_tmp["cognome"].fillna("")
+                            pag_pack = pag_df.merge(clienti_tmp[["id", "pacchetto"]], left_on="cliente_id", right_on="id", how="left")
+                            pack_df = pag_pack.groupby("pacchetto", as_index=False)["importo"].sum().sort_values("importo", ascending=False)
+                            st.plotly_chart(px.bar(pack_df, x="pacchetto", y="importo", title="Incassi per pacchetto"), use_container_width=True)
+                        else:
+                            st.info("Dati pacchetto non disponibili per il grafico incassi per pacchetto.")
 
                 st.subheader("Clienti con saldo aperto")
                 aperti = df[df["residuo"] > 0].copy() if "residuo" in df.columns else pd.DataFrame()
@@ -7247,7 +7299,7 @@ def main():
 
 
 
-    elif menu == "🗓 Calendario unificato":
+    elif menu in ["🗓 Calendario unificato", "🗓 Calendario operativo"]:
         render_calendario_unificato_staff()
 
 
@@ -7375,7 +7427,7 @@ def main():
                     st.success(msg)
 
 
-    elif menu == "⚙️ Disponibilità calendario":
+    elif menu in ["⚙️ Disponibilità calendario", "⚙️ Disponibilità trainer"]:
         st.header("Disponibilità calendario prenotabile")
 
         tab1, tab2 = st.tabs(["Crea disponibilità", "Slot disponibili"])
@@ -7607,21 +7659,55 @@ def main():
                                     st.error(msg)
 
 
-    elif menu == "📊 Dashboard" or menu == "📈 Analytics direzionali":
-        st.header("Dashboard")
+    elif menu == "📊 Dashboard":
+        st.header("Dashboard operativa")
         if df.empty:
             st.info("Inserisci almeno un cliente.")
         else:
             alert_df = build_alert_dashboard(df)
+            oggi = date.today()
             c1,c2,c3,c4,c5 = st.columns(5)
-            c1.metric("Clienti attivi", int((df["stato_cliente"]=="ATTIVO").sum()))
-            c2.metric("Valore contratti", euro(df["importo"].sum()))
-            c3.metric("Incassato", euro(df["importo_pagato"].sum()))
-            c4.metric("Residuo", euro(df["residuo"].sum()))
-            c5.metric("Alert", len(alert_df))
+            c1.metric("Clienti attivi", int((df["stato_cliente"]=="ATTIVO").sum()) if "stato_cliente" in df.columns else len(df))
+            c2.metric("Incassato", euro(df["importo_pagato"].sum()) if "importo_pagato" in df.columns else euro(0))
+            c3.metric("Residuo", euro(df["residuo"].sum()) if "residuo" in df.columns else euro(0))
+            c4.metric("Alert", len(alert_df))
+            c5.metric("Saldo aperto", int((df["residuo"] > 0).sum()) if "residuo" in df.columns else 0)
+
             if not alert_df.empty:
                 st.subheader("Alert principali")
-                st.dataframe(alert_df, use_container_width=True, hide_index=True)
+                st.dataframe(alert_df.head(12), use_container_width=True, hide_index=True)
+
+            st.subheader("Vista rapida clienti")
+            c6,c7 = st.columns(2)
+            with c6:
+                if "pacchetto" in df.columns:
+                    pac=df.groupby("pacchetto",as_index=False)["id"].count().rename(columns={"id":"clienti"})
+                    st.plotly_chart(px.bar(pac,x="pacchetto",y="clienti",title="Clienti per pacchetto"),use_container_width=True)
+            with c7:
+                if "stato_pagamento" in df.columns and "residuo" in df.columns:
+                    pag=df.groupby("stato_pagamento",as_index=False)["residuo"].sum()
+                    st.plotly_chart(px.bar(pag,x="stato_pagamento",y="residuo",title="Residui per stato pagamento"),use_container_width=True)
+
+    elif menu == "📈 Analytics direzionali":
+        st.header("Analytics direzionali")
+        st.caption("Area manageriale: KPI, trend, performance e indicatori utili per decisioni e crescita.")
+        if df.empty:
+            st.info("Inserisci almeno un cliente.")
+        else:
+            valore_contratti = float(df["importo"].sum()) if "importo" in df.columns else 0
+            incassato = float(df["importo_pagato"].sum()) if "importo_pagato" in df.columns else 0
+            residuo = float(df["residuo"].sum()) if "residuo" in df.columns else 0
+            clienti_attivi = int((df["stato_cliente"]=="ATTIVO").sum()) if "stato_cliente" in df.columns else len(df)
+            ticket_medio = valore_contratti / clienti_attivi if clienti_attivi else 0
+            incasso_medio = incassato / clienti_attivi if clienti_attivi else 0
+
+            a1,a2,a3,a4,a5 = st.columns(5)
+            a1.metric("Valore contratti", euro(valore_contratti))
+            a2.metric("Ticket medio", euro(ticket_medio))
+            a3.metric("Incasso medio cliente", euro(incasso_medio))
+            a4.metric("Residuo totale", euro(residuo))
+            a5.metric("Clienti attivi", clienti_attivi)
+
             st.subheader("Performance staff")
             staff_df = build_staff_dashboard(df)
             if staff_df.empty:
@@ -7631,13 +7717,24 @@ def main():
                 if "Nuovi clienti registrati" in staff_df.columns:
                     st.plotly_chart(px.bar(staff_df, x="Utente", y="Nuovi clienti registrati", title="Nuovi clienti registrati per utente"), use_container_width=True)
 
-            c6,c7=st.columns(2)
-            with c6:
-                pac=df.groupby("pacchetto",as_index=False)["id"].count().rename(columns={"id":"clienti"})
-                st.plotly_chart(px.bar(pac,x="pacchetto",y="clienti",title="Clienti per pacchetto"),use_container_width=True)
-            with c7:
-                pag=df.groupby("stato_pagamento",as_index=False)["residuo"].sum()
-                st.plotly_chart(px.pie(pag,names="stato_pagamento",values="residuo",title="Residui per stato pagamento"),use_container_width=True)
+            c1,c2 = st.columns(2)
+            with c1:
+                if "pacchetto" in df.columns and "importo" in df.columns:
+                    pac_val = df.groupby("pacchetto", as_index=False)["importo"].sum()
+                    st.plotly_chart(px.bar(pac_val, x="pacchetto", y="importo", title="Valore contratti per pacchetto"), use_container_width=True)
+            with c2:
+                if "pacchetto" in df.columns and "residuo" in df.columns:
+                    pac_res = df.groupby("pacchetto", as_index=False)["residuo"].sum()
+                    st.plotly_chart(px.bar(pac_res, x="pacchetto", y="residuo", title="Residuo per pacchetto"), use_container_width=True)
+
+    elif menu == "♻️ Ricalcolo lezioni":
+        st.header("Ricalcolo lezioni")
+        if is_admin():
+            render_recalcolo_settimanale_widget()
+            with st.expander("Ricalcolo cumulativo avanzato"):
+                render_lezioni_cumulative_admin()
+        else:
+            st.error("Funzione riservata all’amministratore.")
 
     elif menu == "🧹 Pulizia duplicati":
         if not is_admin():
