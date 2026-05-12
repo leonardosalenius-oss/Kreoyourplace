@@ -954,19 +954,34 @@ def build_whatsapp_url(phone, message):
 
 
 def get_next_lezione_cliente(cliente_id):
+    """Restituisce la prossima lezione del cliente in modo sicuro.
+    Fix V35.1: evita crash se cliente_id è vuoto/NaN o se la colonna contiene valori sporchi.
+    """
+    if cliente_id is None or str(cliente_id).strip() in ("", "nan", "None"):
+        return None
+    try:
+        cid = int(float(cliente_id))
+    except Exception:
+        return None
+
     try:
         lez_df = load_lezioni()
     except Exception:
         return None
-    if lez_df.empty:
+    if lez_df is None or lez_df.empty or "cliente_id" not in lez_df.columns:
         return None
+
     today_ts = pd.Timestamp(date.today())
-    lez_df["data_dt"] = pd.to_datetime(lez_df["data_lezione"], errors="coerce")
-    sub = lez_df[
-        (lez_df["cliente_id"].astype(int) == int(cliente_id)) &
-        (lez_df["data_dt"] >= today_ts) &
-        (lez_df["stato"].isin(["RICHIESTA CLIENTE", "PRENOTATO", "RECUPERO"]))
-    ].sort_values(["data_dt", "ora_inizio"])
+    work = lez_df.copy()
+    work["cliente_id_num"] = pd.to_numeric(work.get("cliente_id"), errors="coerce").astype("Int64")
+    work["data_dt"] = pd.to_datetime(work.get("data_lezione"), errors="coerce")
+
+    stato_col = work.get("stato", pd.Series([""] * len(work))).astype(str).str.upper()
+    sub = work[
+        (work["cliente_id_num"] == cid) &
+        (work["data_dt"] >= today_ts) &
+        (stato_col.isin(["RICHIESTA CLIENTE", "PRENOTATO", "RECUPERO"]))
+    ].sort_values(["data_dt", "ora_inizio"], na_position="last")
     if sub.empty:
         return None
     return sub.iloc[0].to_dict()
@@ -2178,7 +2193,7 @@ def render_agenda_luxury():
     with c1:
         giorno_base = st.date_input("Giorno", value=today, format="DD/MM/YYYY", key="agenda_luxury_giorno")
     with c2:
-        vista = st.selectbox("Vista", ["Oggi", "Domani", "7 giorni"], index=0, key="agenda_luxury_vista")
+        vista = st.selectbox("Vista", ["Oggi", "Domani", "7 giorni"], index=2, key="agenda_luxury_vista")
     if vista == "Domani":
         date_min = giorno_base + timedelta(days=1)
         date_max = date_min
