@@ -552,19 +552,24 @@ def area_cliente_premium_style():
         margin-top: 12px;
     }
 
-    /* Selectbox sidebar: stile luxury nero + bordo oro */
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-        background: #0b0b0b !important;
-        border: 1.5px solid #d4af37 !important;
+    /* Selectbox sidebar: nero + bordo dorato SEMPRE, non solo hover */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:hover,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {
+        background: #050505 !important;
+        background-color: #050505 !important;
+        border: 2px solid #d4af37 !important;
         border-radius: 14px !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.18), 0 8px 20px rgba(0,0,0,0.30) !important;
+        min-height: 46px !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.25), 0 8px 18px rgba(0,0,0,0.35) !important;
     }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] div,
     section[data-testid="stSidebar"] div[data-baseweb="select"] span,
     section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-        color: #f5d76e !important;
-        -webkit-text-fill-color: #f5d76e !important;
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
         font-weight: 900 !important;
         opacity: 1 !important;
     }
@@ -580,31 +585,35 @@ def area_cliente_premium_style():
         font-weight: 800 !important;
     }
 
-    /* Pulsanti sidebar, incluso Logout: nero + bordo oro */
-    section[data-testid="stSidebar"] button {
-        background: #0b0b0b !important;
-        color: #f5d76e !important;
-        border: 1.5px solid #d4af37 !important;
-        border-radius: 13px !important;
+    /* Pulsanti sidebar, incluso Logout: nero + bordo dorato SEMPRE */
+    section[data-testid="stSidebar"] button,
+    section[data-testid="stSidebar"] button[kind="secondary"],
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+        background: #050505 !important;
+        background-color: #050505 !important;
+        color: #f7e7a6 !important;
+        border: 2px solid #d4af37 !important;
+        border-radius: 14px !important;
         font-weight: 900 !important;
         opacity: 1 !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.18), 0 8px 20px rgba(0,0,0,0.28) !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.22), 0 8px 18px rgba(0,0,0,0.35) !important;
     }
 
     section[data-testid="stSidebar"] button p,
     section[data-testid="stSidebar"] button span,
     section[data-testid="stSidebar"] button div {
-        color: #f5d76e !important;
-        -webkit-text-fill-color: #f5d76e !important;
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
         font-weight: 900 !important;
         opacity: 1 !important;
     }
 
-    section[data-testid="stSidebar"] button:hover {
-        background: #151515 !important;
+    section[data-testid="stSidebar"] button:hover,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+        background: #111111 !important;
         color: #ffffff !important;
         border-color: #f3d77a !important;
-        box-shadow: 0 0 0 1px rgba(243,215,122,0.30), 0 10px 24px rgba(0,0,0,0.38) !important;
+        transform: translateY(-1px);
     }
 
     /* Etichette */
@@ -5361,25 +5370,67 @@ def render_v32_navigation():
         color: #ffffff !important;
     }
 
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-        background-color: #ffffff !important;
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:hover,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {
+        background: #050505 !important;
+        background-color: #050505 !important;
         border: 2px solid #d4af37 !important;
-        border-radius: 12px !important;
+        border-radius: 14px !important;
         min-height: 46px !important;
-        color: #111111 !important;
-        font-weight: 800 !important;
-        box-shadow: 0 0 0 2px rgba(212,175,55,0.15) !important;
+        color: #f7e7a6 !important;
+        font-weight: 900 !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.25), 0 8px 18px rgba(0,0,0,0.35) !important;
     }
 
-    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
-        color: #111111 !important;
-        font-weight: 800 !important;
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] div {
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
+        font-weight: 900 !important;
         font-size: 15px !important;
     }
 
+    section[data-testid="stSidebar"] div[data-baseweb="select"] svg {
+        fill: #d4af37 !important;
+        color: #d4af37 !important;
+    }
+
     section[data-testid="stSidebar"] input {
-        color: #111111 !important;
-        font-weight: 800 !important;
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
+        font-weight: 900 !important;
+    }
+
+    section[data-testid="stSidebar"] button,
+    section[data-testid="stSidebar"] button[kind="secondary"],
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+        background: #050505 !important;
+        background-color: #050505 !important;
+        color: #f7e7a6 !important;
+        border: 2px solid #d4af37 !important;
+        border-radius: 14px !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.22), 0 8px 18px rgba(0,0,0,0.35) !important;
+    }
+
+    section[data-testid="stSidebar"] button p,
+    section[data-testid="stSidebar"] button span,
+    section[data-testid="stSidebar"] button div {
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+    }
+
+    section[data-testid="stSidebar"] button:hover,
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+        background: #111111 !important;
+        color: #ffffff !important;
+        border-color: #f3d77a !important;
+        transform: translateY(-1px);
     }
 
     .kreo-nav-help {
@@ -7328,7 +7379,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V35.2")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V34")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
