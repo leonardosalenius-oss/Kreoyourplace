@@ -552,19 +552,26 @@ def area_cliente_premium_style():
         margin-top: 12px;
     }
 
-    /* Selectbox sidebar: valore selezionato sempre leggibile */
+    /* Selectbox sidebar: stile luxury nero + bordo oro */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background: #0b0b0b !important;
+        border: 1.5px solid #d4af37 !important;
+        border-radius: 14px !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.18), 0 8px 20px rgba(0,0,0,0.30) !important;
+    }
+
     section[data-testid="stSidebar"] div[data-baseweb="select"] div,
     section[data-testid="stSidebar"] div[data-baseweb="select"] span,
     section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-        color: #111111 !important;
-        -webkit-text-fill-color: #111111 !important;
+        color: #f5d76e !important;
+        -webkit-text-fill-color: #f5d76e !important;
         font-weight: 900 !important;
         opacity: 1 !important;
     }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] svg {
-        fill: #111111 !important;
-        color: #111111 !important;
+        fill: #d4af37 !important;
+        color: #d4af37 !important;
     }
 
     /* Radio sidebar leggibili */
@@ -573,29 +580,31 @@ def area_cliente_premium_style():
         font-weight: 800 !important;
     }
 
-    /* Pulsanti sidebar, incluso Logout */
+    /* Pulsanti sidebar, incluso Logout: nero + bordo oro */
     section[data-testid="stSidebar"] button {
-        background: #d4af37 !important;
-        color: #111111 !important;
-        border: 1px solid #f3d77a !important;
-        border-radius: 12px !important;
+        background: #0b0b0b !important;
+        color: #f5d76e !important;
+        border: 1.5px solid #d4af37 !important;
+        border-radius: 13px !important;
         font-weight: 900 !important;
         opacity: 1 !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.18), 0 8px 20px rgba(0,0,0,0.28) !important;
     }
 
     section[data-testid="stSidebar"] button p,
     section[data-testid="stSidebar"] button span,
     section[data-testid="stSidebar"] button div {
-        color: #111111 !important;
-        -webkit-text-fill-color: #111111 !important;
+        color: #f5d76e !important;
+        -webkit-text-fill-color: #f5d76e !important;
         font-weight: 900 !important;
         opacity: 1 !important;
     }
 
     section[data-testid="stSidebar"] button:hover {
-        background: #f3d77a !important;
-        color: #111111 !important;
-        border-color: #ffffff !important;
+        background: #151515 !important;
+        color: #ffffff !important;
+        border-color: #f3d77a !important;
+        box-shadow: 0 0 0 1px rgba(243,215,122,0.30), 0 10px 24px rgba(0,0,0,0.38) !important;
     }
 
     /* Etichette */
@@ -7319,7 +7328,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V34")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V35.2")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
