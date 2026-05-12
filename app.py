@@ -4449,7 +4449,7 @@ def render_import_presenze_storiche(key_suffix='main'):
     st.markdown("### Import presenze storiche")
     st.caption("Usa questa funzione una sola volta per portare vecchie presenze/accessi/cronologia nella nuova tabella presenze_clienti.")
     st.warning("Prima devi eseguire il file SQL: kreo_v46_presenze_clienti.sql")
-    if st.button("📥 Importa presenze storiche nella tabella centrale", key="import_presenze_storiche_v46"):
+    if st.button("📥 Importa presenze storiche nella tabella centrale", key=f"import_presenze_storiche_v46_unico_{key_suffix}"):
         res = sincronizza_presenze_storiche_in_centrale()
         st.success(f"Import completato. Create: {res['creati']} | saltate/già presenti: {res['saltati']}")
         st.rerun()
@@ -4696,7 +4696,7 @@ def render_lezioni_cumulative_admin():
     """)
 
     with st.expander("📥 Import presenze storiche in tabella centrale", expanded=False):
-        render_import_presenze_storiche('generale')
+        render_import_presenze_storiche('ricalcolo')
 
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
         res = aggiorna_contatori_cumulativi_clienti()
@@ -7368,10 +7368,6 @@ def main():
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
-
-        if is_admin():
-            with st.expander("📥 Import presenze centralizzate diretto"):
-                render_import_presenze_storiche('ricalcolo')
 
 
         if is_admin():
