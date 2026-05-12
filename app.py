@@ -3667,6 +3667,105 @@ def registra_acconto_iniziale_if_needed(cliente_id, data):
 
 
 
+
+def somma_pagamenti_cliente(cliente_id):
+    try:
+        pag = pagamenti_cliente(int(cliente_id))
+        if pag.empty:
+            return 0.0
+        return float(pd.to_numeric(pag["importo"], errors="coerce").fillna(0).sum())
+    except Exception:
+        return 0.0
+
+
+def allinea_incassi_mancanti_da_schede():
+    """
+    Crea righe reali nella tabella pagamenti quando importo_pagato in scheda cliente
+    è maggiore della somma dei movimenti già registrati.
+    Non modifica importo_pagato: storicizza solo la differenza mancante.
+    """
+    sb = get_supabase()
+    clienti = load_clienti()
+    if clienti.empty:
+        return {"creati": 0, "saltati": 0, "totale": 0.0}
+
+    creati = 0
+    saltati = 0
+    totale_creato = 0.0
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+            importo_pagato_scheda = float(c.get("importo_pagato") or 0)
+            if importo_pagato_scheda <= 0:
+                saltati += 1
+                continue
+
+            pagamenti_registrati = somma_pagamenti_cliente(cid)
+            differenza = round(importo_pagato_scheda - pagamenti_registrati, 2)
+
+            if differenza <= 0.01:
+                saltati += 1
+                continue
+
+            data_mov = c.get("data_iscrizione") or c.get("data_inizio_pacchetto") or date.today()
+
+            # Evita doppioni della stessa procedura
+            existing = (
+                sb.table("pagamenti")
+                .select("*")
+                .eq("cliente_id", cid)
+                .eq("metodo_pagamento", "ALLINEAMENTO SCHEDA")
+                .eq("importo", float(differenza))
+                .limit(1)
+                .execute()
+                .data
+            )
+            if existing:
+                saltati += 1
+                continue
+
+            payload = {
+                "cliente_id": cid,
+                "data_pagamento": str(data_mov),
+                "importo": float(differenza),
+                "metodo_pagamento": "ALLINEAMENTO SCHEDA",
+                "note": "Movimento creato automaticamente per allineare importo_pagato già presente nella scheda cliente.",
+                "registrato_da": user_label(),
+                "created_at": now_iso(),
+                "rata_label": "Allineamento incasso da scheda",
+            }
+            sb.table("pagamenti").insert(payload).execute()
+
+            insert_history(
+                cid,
+                "allineamento incasso",
+                euro(pagamenti_registrati),
+                euro(importo_pagato_scheda),
+                f"Creato movimento reale nello storico pagamenti per differenza: {euro(differenza)}"
+            )
+
+            creati += 1
+            totale_creato += float(differenza)
+        except Exception:
+            saltati += 1
+
+    return {"creati": creati, "saltati": saltati, "totale": totale_creato}
+
+
+def render_allinea_incassi_mancanti():
+    st.markdown("### Allinea incassi mancanti")
+    st.caption("Usa questa funzione solo se alcuni importi pagati sono presenti nella scheda cliente ma non compaiono nello storico pagamenti.")
+
+    st.warning("La ricevuta deve essere generata solo da un incasso reale presente nella tabella superiore. Questa funzione crea i movimenti mancanti nello storico, senza sommare di nuovo il saldo cliente.")
+
+    conferma = st.checkbox("Confermo di voler creare i movimenti mancanti nello storico pagamenti", key="confirm_allinea_incassi")
+    if conferma and st.button("🔄 Crea movimenti mancanti", key="btn_allinea_incassi"):
+        res = allinea_incassi_mancanti_da_schede()
+        st.success(f"Movimenti creati: {res['creati']} | saltati: {res['saltati']} | totale creato: {euro(res['totale'])}")
+        st.rerun()
+
+
 def crea_pagamento_da_scheda_cliente(cliente_id, importo=None, data_pagamento=None, metodo="DA SCHEDA CLIENTE", note="Movimento creato per emissione ricevuta da importo già presente in scheda cliente"):
     """
     Crea una riga pagamenti senza sommare di nuovo l'importo_pagato del cliente.
@@ -3747,44 +3846,7 @@ def crea_pagamento_da_scheda_cliente(cliente_id, importo=None, data_pagamento=No
 
 
 def render_ricevuta_da_scheda_cliente(labels):
-    st.markdown("### Ricevuta da importo già presente in scheda cliente")
-    st.caption("Usa questa funzione se il cliente risulta pagato in anagrafica ma non esiste ancora una riga nello storico pagamenti.")
-
-    selected_cliente = st.selectbox("Cliente per ricevuta da scheda", labels, key="ricevuta_cliente_da_scheda")
-    cid = int(selected_cliente.split(" - ")[0])
-    cliente = get_cliente(cid)
-    if not cliente:
-        st.warning("Cliente non trovato.")
-        return
-
-    importo_pagato = float(cliente.get("importo_pagato") or 0)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Importo contratto", euro(float(cliente.get("importo") or 0)))
-    c2.metric("Importo pagato in scheda", euro(importo_pagato))
-    c3.metric("Residuo", euro(max(float(cliente.get("importo") or 0) - importo_pagato, 0)))
-
-    data_pag = st.date_input("Data ricevuta", value=parse_date(cliente.get("data_iscrizione"), date.today()), format="DD/MM/YYYY", key="ricevuta_scheda_data")
-    importo_mov = st.number_input("Importo ricevuta", min_value=0.0, value=float(importo_pagato), step=10.0, key="ricevuta_scheda_importo")
-    metodo_mov = st.selectbox("Metodo", ["DA SCHEDA CLIENTE", "CONTANTI", "CARTA", "BONIFICO", "ALTRO"], key="ricevuta_scheda_metodo")
-    note_mov = st.text_area("Note ricevuta", value="Ricevuta generata da importo già presente nella scheda cliente.", key="ricevuta_scheda_note")
-
-    if st.button("🧾 Crea movimento e prepara ricevuta", key="crea_movimento_scheda_btn"):
-        ok, msg, new_id = crea_pagamento_da_scheda_cliente(cid, importo_mov, data_pag, metodo_mov, note_mov)
-        if ok:
-            st.success(msg)
-            if new_id:
-                st.session_state["ultimo_pagamento_creato_da_scheda"] = new_id
-                st.rerun()
-        else:
-            st.error(msg)
-
-    new_id = st.session_state.get("ultimo_pagamento_creato_da_scheda")
-    if new_id:
-        pagamento_pdf = get_pagamento_by_id(int(new_id))
-        if pagamento_pdf:
-            st.info(f"Ricevuta pronta per pagamento ID {new_id}.")
-            download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), int(new_id), "da_scheda")
-
+    st.info("Funzione disattivata: le ricevute possono essere generate solo da incassi reali presenti nello storico pagamenti.")
 
 def insert_pagamento(cliente_id, data_pagamento, importo, metodo_pagamento, note_pagamento, rata_num=None, rata_label=None):
     cliente = get_cliente(cliente_id)
@@ -6776,14 +6838,16 @@ def main():
 
             with tab4:
                 st.subheader("Storico pagamenti")
-                st.caption("Qui vedi tutti i movimenti presenti nella tabella pagamenti. Se un importo è solo nella scheda cliente, puoi creare il movimento per emettere la ricevuta.")
+                st.caption("Qui vedi tutti e solo i movimenti realmente registrati nella tabella pagamenti. Le ricevute si generano esclusivamente da questi incassi.")
                 pag_df = load_pagamenti()
                 clienti_df = df[["id", "nome", "cognome"]].copy()
                 clienti_df["cliente"] = clienti_df["nome"].fillna("") + " " + clienti_df["cognome"].fillna("")
 
                 if pag_df.empty:
                     st.info("Nessun pagamento registrato nello storico.")
-                    render_ricevuta_da_scheda_cliente(labels)
+                    if is_admin():
+                        with st.expander("🔄 Allinea incassi mancanti da schede clienti"):
+                            render_allinea_incassi_mancanti()
                 else:
                     pag_view = pag_df.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
 
@@ -6827,8 +6891,9 @@ def main():
                         if pagamento_pdf:
                             download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), pagamento_id_pdf, "storico")
 
-                    with st.expander("🧾 Crea ricevuta da importo già presente in scheda cliente"):
-                        render_ricevuta_da_scheda_cliente(labels)
+                    if is_admin():
+                        with st.expander("🔄 Allinea incassi mancanti da schede clienti"):
+                            render_allinea_incassi_mancanti()
 
                     if is_admin():
                         with st.expander("Pulizia duplicati pagamenti"):
