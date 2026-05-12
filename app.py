@@ -1,27 +1,3 @@
-
-# ============================================================
-# KREO PLATFORM
-# Developed by Pentti Salenius © 2026
-#
-# Proprietary Wellness Management Platform
-# Internal architecture:
-# - Reception workflow
-# - Agenda Luxury
-# - Badge & access integration
-# - Payments & receipts
-# - WhatsApp communications
-# - Role management
-# - Analytics & operational flows
-#
-# This platform is proprietary software.
-# Unauthorized redistribution or reproduction is prohibited.
-# ============================================================
-
-
-PLATFORM_AUTHOR = "Pentti Salenius"
-PLATFORM_COPYRIGHT = "Developed by Pentti Salenius © 2026"
-
-
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -79,9 +55,50 @@ def current_user():
     return st.session_state.get("user", None)
 
 
+def _user_identity_text():
+    u = current_user() or {}
+    return " ".join([
+        str(u.get("nome") or ""),
+        str(u.get("username") or ""),
+        str(u.get("email") or ""),
+        str(u.get("ruolo") or ""),
+    ]).strip().lower()
+
+
+def is_pentti_user():
+    ident = _user_identity_text()
+    return any(x in ident for x in ["pentti", "leonardo", "leonardosalenius"])
+
+
+def is_rosario_user():
+    ident = _user_identity_text()
+    return "rosario" in ident
+
+
+def is_reception_limited_user():
+    ident = _user_identity_text()
+    # Enzo / Vincenzo / Federica devono vedere solo Reception e Calendario,
+    # anche se in Supabase risultassero temporaneamente come admin.
+    return any(x in ident for x in ["federica", "vincenzo", " enzo", "enzo ", "enzo", "frontdesk", "reception"])
+
+
 def is_admin():
     u = current_user()
-    return bool(u and u.get("ruolo") == "admin")
+    if not u:
+        return False
+    if is_reception_limited_user():
+        return False
+    return bool(u and str(u.get("ruolo") or "").lower() == "admin") or is_pentti_user() or is_rosario_user()
+
+
+def can_delete():
+    # Eliminazioni definitive consentite solo a Pentti.
+    # Rosario vede tutto e gestisce tutto, ma non elimina.
+    return is_pentti_user()
+
+
+def can_view_full_menu():
+    return is_pentti_user() or is_rosario_user() or is_admin()
 
 
 def user_label():
@@ -301,6 +318,8 @@ def update_cliente(cliente_id, new_data):
 
 
 def delete_cliente(cliente_id):
+    if not can_delete():
+        return False, "Eliminazione non autorizzata per questo profilo."
     sb = get_supabase()
     sb.table("clienti").delete().eq("id", int(cliente_id)).execute()
     sb.table("cronologia").delete().eq("cliente_id", int(cliente_id)).execute()
@@ -978,34 +997,19 @@ def build_whatsapp_url(phone, message):
 
 
 def get_next_lezione_cliente(cliente_id):
-    """Restituisce la prossima lezione del cliente in modo sicuro.
-    Fix V35.1: evita crash se cliente_id è vuoto/NaN o se la colonna contiene valori sporchi.
-    """
-    if cliente_id is None or str(cliente_id).strip() in ("", "nan", "None"):
-        return None
-    try:
-        cid = int(float(cliente_id))
-    except Exception:
-        return None
-
     try:
         lez_df = load_lezioni()
     except Exception:
         return None
-    if lez_df is None or lez_df.empty or "cliente_id" not in lez_df.columns:
+    if lez_df.empty:
         return None
-
     today_ts = pd.Timestamp(date.today())
-    work = lez_df.copy()
-    work["cliente_id_num"] = pd.to_numeric(work.get("cliente_id"), errors="coerce").astype("Int64")
-    work["data_dt"] = pd.to_datetime(work.get("data_lezione"), errors="coerce")
-
-    stato_col = work.get("stato", pd.Series([""] * len(work))).astype(str).str.upper()
-    sub = work[
-        (work["cliente_id_num"] == cid) &
-        (work["data_dt"] >= today_ts) &
-        (stato_col.isin(["RICHIESTA CLIENTE", "PRENOTATO", "RECUPERO"]))
-    ].sort_values(["data_dt", "ora_inizio"], na_position="last")
+    lez_df["data_dt"] = pd.to_datetime(lez_df["data_lezione"], errors="coerce")
+    sub = lez_df[
+        (lez_df["cliente_id"].astype(int) == int(cliente_id)) &
+        (lez_df["data_dt"] >= today_ts) &
+        (lez_df["stato"].isin(["RICHIESTA CLIENTE", "PRENOTATO", "RECUPERO"]))
+    ].sort_values(["data_dt", "ora_inizio"])
     if sub.empty:
         return None
     return sub.iloc[0].to_dict()
@@ -1080,102 +1084,6 @@ def registra_notifica(cliente_id, template, messaggio):
         f"Messaggio generato da {user_label()}: {messaggio[:250]}"
     )
     return True
-
-
-
-def template_from_alert_text(alert_text):
-    """Mappa l'alert operativo al template WhatsApp più adatto."""
-    txt = str(alert_text or "").lower()
-    if "certificato" in txt and ("mancante" in txt or "consegnato" in txt):
-        return "CERTIFICATO MEDICO MANCANTE"
-    if "certificato" in txt and ("scad" in txt or "scaden" in txt):
-        return "CERTIFICATO MEDICO IN SCADENZA"
-    if "rata" in txt or "saldo" in txt or "pagare" in txt or "residuo" in txt:
-        return "RESIDUO DA SALDARE"
-    if "abbonamento" in txt or "rinnovo" in txt:
-        return "RINNOVO / PROSSIMA RATA"
-    if "lezion" in txt and ("residue" in txt or "basse" in txt or "esaur" in txt):
-        return "LEZIONI RESIDUE BASSE"
-    return "MESSAGGIO PERSONALIZZATO"
-
-
-def render_alert_message_center(df, context_key="alert_msg_center"):
-    """Centro operativo: da alert a messaggio WhatsApp pronto, senza far cercare il cliente allo staff."""
-    if df is None or df.empty:
-        st.info("Nessun cliente disponibile.")
-        return
-
-    alert_df = build_alert_dashboard(df)
-    if alert_df.empty:
-        st.success("Nessun alert aperto. Ottimo lavoro.")
-        return
-
-    st.markdown("### 🚨 Alert con azione rapida")
-    st.caption("Scegli un alert: KREO prepara automaticamente il messaggio più coerente per il cliente.")
-
-    priorita = st.multiselect(
-        "Priorità da mostrare",
-        ["ALTA", "MEDIA"],
-        default=["ALTA", "MEDIA"],
-        key=f"{context_key}_priorita",
-    )
-    filtered = alert_df[alert_df["Priorità"].isin(priorita)].copy()
-    if filtered.empty:
-        st.info("Nessun alert con i filtri selezionati.")
-        return
-
-    st.dataframe(filtered, use_container_width=True, hide_index=True)
-
-    options = []
-    for i, row in filtered.reset_index(drop=True).iterrows():
-        label = f"{int(row['ID'])} - {row['Cliente']} | {row['Priorità']} | {row['Alert']}"
-        options.append(label)
-
-    selected_alert = st.selectbox("Alert da gestire", options, key=f"{context_key}_selected")
-    selected_id = int(selected_alert.split(" - ")[0])
-    selected_row = filtered[filtered["ID"].astype(int) == selected_id].iloc[0]
-    cliente = get_cliente(selected_id)
-
-    if not cliente:
-        st.error("Cliente non trovato.")
-        return
-
-    suggested_template = template_from_alert_text(selected_row.get("Alert", ""))
-    template_options = [
-        "CERTIFICATO MEDICO MANCANTE",
-        "CERTIFICATO MEDICO IN SCADENZA",
-        "RESIDUO DA SALDARE",
-        "RINNOVO / PROSSIMA RATA",
-        "LEZIONI RESIDUE BASSE",
-        "PROMEMORIA LEZIONE",
-        "MESSAGGIO PERSONALIZZATO",
-    ]
-    default_idx = template_options.index(suggested_template) if suggested_template in template_options else 0
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Cliente", f"{cliente.get('nome','')} {cliente.get('cognome','')}")
-    c2.metric("Telefono", cliente.get("cellulare", "") or "mancante")
-    c3.metric("Priorità", selected_row.get("Priorità", ""))
-
-    template = st.selectbox(
-        "Template suggerito",
-        template_options,
-        index=default_idx,
-        key=f"{context_key}_template",
-    )
-
-    custom_message = ""
-    if template == "MESSAGGIO PERSONALIZZATO":
-        custom_message = st.text_area("Messaggio personalizzato", key=f"{context_key}_custom")
-
-    msg = genera_testo_whatsapp(cliente, template, custom_message)
-    msg = st.text_area("Messaggio pronto", value=msg, height=150, key=f"{context_key}_msg")
-    url = build_whatsapp_url(cliente.get("cellulare", ""), msg)
-
-    st.markdown(f"[📲 Apri WhatsApp con messaggio pronto]({url})", unsafe_allow_html=True)
-    if st.button("✅ Registra contatto in cronologia", key=f"{context_key}_register"):
-        registra_notifica(selected_id, template, msg)
-        st.success("Contatto registrato nella cronologia cliente.")
 
 
 
@@ -1614,268 +1522,96 @@ def calendar_color_for_type(tipo, stato=None):
     return "#64748b"
 
 
-
-@st.cache_data(ttl=60, show_spinner=False)
-def load_disponibilita_range(date_min, date_max):
-    """Carica solo gli slot nel range visibile del calendario. Cache breve per rendere il calendario fluido."""
-    sb = get_supabase()
-    try:
-        data = (
-            sb.table("disponibilita_calendario")
-            .select("id,data_slot,ora_inizio,ora_fine,trainer,tipo_slot,max_posti,attivo")
-            .gte("data_slot", str(date_min))
-            .lte("data_slot", str(date_max))
-            .order("data_slot", desc=False)
-            .execute()
-            .data
-        )
-    except Exception:
-        data = []
-    df = pd.DataFrame(data)
-    return df
-
-
-@st.cache_data(ttl=45, show_spinner=False)
-def load_lezioni_range(date_min, date_max):
-    """Carica solo lezioni/prenotazioni nel range visibile del calendario. Cache breve anti-lentezza."""
-    sb = get_supabase()
-    try:
-        data = (
-            sb.table("lezioni")
-            .select("id,cliente_id,slot_id,data_lezione,ora_inizio,ora_fine,trainer,stato,note")
-            .gte("data_lezione", str(date_min))
-            .lte("data_lezione", str(date_max))
-            .order("data_lezione", desc=False)
-            .execute()
-            .data
-        )
-    except Exception:
-        data = []
-    df = pd.DataFrame(data)
-    if not df.empty and "data_lezione" in df.columns:
-        df["data_lezione_it"] = df["data_lezione"].apply(format_date_it)
-    return df
-
-
-@st.cache_data(ttl=90, show_spinner=False)
-def load_clienti_calendar_map():
-    """Mappa clienti minima per il calendario: evita di caricare tutta l'anagrafica a ogni refresh."""
-    sb = get_supabase()
-    try:
-        data = (
-            sb.table("clienti")
-            .select("id,nome,cognome,cellulare,pacchetto,numero_lezioni,lezioni_utilizzate")
-            .execute()
-            .data
-        )
-    except Exception:
-        data = []
-
-    out = {}
-    for c in data or []:
-        try:
-            cid = int(c.get("id"))
-            pac = c.get("pacchetto", "")
-            numero = int(c.get("numero_lezioni") or 0)
-            usate = int(c.get("lezioni_utilizzate") or 0)
-            out[cid] = {
-                "nome": f"{c.get('nome','')} {c.get('cognome','')}".strip(),
-                "cellulare": c.get("cellulare", ""),
-                "pacchetto": pac,
-                "tipo": pacchetto_tipo(pac),
-                "lezioni_residue": max(numero - usate, 0),
-            }
-        except Exception:
-            continue
-    return out
-
-
-def clear_calendar_cache():
-    """Svuota cache calendario dopo inserimenti/modifiche, così resta veloce ma aggiornato."""
-    try:
-        load_lezioni_range.clear()
-    except Exception:
-        pass
-    try:
-        load_disponibilita_range.clear()
-    except Exception:
-        pass
-    try:
-        load_clienti_calendar_map.clear()
-    except Exception:
-        pass
-
-
-def get_calendar_trainer_options(date_min, date_max):
-    opts = ["Tutti"]
-    try:
-        default_trainer = get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
-        if default_trainer and default_trainer not in opts:
-            opts.append(default_trainer)
-    except Exception:
-        pass
-    try:
-        lez = load_lezioni_range(date_min, date_max)
-        if not lez.empty and "trainer" in lez.columns:
-            for t in sorted(lez["trainer"].dropna().astype(str).unique().tolist()):
-                if t and t not in opts:
-                    opts.append(t)
-    except Exception:
-        pass
-    try:
-        slots = load_disponibilita_range(date_min, date_max)
-        if not slots.empty and "trainer" in slots.columns:
-            for t in sorted(slots["trainer"].dropna().astype(str).unique().tolist()):
-                if t and t not in opts:
-                    opts.append(t)
-    except Exception:
-        pass
-    return opts
-
-
-def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="Tutti", show_free_slots=False):
-    """
-    V34.2 - Calendario leggero e coerente:
-    - carica solo il range selezionato;
-    - filtra per trainer;
-    - mostra le prenotazioni con il colore del pacchetto cliente;
-    - su modalità turbo mostra solo le lezioni; gli slot liberi si attivano a richiesta.
-    """
+def build_premium_calendar_events():
     events = []
 
-    today = date.today()
-    if date_min is None:
-        date_min = today - timedelta(days=today.weekday())
-    if date_max is None:
-        date_max = date_min + timedelta(days=27)
-
-    if show_free_slots:
-        try:
-            slots = load_disponibilita_range(date_min, date_max)
-        except Exception:
-            slots = pd.DataFrame()
-    else:
+    try:
+        slots = load_disponibilita()
+    except Exception:
         slots = pd.DataFrame()
 
     try:
-        lez = load_lezioni_range(date_min, date_max)
+        lez = load_lezioni()
     except Exception:
         lez = pd.DataFrame()
 
-    trainer_filter_norm = str(trainer_filter or "Tutti").strip()
-    if trainer_filter_norm and trainer_filter_norm != "Tutti":
-        if not slots.empty and "trainer" in slots.columns:
-            slots = slots[slots["trainer"].astype(str) == trainer_filter_norm].copy()
-        if not lez.empty and "trainer" in lez.columns:
-            lez = lez[lez["trainer"].astype(str) == trainer_filter_norm].copy()
-
+    # Occupazione per slot e nomi clienti
+    clienti_map = {}
     try:
-        clienti_map = load_clienti_calendar_map()
+        clienti_df = load_clienti()
+        if not clienti_df.empty:
+            for _, c in clienti_df.iterrows():
+                clienti_map[int(c["id"])] = f"{c.get('nome','')} {c.get('cognome','')}".strip()
     except Exception:
         clienti_map = {}
 
     pren_by_slot = {}
     if not lez.empty and "slot_id" in lez.columns:
-        lez_valid = lez[~lez["stato"].astype(str).str.upper().isin(["ANNULLATO"])] .copy()
+        lez_valid = lez[~lez["stato"].isin(["ANNULLATO"])].copy()
         for _, r in lez_valid.iterrows():
             sid = r.get("slot_id")
             if pd.isna(sid):
                 continue
-            try:
-                sid = int(sid)
-            except Exception:
-                continue
+            sid = int(sid)
             pren_by_slot.setdefault(sid, []).append(r.to_dict())
 
-    # Slot disponibili o prenotazioni legate a slot.
     if not slots.empty:
-        for _, srow in slots.iterrows():
+        for _, s in slots.iterrows():
             try:
-                if "attivo" in srow and str(srow.get("attivo")).lower() in ["false", "0", "no"]:
-                    continue
-                sid = int(srow["id"])
-                data_slot = str(srow.get("data_slot"))
-                start = str(srow.get("ora_inizio"))[:5]
-                end = str(srow.get("ora_fine"))[:5]
-                tipo = srow.get("tipo_slot", "")
-                trainer = srow.get("trainer", "")
-                maxp = int(srow.get("max_posti") or 1)
+                sid = int(s["id"])
+                data_slot = str(s.get("data_slot"))
+                start = str(s.get("ora_inizio"))[:5]
+                end = str(s.get("ora_fine"))[:5]
+                tipo = s.get("tipo_slot", "")
+                trainer = s.get("trainer", "")
+                maxp = int(s.get("max_posti") or 1)
                 pren = pren_by_slot.get(sid, [])
                 occ = len(pren)
+                liberi = max(maxp - occ, 0)
+                title = f"{tipo} · {occ}/{maxp}"
+                if trainer:
+                    title += f" · {trainer}"
 
-                if pren:
-                    # Le prenotazioni reali vincono graficamente sullo slot: colore = pacchetto cliente.
-                    for p_lez in pren:
-                        lid = int(p_lez.get("id"))
-                        cid = int(p_lez.get("cliente_id")) if p_lez.get("cliente_id") is not None else 0
-                        cinfo = clienti_map.get(cid, {})
-                        cliente_nome = cinfo.get("nome", "Cliente")
-                        stato = str(p_lez.get("stato", "PRENOTATO"))
-                        tipo_cliente = cinfo.get("tipo", tipo)
-                        color = calendar_color_for_type(tipo_cliente, stato if "RICHIESTA" in stato.upper() or "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper() else None)
-                        events.append({
-                            "id": f"lezione-{lid}",
-                            "title": f"{cliente_nome} · {stato}",
-                            "start": f"{data_slot}T{start}:00",
-                            "end": f"{data_slot}T{end}:00",
-                            "backgroundColor": color,
-                            "borderColor": color,
-                            "extendedProps": {
-                                "kind": "lezione",
-                                "lezione_id": lid,
-                                "cliente_id": cid,
-                                "cliente": cliente_nome,
-                                "pacchetto": cinfo.get("pacchetto", ""),
-                                "lezioni_residue": cinfo.get("lezioni_residue", ""),
-                                "trainer": trainer,
-                                "stato": stato,
-                                "tipo": tipo_cliente,
-                                "slot_id": sid,
-                            }
-                        })
-                else:
-                    # Slot libero: colore tenue del tipo slot.
-                    color = calendar_color_for_type(tipo)
-                    events.append({
-                        "id": f"slot-{sid}",
-                        "title": f"DISPONIBILE · {tipo} · 0/{maxp}",
-                        "start": f"{data_slot}T{start}:00",
-                        "end": f"{data_slot}T{end}:00",
-                        "backgroundColor": color,
-                        "borderColor": color,
-                        "extendedProps": {
-                            "kind": "slot",
-                            "slot_id": sid,
-                            "tipo": tipo,
-                            "trainer": trainer,
-                            "posti": f"0/{maxp}",
-                            "clienti": "",
-                        }
-                    })
+                color = calendar_color_for_type(tipo, "PIENO" if liberi <= 0 else "")
+
+                events.append({
+                    "id": f"slot-{sid}",
+                    "title": title,
+                    "start": f"{data_slot}T{start}:00",
+                    "end": f"{data_slot}T{end}:00",
+                    "backgroundColor": color,
+                    "borderColor": color,
+                    "extendedProps": {
+                        "kind": "slot",
+                        "slot_id": sid,
+                        "tipo": tipo,
+                        "trainer": trainer,
+                        "posti": f"{occ}/{maxp}",
+                        "clienti": ", ".join([clienti_map.get(int(p.get("cliente_id")), "Cliente") for p in pren if p.get("cliente_id")]),
+                    }
+                })
             except Exception:
                 continue
 
-    # Lezioni senza slot_id.
+    # Lezioni senza slot_id, così non si perdono prenotazioni manuali vecchie
     if not lez.empty:
         for _, r in lez.iterrows():
             try:
-                if show_free_slots and "slot_id" in r and not pd.isna(r.get("slot_id")):
+                if "slot_id" in r and not pd.isna(r.get("slot_id")):
                     continue
                 lid = int(r["id"])
                 data_l = str(r.get("data_lezione"))
                 start = str(r.get("ora_inizio"))[:5]
                 end = str(r.get("ora_fine"))[:5]
-                stato = str(r.get("stato", ""))
+                stato = r.get("stato", "")
                 trainer = r.get("trainer", "")
-                cid = int(r.get("cliente_id")) if not pd.isna(r.get("cliente_id")) else 0
-                cinfo = clienti_map.get(cid, {})
-                cliente_nome = cinfo.get("nome", "Cliente")
-                tipo_cliente = cinfo.get("tipo", "")
-                color = calendar_color_for_type(tipo_cliente, stato if "RICHIESTA" in stato.upper() or "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper() else None)
+                cliente_nome = clienti_map.get(int(r.get("cliente_id")), "Cliente")
+                title = f"{cliente_nome} · {stato}"
+                color = calendar_color_for_type("", stato)
 
                 events.append({
                     "id": f"lezione-{lid}",
-                    "title": f"{cliente_nome} · {stato}",
+                    "title": title,
                     "start": f"{data_l}T{start}:00",
                     "end": f"{data_l}T{end}:00",
                     "backgroundColor": color,
@@ -1883,19 +1619,16 @@ def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="
                     "extendedProps": {
                         "kind": "lezione",
                         "lezione_id": lid,
-                        "cliente_id": cid,
                         "cliente": cliente_nome,
-                        "pacchetto": cinfo.get("pacchetto", ""),
-                        "lezioni_residue": cinfo.get("lezioni_residue", ""),
                         "trainer": trainer,
                         "stato": stato,
-                        "tipo": tipo_cliente,
                     }
                 })
             except Exception:
                 continue
 
     return events
+
 
 
 def time_to_minutes(t):
@@ -2204,308 +1937,9 @@ def render_calendario_unificato_staff():
                 st.rerun()
 
 
-
-
-
-def render_agenda_luxury():
-    """V35 - Agenda Luxury: vista operativa rapida, senza rendering pesante del calendario completo."""
-    st.header("✨ Agenda Luxury")
-    st.caption("Vista concierge veloce: oggi, clienti attesi, check-in, WhatsApp e azioni rapide. Il calendario completo resta nella Vista avanzata.")
-
-    today = date.today()
-    c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.4, 1.2])
-    with c1:
-        giorno_base = st.date_input("Giorno", value=today, format="DD/MM/YYYY", key="agenda_luxury_giorno")
-    with c2:
-        vista = st.selectbox("Vista", ["Oggi", "Domani", "7 giorni"], index=2, key="agenda_luxury_vista")
-    if vista == "Domani":
-        date_min = giorno_base + timedelta(days=1)
-        date_max = date_min
-    elif vista == "7 giorni":
-        date_min = giorno_base
-        date_max = giorno_base + timedelta(days=6)
-    else:
-        date_min = giorno_base
-        date_max = giorno_base
-
-    lez = load_lezioni_range(date_min, date_max)
-    clienti_map = load_clienti_calendar_map()
-
-    trainer_options = ["Tutti"]
-    if not lez.empty and "trainer" in lez.columns:
-        trainer_options += sorted([x for x in lez["trainer"].dropna().astype(str).unique().tolist() if x])
-    trainer_options = list(dict.fromkeys(trainer_options))
-    with c3:
-        trainer_filter = st.selectbox("Trainer", trainer_options, key="agenda_luxury_trainer")
-    with c4:
-        mostra_annullate = st.checkbox("Mostra annullate", value=False, key="agenda_luxury_annullate")
-
-    if not lez.empty:
-        if trainer_filter != "Tutti" and "trainer" in lez.columns:
-            lez = lez[lez["trainer"].astype(str) == trainer_filter].copy()
-        if not mostra_annullate and "stato" in lez.columns:
-            lez = lez[~lez["stato"].astype(str).str.upper().isin(["ANNULLATO"])] .copy()
-
-    # arricchimento leggero senza chiamate Supabase per ogni cliente
-    rows = []
-    if not lez.empty:
-        for _, r in lez.iterrows():
-            try:
-                cid = int(r.get("cliente_id")) if r.get("cliente_id") is not None and not pd.isna(r.get("cliente_id")) else 0
-            except Exception:
-                cid = 0
-            cinfo = clienti_map.get(cid, {})
-            rows.append({
-                "id": int(r.get("id")),
-                "data": str(r.get("data_lezione", "")),
-                "ora": str(r.get("ora_inizio", ""))[:5],
-                "fine": str(r.get("ora_fine", ""))[:5],
-                "cliente_id": cid,
-                "cliente": cinfo.get("nome", "Cliente"),
-                "cellulare": cinfo.get("cellulare", ""),
-                "pacchetto": cinfo.get("pacchetto", ""),
-                "tipo": cinfo.get("tipo", ""),
-                "residue": cinfo.get("lezioni_residue", ""),
-                "trainer": str(r.get("trainer", "")),
-                "stato": str(r.get("stato", "PRENOTATO")),
-                "note": str(r.get("note", "") or ""),
-            })
-
-    agenda_df = pd.DataFrame(rows)
-    if not agenda_df.empty:
-        agenda_df = agenda_df.sort_values(["data", "ora", "trainer", "cliente"], ascending=True)
-
-    # KPI rapidi, senza caricare la griglia completa degli slot.
-    tot = int(len(agenda_df)) if not agenda_df.empty else 0
-    presenti = int((agenda_df["stato"].astype(str).str.upper() == "PRESENTE").sum()) if not agenda_df.empty else 0
-    prenotati = int((agenda_df["stato"].astype(str).str.upper() == "PRENOTATO").sum()) if not agenda_df.empty else 0
-    richieste = int((agenda_df["stato"].astype(str).str.upper().str.contains("RICHIESTA", na=False)).sum()) if not agenda_df.empty else 0
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Clienti attesi", tot)
-    k2.metric("Check-in", presenti)
-    k3.metric("Prenotati", prenotati)
-    k4.metric("Richieste", richieste)
-
-    st.markdown("---")
-
-    left, right = st.columns([1.8, 1])
-    with left:
-        st.subheader("Timeline operativa")
-        if agenda_df.empty:
-            st.success("Nessuna lezione nel range selezionato. Vista pulita e caricamento immediato.")
-        else:
-            for _, row in agenda_df.iterrows():
-                lezione_id = int(row["id"])
-                stato = str(row.get("stato", ""))
-                tipo = str(row.get("tipo", ""))
-                color = calendar_color_for_type(tipo, stato if "RICHIESTA" in stato.upper() or "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper() else None)
-                border = "#1d1d1f"
-                if stato.upper() == "PRESENTE":
-                    status_badge = "✅ Presente"
-                elif stato.upper() == "ANNULLATO":
-                    status_badge = "🚫 Annullata"
-                elif "RICHIESTA" in stato.upper():
-                    status_badge = "🟣 Richiesta"
-                else:
-                    status_badge = "⏳ Prenotata"
-
-                st.markdown(
-                    f"""
-                    <div style="border:1px solid rgba(255,255,255,.10); border-left:7px solid {color}; border-radius:18px; padding:14px 16px; margin:10px 0; background:linear-gradient(135deg, rgba(255,255,255,.055), rgba(255,255,255,.025)); box-shadow:0 10px 28px rgba(0,0,0,.18);">
-                        <div style="display:flex; justify-content:space-between; gap:14px; align-items:center;">
-                            <div>
-                                <div style="font-size:18px; font-weight:900; color:#ffffff;">{format_date_it(row['data'])} · {row['ora']} - {row['fine']}</div>
-                                <div style="font-size:15px; color:#f3f3f3; margin-top:4px;"><b>{row['cliente']}</b> · {row['pacchetto'] or row['tipo']} · {row['trainer']}</div>
-                                <div style="font-size:12px; color:#cfcfcf; margin-top:4px;">Lezioni residue: {row['residue']} · {status_badge}</div>
-                            </div>
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
-                with b1:
-                    if st.button("Apri", key=f"agenda_open_{lezione_id}", use_container_width=True):
-                        st.session_state["agenda_luxury_selected"] = lezione_id
-                        st.rerun()
-                with b2:
-                    if st.button("✅ Check-in", key=f"agenda_checkin_{lezione_id}", use_container_width=True, disabled=(stato.upper()=="PRESENTE")):
-                        ok, msg = update_stato_lezione(lezione_id, "PRESENTE")
-                        try:
-                            if int(row.get("cliente_id") or 0):
-                                aggiorna_contatori_dopo_presenza_lezione(int(row.get("cliente_id")))
-                        except Exception:
-                            pass
-                        if ok:
-                            clear_calendar_cache()
-                            st.success("Check-in registrato.")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                with b3:
-                    cliente = None
-                    if int(row.get("cliente_id") or 0):
-                        # Chiamata solo quando serve renderizzare il bottone WhatsApp della riga.
-                        cliente = {"cellulare": row.get("cellulare", ""), "nome": str(row.get("cliente", "")).split(" ")[0], "cognome": "", "pacchetto": row.get("pacchetto", "")}
-                    if cliente and cliente.get("cellulare"):
-                        msg = genera_testo_whatsapp(cliente, "PROMEMORIA LEZIONE")
-                        st.link_button("📲 WhatsApp", build_whatsapp_url(cliente.get("cellulare", ""), msg), use_container_width=True)
-                    else:
-                        st.button("📲 WhatsApp", key=f"agenda_wa_disabled_{lezione_id}", use_container_width=True, disabled=True)
-                with b4:
-                    if st.button("🚫 Annulla", key=f"agenda_cancel_{lezione_id}", use_container_width=True, disabled=(stato.upper()=="ANNULLATO")):
-                        ok, msg = update_stato_lezione(lezione_id, "ANNULLATO")
-                        if ok:
-                            clear_calendar_cache()
-                            st.warning("Lezione annullata.")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-    with right:
-        st.subheader("Dettaglio concierge")
-        selected_id = st.session_state.get("agenda_luxury_selected")
-        if not selected_id:
-            st.info("Seleziona una lezione dalla timeline per aprire il dettaglio operativo.")
-        else:
-            selected_row = agenda_df[agenda_df["id"] == int(selected_id)] if not agenda_df.empty else pd.DataFrame()
-            if selected_row.empty:
-                st.warning("La lezione selezionata non è più nel range corrente.")
-                st.session_state.pop("agenda_luxury_selected", None)
-            else:
-                sr = selected_row.iloc[0].to_dict()
-                cliente = get_cliente(int(sr.get("cliente_id") or 0)) if int(sr.get("cliente_id") or 0) else None
-                st.markdown(f"### {sr.get('cliente')}")
-                st.caption(f"{format_date_it(sr.get('data'))} · {sr.get('ora')} - {sr.get('fine')} · {sr.get('trainer')}")
-                d1, d2 = st.columns(2)
-                d1.metric("Pacchetto", sr.get("pacchetto") or sr.get("tipo") or "-")
-                d2.metric("Stato", sr.get("stato") or "-")
-                d3, d4 = st.columns(2)
-                d3.metric("Lezioni residue", sr.get("residue") if sr.get("residue") != "" else "-")
-                if cliente:
-                    try:
-                        residuo = max(float(cliente.get("importo") or 0) - float(cliente.get("importo_pagato") or 0), 0)
-                    except Exception:
-                        residuo = 0
-                    d4.metric("Saldo aperto", euro(residuo))
-                    alerts = get_cliente_alerts(cliente)
-                    if alerts:
-                        st.markdown("#### Alert cliente")
-                        render_alerts(alerts)
-                    else:
-                        st.success("Nessun alert critico sul cliente.")
-
-                    msg = genera_testo_whatsapp(cliente, "PROMEMORIA LEZIONE")
-                    st.link_button("📲 Invia promemoria WhatsApp", build_whatsapp_url(cliente.get("cellulare", ""), msg), use_container_width=True)
-                    if st.button("Apri scheda cliente", key=f"agenda_open_cliente_{selected_id}", use_container_width=True):
-                        st.session_state["reception_target"] = "✏️ Modifica cliente"
-                        st.info("Vai su Clienti → Modifica cliente per aprire la scheda completa.")
-                else:
-                    st.info("Cliente non trovato o lezione non collegata a cliente.")
-
-                st.markdown("#### Azioni rapide")
-                q1, q2 = st.columns(2)
-                with q1:
-                    if st.button("✅ Conferma presenza", key=f"agenda_detail_checkin_{selected_id}", use_container_width=True):
-                        ok, msg = update_stato_lezione(int(selected_id), "PRESENTE")
-                        try:
-                            if int(sr.get("cliente_id") or 0):
-                                aggiorna_contatori_dopo_presenza_lezione(int(sr.get("cliente_id")))
-                        except Exception:
-                            pass
-                        if ok:
-                            clear_calendar_cache()
-                            st.success("Presenza confermata.")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-                with q2:
-                    if st.button("🚫 Annulla lezione", key=f"agenda_detail_cancel_{selected_id}", use_container_width=True):
-                        ok, msg = update_stato_lezione(int(selected_id), "ANNULLATO")
-                        if ok:
-                            clear_calendar_cache()
-                            st.warning("Lezione annullata.")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-                with st.expander("✏️ Modifica rapida orario / trainer"):
-                    m1, m2 = st.columns(2)
-                    with m1:
-                        nuova_data = st.date_input("Data", value=parse_date(sr.get("data"), date.today()), format="DD/MM/YYYY", key=f"agenda_mod_data_{selected_id}")
-                        nuovo_start = st.time_input("Ora inizio", value=datetime.strptime(sr.get("ora") or "09:00", "%H:%M").time(), key=f"agenda_mod_start_{selected_id}")
-                    with m2:
-                        nuovo_end = st.time_input("Ora fine", value=datetime.strptime(sr.get("fine") or "10:00", "%H:%M").time(), key=f"agenda_mod_end_{selected_id}")
-                        nuovo_trainer = st.text_input("Trainer", value=sr.get("trainer", ""), key=f"agenda_mod_trainer_{selected_id}")
-                    if st.button("💾 Salva modifica", key=f"agenda_mod_save_{selected_id}", use_container_width=True):
-                        try:
-                            sb = get_supabase()
-                            sb.table("lezioni").update({
-                                "data_lezione": str(nuova_data),
-                                "ora_inizio": nuovo_start.strftime("%H:%M"),
-                                "ora_fine": nuovo_end.strftime("%H:%M"),
-                                "trainer": nuovo_trainer,
-                                "updated_at": now_iso(),
-                                "aggiornata_da": user_label(),
-                            }).eq("id", int(selected_id)).execute()
-                            clear_calendar_cache()
-                            st.success("Lezione aggiornata.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Errore modifica lezione: {e}")
-
-    st.markdown("---")
-    with st.expander("➕ Inserimento rapido lezione", expanded=False):
-        st.caption("Creazione veloce senza aprire il calendario pesante.")
-        df_clienti = load_clienti()
-        if df_clienti.empty:
-            st.info("Nessun cliente disponibile.")
-        else:
-            dfc = df_clienti.sort_values("id", ascending=True).copy()
-            labels = (dfc["id"].astype(str) + " - " + dfc["nome"] + " " + dfc["cognome"]).tolist()
-            i1, i2, i3 = st.columns([1.8, 1, 1])
-            with i1:
-                selected = st.selectbox("Cliente", labels, key="agenda_quick_cliente")
-                cliente_id = int(selected.split(" - ")[0])
-            with i2:
-                data_lezione = st.date_input("Data", value=giorno_base, format="DD/MM/YYYY", key="agenda_quick_data")
-            with i3:
-                ora_inizio = st.time_input("Ora", value=datetime.strptime("09:00", "%H:%M").time(), key="agenda_quick_ora")
-            j1, j2, j3 = st.columns(3)
-            with j1:
-                durata = st.number_input("Durata min", min_value=30, max_value=180, value=60, step=15, key="agenda_quick_durata")
-            with j2:
-                trainer = st.text_input("Trainer", value=get_kreo_settings().get("trainer_default", "Vincenzo Crinisio"), key="agenda_quick_trainer")
-            with j3:
-                stato = st.selectbox("Stato", ["PRENOTATO", "RICHIESTA CLIENTE", "RECUPERO"], key="agenda_quick_stato")
-            ora_fine_dt = (datetime.combine(date.today(), ora_inizio) + timedelta(minutes=int(durata))).time()
-            note = st.text_input("Note", value="", key="agenda_quick_note")
-            if st.button("Salva lezione rapida", key="agenda_quick_save", use_container_width=True):
-                try:
-                    sb = get_supabase()
-                    sb.table("lezioni").insert({
-                        "cliente_id": int(cliente_id),
-                        "slot_id": None,
-                        "data_lezione": str(data_lezione),
-                        "ora_inizio": ora_inizio.strftime("%H:%M"),
-                        "ora_fine": ora_fine_dt.strftime("%H:%M"),
-                        "trainer": trainer,
-                        "stato": stato,
-                        "note": note,
-                        "created_at": now_iso(),
-                        "created_by": user_label(),
-                    }).execute()
-                    insert_history(int(cliente_id), "lezione rapida", "", f"{format_date_it(data_lezione)} {ora_inizio.strftime('%H:%M')}", "Inserita da Agenda Luxury")
-                    clear_calendar_cache()
-                    st.success("Lezione inserita in Agenda Luxury.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Errore inserimento lezione: {e}")
-
 def render_premium_calendar():
     st.header("Premium Calendar KREO")
-    st.caption("V34.3 TURBO: carica di default solo le lezioni della settimana. Gli slot liberi si attivano a richiesta.")
+    st.caption("Vista calendario professionale: slot, capienza, richieste cliente, presenze e trainer.")
 
     if st_calendar is None:
         st.warning("Modulo calendario premium non installato. Installa/aggiorna requirements.txt e fai Reboot app.")
@@ -2517,41 +1951,27 @@ def render_premium_calendar():
             st.dataframe(slots, use_container_width=True, hide_index=True)
         return
 
-    today = date.today()
-    monday = today - timedelta(days=today.weekday())
-    f1, f2, f3 = st.columns([1.2, 1.2, 1.6])
-    with f1:
-        data_da = st.date_input("Da", value=monday, format="DD/MM/YYYY", key="cal_v342_da")
-    with f2:
-        giorni_vista = st.selectbox("Vista", [7, 14, 28], index=0, format_func=lambda x: f"{x} giorni", key="cal_v343_giorni")
-    data_a = data_da + timedelta(days=int(giorni_vista) - 1)
-    with f3:
-        trainer_options = get_calendar_trainer_options(data_da, data_a)
-        trainer_filter = st.selectbox("Trainer", trainer_options, key="cal_v343_trainer")
-    show_free_slots = st.checkbox("Mostra anche slot liberi", value=False, key="cal_v343_show_free_slots", help="Più completo ma più pesante. Per lavorare veloce lascia disattivato.")
-
-    events = build_premium_calendar_events(data_da, data_a, trainer_filter, show_free_slots=show_free_slots)
+    events = build_premium_calendar_events()
 
     calendar_options = {
         "initialView": "timeGridWeek",
-        "initialDate": str(data_da),
         "locale": "it",
         "firstDay": 1,
         "slotMinTime": get_kreo_settings().get("apertura", "07:30") + ":00",
         "slotMaxTime": get_kreo_settings().get("chiusura", "20:00") + ":00",
         "allDaySlot": False,
-        "height": 520,
+        "height": 760,
         "editable": False,
         "selectable": True,
         "nowIndicator": True,
-        "eventDisplay": "block",
         "headerToolbar": {
             "left": "prev,next today",
             "center": "title",
-            "right": "timeGridWeek,timeGridDay,listWeek",
+            "right": "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
         },
         "buttonText": {
             "today": "Oggi",
+            "month": "Mese",
             "week": "Settimana",
             "day": "Giorno",
             "list": "Lista",
@@ -2559,18 +1979,26 @@ def render_premium_calendar():
     }
 
     custom_css = """
-    .fc .fc-toolbar-title { font-size: 1.22rem; font-weight: 900; }
-    .fc-event { border-radius: 10px; padding: 3px; font-size: 0.74rem; font-weight: 800; }
-    .fc-timegrid-slot { height: 36px !important; }
-    .fc .fc-button { border-radius: 10px; }
+    .fc .fc-toolbar-title {
+        font-size: 1.35rem;
+        font-weight: 900;
+    }
+    .fc-event {
+        border-radius: 10px;
+        padding: 3px;
+        font-size: 0.78rem;
+        font-weight: 700;
+    }
+    .fc-timegrid-slot {
+        height: 44px !important;
+    }
     """
 
-    st.caption(f"Modalità {'completa' if show_free_slots else 'turbo'} · caricati {len(events)} eventi dal {format_date_it(data_da)} al {format_date_it(data_a)}.")
     state = st_calendar(
         events=events,
         options=calendar_options,
         custom_css=custom_css,
-        key=f"premium_calendar_kreo_v343_{data_da}_{giorni_vista}_{trainer_filter}_{show_free_slots}",
+        key="premium_calendar_kreo",
     )
 
     st.markdown("---")
@@ -2586,7 +2014,11 @@ def render_premium_calendar():
             c1.metric("Tipo", props.get("tipo", ""))
             c2.metric("Trainer", props.get("trainer", ""))
             c3.metric("Posti", props.get("posti", ""))
-            st.info("Slot disponibile. Per prenotare usa il pannello 'Inserimento rapido lezione cliente' sopra il calendario.")
+            clienti = props.get("clienti", "")
+            if clienti:
+                st.info(f"Clienti prenotati: {clienti}")
+            else:
+                st.info("Nessun cliente prenotato su questo slot.")
 
             slot_id = int(props.get("slot_id"))
             with st.expander("Gestione slot"):
@@ -2595,105 +2027,30 @@ def render_premium_calendar():
                         ok, msg = delete_slot_disponibilita(slot_id)
                         if ok:
                             st.success(msg)
-                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
 
         elif props.get("kind") == "lezione":
-            lezione_id = int(props.get("lezione_id"))
-            cliente_id = int(props.get("cliente_id") or 0)
-            cliente = get_cliente(cliente_id) if cliente_id else None
-
-            d1, d2, d3, d4 = st.columns(4)
-            d1.metric("Cliente", props.get("cliente", ""))
-            d2.metric("Pacchetto", props.get("pacchetto", props.get("tipo", "")))
-            d3.metric("Trainer", props.get("trainer", ""))
-            d4.metric("Stato", props.get("stato", ""))
-
-            if cliente:
-                st.caption(f"Lezioni residue: {cliente.get('lezioni_residue', props.get('lezioni_residue', ''))}")
-
-            a1, a2, a3, a4 = st.columns(4)
-            with a1:
-                if st.button("✅ Conferma presenza", key=f"cal_presente_{lezione_id}"):
-                    ok, msg = update_stato_lezione(lezione_id, "PRESENTE")
-                    try:
-                        if cliente_id:
-                            aggiorna_contatori_dopo_presenza_lezione(cliente_id)
-                    except Exception:
-                        pass
-                    if ok:
-                        st.success("Presenza confermata e lezioni aggiornate.")
-                        clear_calendar_cache()
-                        st.rerun()
-                    else:
-                        st.error(msg)
-            with a2:
-                if st.button("🚫 Annulla", key=f"cal_annulla_{lezione_id}"):
-                    ok, msg = update_stato_lezione(lezione_id, "ANNULLATO")
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-            with a3:
-                if cliente:
-                    msg = genera_testo_whatsapp(cliente, "PROMEMORIA LEZIONE")
-                    st.link_button("📲 WhatsApp", build_whatsapp_url(cliente.get("cellulare", ""), msg))
-            with a4:
-                if is_admin() and st.button("🗑 Elimina", key=f"cal_delete_lez_{lezione_id}"):
-                    ok, msg = delete_lezione(lezione_id)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-            with st.expander("✏️ Modifica orario / trainer"):
-                m1, m2, m3 = st.columns(3)
-                with m1:
-                    nuova_data = st.date_input("Data", value=parse_date(ev.get("start", "")[:10], date.today()), format="DD/MM/YYYY", key=f"cal_mod_data_{lezione_id}")
-                with m2:
-                    nuovo_start = st.time_input("Ora inizio", value=datetime.strptime(ev.get("start", "09:00")[11:16] or "09:00", "%H:%M").time(), key=f"cal_mod_start_{lezione_id}")
-                with m3:
-                    nuovo_end = st.time_input("Ora fine", value=datetime.strptime(ev.get("end", "10:00")[11:16] or "10:00", "%H:%M").time(), key=f"cal_mod_end_{lezione_id}")
-                nuovo_trainer = st.text_input("Trainer", value=props.get("trainer", ""), key=f"cal_mod_trainer_{lezione_id}")
-                if st.button("💾 Salva modifica lezione", key=f"cal_mod_save_{lezione_id}"):
-                    try:
-                        sb = get_supabase()
-                        sb.table("lezioni").update({
-                            "data_lezione": str(nuova_data),
-                            "ora_inizio": nuovo_start.strftime("%H:%M"),
-                            "ora_fine": nuovo_end.strftime("%H:%M"),
-                            "trainer": nuovo_trainer,
-                            "updated_at": now_iso(),
-                            "aggiornata_da": user_label(),
-                        }).eq("id", int(lezione_id)).execute()
-                        if cliente_id:
-                            insert_history(cliente_id, "modifica lezione", "", f"{format_date_it(nuova_data)} {nuovo_start.strftime('%H:%M')}-{nuovo_end.strftime('%H:%M')}", f"Modifica calendario da {user_label()}")
-                        st.success("Lezione aggiornata.")
-                        clear_calendar_cache()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Errore modifica lezione: {e}")
+            st.write(f"Cliente: **{props.get('cliente','')}**")
+            st.write(f"Trainer: **{props.get('trainer','')}**")
+            st.write(f"Stato: **{props.get('stato','')}**")
 
     elif state and state.get("dateClick"):
         clicked = state["dateClick"].get("dateStr")
         st.info(f"Hai cliccato: {clicked}")
-        st.caption("Usa l'inserimento rapido sopra il calendario per creare la lezione su questo orario.")
+        st.caption("Nelle prossime versioni questo click aprirà direttamente la creazione slot/lezione.")
     else:
-        st.info("Clicca su uno slot o su una lezione per vedere il dettaglio e le azioni rapide.")
+        st.info("Clicca su uno slot o su una lezione per vedere il dettaglio.")
 
     st.markdown("---")
     st.subheader("Legenda")
-    l1, l2, l3, l4, l5, l6 = st.columns(6)
+    l1, l2, l3, l4, l5 = st.columns(5)
     l1.markdown("🟨 **Luxury / One to One**")
     l2.markdown("🟦 **Gold / Two to One**")
     l3.markdown("🟪 **VIP / Three to One**")
-    l4.markdown("🔵 **Coaching in sede**")
+    l4.markdown("🟦 **Coaching in sede**")
     l5.markdown("🟧 **Richiesta cliente**")
-    l6.markdown("🟩 **Presente**")
 
 
 def render_weekly_planner(selected_week):
@@ -2925,6 +2282,8 @@ def create_slot_disponibilita(data_slot, ora_inizio, ora_fine, trainer, tipo_slo
 
 
 def delete_slot_disponibilita(slot_id):
+    if not can_delete():
+        return False, "Eliminazione non autorizzata per questo profilo."
     if not is_admin():
         return False, "Operazione riservata all’amministratore."
     sb = get_supabase()
@@ -3159,6 +2518,8 @@ def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, t
 
 
 def elimina_presenza_lezione_cliente(lezione_id):
+    if not can_delete():
+        return False, "Eliminazione non autorizzata per questo profilo."
     """
     Elimina una presenza/lezione del cliente dalla tabella lezioni
     e ricalcola i contatori del cliente.
@@ -3311,6 +2672,8 @@ def update_stato_lezione(lezione_id, nuovo_stato):
 
 
 def delete_lezione(lezione_id):
+    if not can_delete():
+        return False, "Eliminazione non autorizzata per questo profilo."
     if not is_admin():
         return False, "Operazione riservata all’amministratore."
     sb = get_supabase()
@@ -3601,6 +2964,8 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
 
 
 def delete_documento(documento_id):
+    if not can_delete():
+        return False, "Eliminazione non autorizzata per questo profilo."
     if not is_admin():
         return False, "Operazione riservata all'amministratore."
 
@@ -4122,68 +3487,6 @@ def render_scadenze_abbonamento_admin():
         st.success(f"Scadenze aggiornate: {res['aggiornati']} | saltate: {res['saltati']}")
         st.rerun()
 
-
-
-def render_stampa_ricevuta_rapida(df=None, context_key="ricevuta_rapida"):
-    """Schermata rapida per Reception: seleziona un pagamento reale e scarica la ricevuta PDF."""
-    st.header("🧾 Stampa ricevuta pagamento")
-    st.caption("Seleziona un incasso già registrato nello storico pagamenti e genera la ricevuta PDF.")
-
-    pag_df = load_pagamenti()
-    if pag_df.empty:
-        st.info("Nessun pagamento registrato nello storico. Prima registra un incasso.")
-        return
-
-    if df is None or getattr(df, "empty", True):
-        df = load_clienti()
-
-    clienti_df = df[["id", "nome", "cognome"]].copy() if not df.empty and {"id", "nome", "cognome"}.issubset(df.columns) else pd.DataFrame(columns=["id", "nome", "cognome"])
-    clienti_df["cliente"] = clienti_df["nome"].fillna("") + " " + clienti_df["cognome"].fillna("")
-
-    pag_view = pag_df.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
-    pag_view["cliente"] = pag_view["cliente"].fillna("Cliente ID " + pag_view["cliente_id"].astype(str))
-    pag_view = pag_view.sort_values("id", ascending=False).copy()
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        clienti_filter = ["Tutti"] + sorted([x for x in pag_view["cliente"].dropna().unique().tolist() if str(x).strip()])
-        filtro_cliente = st.selectbox("Cliente", clienti_filter, key=f"{context_key}_cliente")
-    with c2:
-        data_da = st.date_input("Da data", value=date(2020, 1, 1), format="DD/MM/YYYY", key=f"{context_key}_data_da")
-    with c3:
-        data_a = st.date_input("A data", value=date.today(), format="DD/MM/YYYY", key=f"{context_key}_data_a")
-
-    pag_filtrato = pag_view.copy()
-    if filtro_cliente != "Tutti":
-        pag_filtrato = pag_filtrato[pag_filtrato["cliente"] == filtro_cliente]
-    if "data_pagamento" in pag_filtrato.columns:
-        pag_filtrato = pag_filtrato[
-            (pag_filtrato["data_pagamento"].astype(str) >= str(data_da)) &
-            (pag_filtrato["data_pagamento"].astype(str) <= str(data_a))
-        ]
-
-    if pag_filtrato.empty:
-        st.warning("Nessun pagamento trovato con questi filtri.")
-        return
-
-    st.caption(f"Movimenti disponibili: {len(pag_filtrato)}")
-    pag_filtrato["label_ricevuta"] = (
-        pag_filtrato["id"].astype(str) + " - " +
-        pag_filtrato["cliente"].fillna("").astype(str) + " - " +
-        pag_filtrato["data_pagamento_it"].fillna("").astype(str) + " - " +
-        pag_filtrato["importo"].apply(lambda x: euro(float(x or 0)))
-    )
-    selected_ricevuta = st.selectbox("Pagamento da stampare", pag_filtrato["label_ricevuta"].tolist(), key=f"{context_key}_select_pagamento")
-    pagamento_id_pdf = int(selected_ricevuta.split(" - ")[0])
-    pagamento_pdf = get_pagamento_by_id(pagamento_id_pdf)
-
-    if pagamento_pdf:
-        st.info("Controlla il pagamento selezionato e scarica la ricevuta PDF.")
-        cols = ["id", "cliente", "data_pagamento_it", "importo", "metodo_pagamento", "rata_label", "note"]
-        row = pag_filtrato[pag_filtrato["id"].astype(int) == pagamento_id_pdf]
-        if not row.empty:
-            st.dataframe(row[[c for c in cols if c in row.columns]], use_container_width=True, hide_index=True)
-        download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), pagamento_id_pdf, context_key)
 
 def frequenza_pagamento_mesi(tipologia_pagamento):
     t = (tipologia_pagamento or "UNICA SOLUZIONE").upper()
@@ -4715,6 +4018,8 @@ def insert_pagamento(cliente_id, data_pagamento, importo, metodo_pagamento, note
 
 
 def delete_pagamento(pagamento_id):
+    if not can_delete():
+        return False, "Eliminazione non autorizzata per questo profilo."
     sb = get_supabase()
     data = sb.table("pagamenti").select("*").eq("id", int(pagamento_id)).limit(1).execute().data
     if not data:
@@ -5365,38 +4670,47 @@ def login_gate():
 def render_v32_navigation():
     st.sidebar.markdown("""
     <style>
-    section[data-testid="stSidebar"] {
-        background: #0f0f0f !important;
-    }
-
+    section[data-testid="stSidebar"] { background: #0f0f0f !important; }
     section[data-testid="stSidebar"] label,
     section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] div {
-        color: #ffffff !important;
-    }
+    section[data-testid="stSidebar"] div { color: #ffffff !important; }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-        background-color: #ffffff !important;
+        background-color: #050505 !important;
         border: 2px solid #d4af37 !important;
         border-radius: 12px !important;
         min-height: 46px !important;
-        color: #111111 !important;
-        font-weight: 800 !important;
+        color: #f7e7a6 !important;
+        font-weight: 900 !important;
         box-shadow: 0 0 0 2px rgba(212,175,55,0.15) !important;
     }
-
-    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
-        color: #111111 !important;
-        font-weight: 800 !important;
-        font-size: 15px !important;
-    }
-
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
     section[data-testid="stSidebar"] input {
-        color: #111111 !important;
-        font-weight: 800 !important;
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
+        font-weight: 900 !important;
     }
-
+    section[data-testid="stSidebar"] button,
+    section[data-testid="stSidebar"] button[kind="secondary"],
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+        background: #050505 !important;
+        background-color: #050505 !important;
+        color: #f7e7a6 !important;
+        border: 2px solid #d4af37 !important;
+        border-radius: 14px !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.22), 0 8px 18px rgba(0,0,0,0.35) !important;
+    }
+    section[data-testid="stSidebar"] button p,
+    section[data-testid="stSidebar"] button span,
+    section[data-testid="stSidebar"] button div {
+        color: #f7e7a6 !important;
+        -webkit-text-fill-color: #f7e7a6 !important;
+        font-weight: 900 !important;
+        opacity: 1 !important;
+    }
     .kreo-nav-help {
         background: rgba(212,175,55,0.14);
         border: 1px solid rgba(212,175,55,0.55);
@@ -5412,33 +4726,47 @@ def render_v32_navigation():
 
     st.sidebar.markdown("## KREO Gestionale")
     st.sidebar.caption("Navigazione semplificata V35 · Agenda Luxury")
-    st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
+    st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu nero qui sotto.</div>', unsafe_allow_html=True)
 
-    macro = st.sidebar.radio(
-        "Sezione",
-        ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "📩 Comunicazioni", "👥 Staff", "🏢 Azienda", "📊 Analytics"],
-        key="v32_macro_nav"
-    )
+    full_macro_options = ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "📩 Comunicazioni", "👥 Staff", "🏢 Azienda", "📊 Analytics"]
+    reception_macro_options = ["🛎️ Reception", "🗓 Calendario"]
+
+    if is_reception_limited_user():
+        macro_options = reception_macro_options
+    else:
+        macro_options = full_macro_options
+
+    if st.session_state.get("v32_macro_nav") not in macro_options:
+        st.session_state["v32_macro_nav"] = macro_options[0]
+
+    macro = st.sidebar.radio("Sezione", macro_options, key="v32_macro_nav")
 
     submenu_map = {
         "🏠 Dashboard": ["📊 Dashboard", "🚨 Alert clienti"],
-        "🛎️ Reception": ["🛎️ Console Reception"],
-        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
-        "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
-        "🗓 Calendario": ["✨ Agenda Luxury", "🗓 Calendario avanzato", "⚙️ Disponibilità trainer"],
-        "💳 Incassi": ["💳 Gestione incassi", "🧾 Stampa ricevuta", "⬇️ Export Excel"],
-        "📩 Comunicazioni": ["📲 Notifiche WhatsApp", "🚨 Centro alert & messaggi"],
+        "🛎️ Reception": ["🛎️ Console Reception", "➕ Nuovo cliente", "✏️ Modifica cliente", "💳 Gestione incassi", "🚨 Alert clienti", "🚪 Accessi tornello"],
+        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati", "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
+        "🗓 Calendario": ["🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
+        "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
+        "📩 Comunicazioni": ["📩 Notifiche WhatsApp", "🚨 Alert clienti"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
-        "📊 Analytics": ["📈 Analytics direzionali"],
+        "📊 Analytics": ["📈 Analytics direzionali", "🚨 Alert clienti"],
     }
 
     items = submenu_map.get(macro, ["📊 Dashboard"])
 
-    # Staff non admin: nascondo funzioni critiche se presenti
-    if not is_admin():
+    if is_reception_limited_user():
+        allowed = {"🛎️ Console Reception", "🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni"}
+        items = [x for x in items if x in allowed]
+    elif not can_view_full_menu():
         hidden = {"⬇️ Export Excel", "👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati"}
         items = [x for x in items if x not in hidden]
+
+    if not items:
+        items = ["🛎️ Console Reception"] if is_reception_limited_user() else ["📊 Dashboard"]
+
+    if st.session_state.get("v32_sub_nav") not in items:
+        st.session_state["v32_sub_nav"] = items[0]
 
     selected = st.sidebar.selectbox("👇 Scegli la funzione operativa", items, key="v32_sub_nav")
 
@@ -7242,7 +6570,6 @@ def render_accessi_tornello_page():
                         ok, msg = disattiva_badge(badge_id)
                         if ok:
                             st.success(msg)
-                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
@@ -7331,67 +6658,10 @@ def render_accessi_tornello_page():
     with tab12:
         render_console_reception_premium()
 
-
-
-
-# ---- KREO LUXURY SIDEBAR / FOOTER STYLE ----
-def inject_kreo_luxury_sidebar_style():
+# ---- PLATFORM FOOTER ----
+def inject_platform_footer():
     st.markdown("""
     <style>
-    section[data-testid="stSidebar"] div.stButton > button,
-    section[data-testid="stSidebar"] button[kind="secondary"],
-    section[data-testid="stSidebar"] button[kind="primary"] {
-        background: #050505 !important;
-        background-color: #050505 !important;
-        color: #F4D675 !important;
-        border: 1.4px solid #D4AF37 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.10), 0 6px 18px rgba(0,0,0,0.32) !important;
-        font-weight: 700 !important;
-        transition: all .18s ease-in-out !important;
-    }
-
-    section[data-testid="stSidebar"] div.stButton > button:hover,
-    section[data-testid="stSidebar"] button[kind="secondary"]:hover,
-    section[data-testid="stSidebar"] button[kind="primary"]:hover {
-        background: #121212 !important;
-        background-color: #121212 !important;
-        color: #FFFFFF !important;
-        border: 1.6px solid #F4D675 !important;
-        box-shadow: 0 0 12px rgba(212,175,55,0.35) !important;
-    }
-
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] div[role="button"],
-    section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="control"],
-    section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"] {
-        background: #050505 !important;
-        background-color: #050505 !important;
-        color: #F4D675 !important;
-        border-color: #D4AF37 !important;
-    }
-
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
-        border: 1.5px solid #D4AF37 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.10), 0 6px 18px rgba(0,0,0,0.32) !important;
-    }
-
-    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] svg,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-        color: #F4D675 !important;
-        fill: #F4D675 !important;
-    }
-
-    section[data-testid="stSidebar"] input,
-    section[data-testid="stSidebar"] textarea {
-        background: #050505 !important;
-        color: #F4D675 !important;
-        border: 1.4px solid #D4AF37 !important;
-        border-radius: 12px !important;
-    }
-
     .pentti-footer {
         position: fixed;
         bottom: 55px;
@@ -7406,28 +6676,15 @@ def inject_kreo_luxury_sidebar_style():
         font-weight: 700;
         box-shadow: 0 0 14px rgba(212,175,55,0.35), 0 8px 24px rgba(0,0,0,0.40);
     }
-
-    @media (max-width: 900px) {
-        .pentti-footer {
-            left: 16px;
-            right: 16px;
-            bottom: 70px;
-            text-align: center;
-            font-size: 11px;
-        }
-    }
     </style>
-
-    <div class="pentti-footer">
-        Developed by Pentti Salenius © 2026
-    </div>
+    <div class="pentti-footer">Developed by Pentti Salenius © 2026</div>
     """, unsafe_allow_html=True)
 
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
     style()
-    inject_kreo_luxury_sidebar_style()
+    inject_platform_footer()
 
     if not login_gate():
         return
@@ -7437,7 +6694,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V34")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V32.1")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -7447,56 +6704,14 @@ def main():
         st.rerun()
 
     menu = render_v32_navigation()
-    raw_menu = menu
 
     df = load_clienti()
 
-    # Routing interno della Reception: i pulsanti non modificano le chiavi dei widget
-    # della sidebar (v32_macro_nav / v32_sub_nav), perché Streamlit lo blocca dopo
-    # l'istanziazione del widget. Qui usiamo una chiave separata e poi renderizziamo
-    # direttamente la schermata operativa richiesta.
-    if raw_menu == "🛎️ Console Reception" and st.session_state.get("reception_target"):
-        menu = st.session_state["reception_target"]
-        st.info(f"🛎️ Reception → {menu}")
-        if st.button("⬅️ Torna alla console Reception", key="reception_back", use_container_width=False):
-            st.session_state.pop("reception_target", None)
-            st.rerun()
-        st.markdown("---")
-
     if menu == "🛎️ Console Reception":
-        st.header("🛎️ Reception KREO")
-        st.caption("Console operativa rapida per le attività quotidiane: pochi pulsanti, funzioni essenziali, zero complessità.")
+        render_console_reception_premium()
+        return
 
-        st.markdown("### Operazioni rapide")
-        r1c1, r1c2, r1c3 = st.columns(3)
-        r2c1, r2c2, r2c3 = st.columns(3)
-        r3c1, r3c2, r3c3 = st.columns(3)
-        r4c1, r4c2, r4c3 = st.columns(3)
-
-        def reception_button(label, menu_target, key):
-            if st.button(label, key=key, use_container_width=True):
-                st.session_state["reception_target"] = menu_target
-                st.rerun()
-
-        with r1c1: reception_button("➕ Nuovo cliente", "➕ Nuovo cliente", "rec_new_cliente")
-        with r1c2: reception_button("✏️ Modifica cliente", "✏️ Modifica cliente", "rec_edit_cliente")
-        with r1c3: reception_button("💰 Registra incasso", "💳 Gestione incassi", "rec_incasso")
-        with r2c1: reception_button("🚨 Elenco alert", "🚨 Alert clienti", "rec_alert")
-        with r2c2: reception_button("🎟️ Associa badge", "🚪 Accessi tornello", "rec_badge")
-        with r2c3: reception_button("🔄 Sincronizza accessi / badge", "🚪 Accessi tornello", "rec_sync")
-        with r3c1: reception_button("♻️ Ricalcolo lezioni", "♻️ Ricalcolo lezioni", "rec_recalc")
-        with r3c2: reception_button("📅 Agenda / lezione", "✨ Agenda Luxury", "rec_lezione")
-        with r3c3: reception_button("✅ Check-in cliente", "🚪 Accessi tornello", "rec_checkin")
-        with r4c1: reception_button("📩 Messaggio cliente", "📲 Notifiche WhatsApp", "rec_messaggio_cliente")
-        with r4c2: reception_button("🧾 Stampa ricevuta", "🧾 Stampa ricevuta", "rec_stampa_ricevuta")
-
-        st.markdown("---")
-        st.success("Clicca un pulsante: sotto si apre direttamente la schermata operativa completa.")
-
-        with st.expander("🚨 Alert urgenti e messaggi rapidi", expanded=True):
-            render_alert_message_center(df, context_key="reception_alerts")
-
-    elif menu == "➕ Nuovo cliente":
+    if menu == "➕ Nuovo cliente":
         st.header("Nuova iscrizione / aggiornamento cliente")
         st.info("Se il cliente è già presente, questa schermata aggiorna la sua scheda invece di creare un duplicato.")
         with st.form("nuovo_cliente"):
@@ -7606,7 +6821,6 @@ def main():
                         ok, msg = upload_documento_cliente(cliente_id, file, tipo_documento, note_documento)
                         if ok:
                             st.success(msg)
-                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
@@ -7661,8 +6875,6 @@ def main():
             st.subheader("Sostituzione documento")
             st.info("Per sostituire un documento, carica un nuovo PDF dello stesso tipo per lo stesso cliente. L'ultimo caricato diventa quello visibile nella scheda cliente; i precedenti restano nello storico, salvo eliminazione admin.")
 
-    elif menu == "🧾 Stampa ricevuta":
-        render_stampa_ricevuta_rapida(df, context_key="reception_ricevuta")
 
     elif menu == "💳 Gestione incassi":
         st.header("Gestione incassi e rate")
@@ -7826,17 +7038,11 @@ def main():
                 if not pag_df.empty:
                     c1, c2 = st.columns(2)
                     with c1:
-                        mese_df = pag_df.groupby("mese", as_index=False)["importo"].sum().sort_values("mese")
-                        st.plotly_chart(px.bar(mese_df, x="mese", y="importo", title="Andamento incassi mensili"), use_container_width=True)
+                        metodo_df = pag_df.groupby("metodo_pagamento", as_index=False)["importo"].sum()
+                        st.plotly_chart(px.pie(metodo_df, names="metodo_pagamento", values="importo", title="Incassi per metodo"), use_container_width=True)
                     with c2:
-                        clienti_tmp = df[["id", "nome", "cognome", "pacchetto"]].copy() if {"id", "nome", "cognome", "pacchetto"}.issubset(df.columns) else pd.DataFrame()
-                        if not clienti_tmp.empty and "cliente_id" in pag_df.columns:
-                            clienti_tmp["cliente"] = clienti_tmp["nome"].fillna("") + " " + clienti_tmp["cognome"].fillna("")
-                            pag_pack = pag_df.merge(clienti_tmp[["id", "pacchetto"]], left_on="cliente_id", right_on="id", how="left")
-                            pack_df = pag_pack.groupby("pacchetto", as_index=False)["importo"].sum().sort_values("importo", ascending=False)
-                            st.plotly_chart(px.bar(pack_df, x="pacchetto", y="importo", title="Incassi per pacchetto"), use_container_width=True)
-                        else:
-                            st.info("Dati pacchetto non disponibili per il grafico incassi per pacchetto.")
+                        mese_df = pag_df.groupby("mese", as_index=False)["importo"].sum()
+                        st.plotly_chart(px.bar(mese_df, x="mese", y="importo", title="Incassi per mese"), use_container_width=True)
 
                 st.subheader("Clienti con saldo aperto")
                 aperti = df[df["residuo"] > 0].copy() if "residuo" in df.columns else pd.DataFrame()
@@ -7957,7 +7163,8 @@ def main():
                 c1.metric("Alert totali", len(alert_df))
                 c2.metric("Priorità alta", int((alert_df["Priorità"]=="ALTA").sum()))
                 c3.metric("Priorità media", int((alert_df["Priorità"]=="MEDIA").sum()))
-                render_alert_message_center(df, context_key="alert_page")
+                priorita = st.multiselect("Filtra priorità", ["ALTA","MEDIA"], default=["ALTA","MEDIA"])
+                st.dataframe(alert_df[alert_df["Priorità"].isin(priorita)], use_container_width=True, hide_index=True)
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
@@ -8044,8 +7251,7 @@ def main():
 
 
     elif menu == "📲 Notifiche WhatsApp":
-        st.header("📩 Comunicazioni clienti")
-        st.caption("Invio rapido WhatsApp con template pronti: il gestionale prepara il testo, poi lo staff conferma e invia da WhatsApp Web/app.")
+        st.header("Notifiche WhatsApp")
 
         if df.empty:
             st.info("Inserisci almeno un cliente prima di generare notifiche.")
@@ -8147,16 +7353,12 @@ def main():
 
 
 
-    elif menu == "✨ Agenda Luxury":
-        render_agenda_luxury()
-
-
-    elif menu in ["🗓 Calendario avanzato", "🗓 Premium Calendar"]:
-        render_premium_calendar()
-
-
-    elif menu in ["🗓 Calendario unificato", "🗓 Calendario operativo"]:
+    elif menu == "🗓 Calendario unificato":
         render_calendario_unificato_staff()
+
+
+    elif menu == "🗓 Premium Calendar":
+        render_premium_calendar()
 
 
     elif menu == "🗓 Planner Slot":
@@ -8279,7 +7481,7 @@ def main():
                     st.success(msg)
 
 
-    elif menu in ["⚙️ Disponibilità calendario", "⚙️ Disponibilità trainer"]:
+    elif menu == "⚙️ Disponibilità calendario":
         st.header("Disponibilità calendario prenotabile")
 
         tab1, tab2 = st.tabs(["Crea disponibilità", "Slot disponibili"])
@@ -8496,7 +7698,6 @@ def main():
                         ok, msg = update_stato_lezione(lezione_id, nuovo_stato)
                         if ok:
                             st.success(msg)
-                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
@@ -8512,55 +7713,21 @@ def main():
                                     st.error(msg)
 
 
-    elif menu == "📊 Dashboard":
-        st.header("Dashboard operativa")
+    elif menu == "📊 Dashboard" or menu == "📈 Analytics direzionali":
+        st.header("Dashboard")
         if df.empty:
             st.info("Inserisci almeno un cliente.")
         else:
             alert_df = build_alert_dashboard(df)
-            oggi = date.today()
             c1,c2,c3,c4,c5 = st.columns(5)
-            c1.metric("Clienti attivi", int((df["stato_cliente"]=="ATTIVO").sum()) if "stato_cliente" in df.columns else len(df))
-            c2.metric("Incassato", euro(df["importo_pagato"].sum()) if "importo_pagato" in df.columns else euro(0))
-            c3.metric("Residuo", euro(df["residuo"].sum()) if "residuo" in df.columns else euro(0))
-            c4.metric("Alert", len(alert_df))
-            c5.metric("Saldo aperto", int((df["residuo"] > 0).sum()) if "residuo" in df.columns else 0)
-
+            c1.metric("Clienti attivi", int((df["stato_cliente"]=="ATTIVO").sum()))
+            c2.metric("Valore contratti", euro(df["importo"].sum()))
+            c3.metric("Incassato", euro(df["importo_pagato"].sum()))
+            c4.metric("Residuo", euro(df["residuo"].sum()))
+            c5.metric("Alert", len(alert_df))
             if not alert_df.empty:
                 st.subheader("Alert principali")
-                st.dataframe(alert_df.head(12), use_container_width=True, hide_index=True)
-
-            st.subheader("Vista rapida clienti")
-            c6,c7 = st.columns(2)
-            with c6:
-                if "pacchetto" in df.columns:
-                    pac=df.groupby("pacchetto",as_index=False)["id"].count().rename(columns={"id":"clienti"})
-                    st.plotly_chart(px.bar(pac,x="pacchetto",y="clienti",title="Clienti per pacchetto"),use_container_width=True)
-            with c7:
-                if "stato_pagamento" in df.columns and "residuo" in df.columns:
-                    pag=df.groupby("stato_pagamento",as_index=False)["residuo"].sum()
-                    st.plotly_chart(px.bar(pag,x="stato_pagamento",y="residuo",title="Residui per stato pagamento"),use_container_width=True)
-
-    elif menu == "📈 Analytics direzionali":
-        st.header("Analytics direzionali")
-        st.caption("Area manageriale: KPI, trend, performance e indicatori utili per decisioni e crescita.")
-        if df.empty:
-            st.info("Inserisci almeno un cliente.")
-        else:
-            valore_contratti = float(df["importo"].sum()) if "importo" in df.columns else 0
-            incassato = float(df["importo_pagato"].sum()) if "importo_pagato" in df.columns else 0
-            residuo = float(df["residuo"].sum()) if "residuo" in df.columns else 0
-            clienti_attivi = int((df["stato_cliente"]=="ATTIVO").sum()) if "stato_cliente" in df.columns else len(df)
-            ticket_medio = valore_contratti / clienti_attivi if clienti_attivi else 0
-            incasso_medio = incassato / clienti_attivi if clienti_attivi else 0
-
-            a1,a2,a3,a4,a5 = st.columns(5)
-            a1.metric("Valore contratti", euro(valore_contratti))
-            a2.metric("Ticket medio", euro(ticket_medio))
-            a3.metric("Incasso medio cliente", euro(incasso_medio))
-            a4.metric("Residuo totale", euro(residuo))
-            a5.metric("Clienti attivi", clienti_attivi)
-
+                st.dataframe(alert_df, use_container_width=True, hide_index=True)
             st.subheader("Performance staff")
             staff_df = build_staff_dashboard(df)
             if staff_df.empty:
@@ -8570,24 +7737,13 @@ def main():
                 if "Nuovi clienti registrati" in staff_df.columns:
                     st.plotly_chart(px.bar(staff_df, x="Utente", y="Nuovi clienti registrati", title="Nuovi clienti registrati per utente"), use_container_width=True)
 
-            c1,c2 = st.columns(2)
-            with c1:
-                if "pacchetto" in df.columns and "importo" in df.columns:
-                    pac_val = df.groupby("pacchetto", as_index=False)["importo"].sum()
-                    st.plotly_chart(px.bar(pac_val, x="pacchetto", y="importo", title="Valore contratti per pacchetto"), use_container_width=True)
-            with c2:
-                if "pacchetto" in df.columns and "residuo" in df.columns:
-                    pac_res = df.groupby("pacchetto", as_index=False)["residuo"].sum()
-                    st.plotly_chart(px.bar(pac_res, x="pacchetto", y="residuo", title="Residuo per pacchetto"), use_container_width=True)
-
-    elif menu == "♻️ Ricalcolo lezioni":
-        st.header("Ricalcolo lezioni")
-        if is_admin():
-            render_recalcolo_settimanale_widget()
-            with st.expander("Ricalcolo cumulativo avanzato"):
-                render_lezioni_cumulative_admin()
-        else:
-            st.error("Funzione riservata all’amministratore.")
+            c6,c7=st.columns(2)
+            with c6:
+                pac=df.groupby("pacchetto",as_index=False)["id"].count().rename(columns={"id":"clienti"})
+                st.plotly_chart(px.bar(pac,x="pacchetto",y="clienti",title="Clienti per pacchetto"),use_container_width=True)
+            with c7:
+                pag=df.groupby("stato_pagamento",as_index=False)["residuo"].sum()
+                st.plotly_chart(px.pie(pag,names="stato_pagamento",values="residuo",title="Residui per stato pagamento"),use_container_width=True)
 
     elif menu == "🧹 Pulizia duplicati":
         if not is_admin():
