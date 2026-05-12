@@ -4701,12 +4701,12 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V33.3")
+    st.sidebar.caption("Navigazione semplificata V33.4")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
         "Sezione",
-        ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "👥 Staff", "🏢 Azienda", "📊 Analytics"],
+        ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "📩 Comunicazioni", "👥 Staff", "🏢 Azienda", "📊 Analytics"],
         key="v32_macro_nav"
     )
 
@@ -4717,6 +4717,7 @@ def render_v32_navigation():
         "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
         "🗓 Calendario": ["🗓 Calendario operativo", "⚙️ Disponibilità trainer"],
         "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
+        "📩 Comunicazioni": ["📲 Notifiche WhatsApp"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
         "📊 Analytics": ["📈 Analytics direzionali"],
@@ -6631,7 +6632,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V33.3")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V33.4")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -6665,6 +6666,7 @@ def main():
         r1c1, r1c2, r1c3 = st.columns(3)
         r2c1, r2c2, r2c3 = st.columns(3)
         r3c1, r3c2, r3c3 = st.columns(3)
+        r4c1, r4c2, r4c3 = st.columns(3)
 
         def reception_button(label, menu_target, key):
             if st.button(label, key=key, use_container_width=True):
@@ -6680,6 +6682,7 @@ def main():
         with r3c1: reception_button("♻️ Ricalcolo lezioni", "♻️ Ricalcolo lezioni", "rec_recalc")
         with r3c2: reception_button("📅 Inserimento rapido lezione", "🗓 Calendario operativo", "rec_lezione")
         with r3c3: reception_button("✅ Check-in cliente", "🚪 Accessi tornello", "rec_checkin")
+        with r4c1: reception_button("📩 Messaggio cliente", "📲 Notifiche WhatsApp", "rec_messaggio_cliente")
 
         st.markdown("---")
         st.success("Clicca un pulsante: sotto si apre direttamente la schermata operativa completa.")
@@ -7230,7 +7233,8 @@ def main():
 
 
     elif menu == "📲 Notifiche WhatsApp":
-        st.header("Notifiche WhatsApp")
+        st.header("📩 Comunicazioni clienti")
+        st.caption("Invio rapido WhatsApp con template pronti: il gestionale prepara il testo, poi lo staff conferma e invia da WhatsApp Web/app.")
 
         if df.empty:
             st.info("Inserisci almeno un cliente prima di generare notifiche.")
