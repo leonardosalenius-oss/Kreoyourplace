@@ -1044,6 +1044,102 @@ def registra_notifica(cliente_id, template, messaggio):
 
 
 
+def template_from_alert_text(alert_text):
+    """Mappa l'alert operativo al template WhatsApp più adatto."""
+    txt = str(alert_text or "").lower()
+    if "certificato" in txt and ("mancante" in txt or "consegnato" in txt):
+        return "CERTIFICATO MEDICO MANCANTE"
+    if "certificato" in txt and ("scad" in txt or "scaden" in txt):
+        return "CERTIFICATO MEDICO IN SCADENZA"
+    if "rata" in txt or "saldo" in txt or "pagare" in txt or "residuo" in txt:
+        return "RESIDUO DA SALDARE"
+    if "abbonamento" in txt or "rinnovo" in txt:
+        return "RINNOVO / PROSSIMA RATA"
+    if "lezion" in txt and ("residue" in txt or "basse" in txt or "esaur" in txt):
+        return "LEZIONI RESIDUE BASSE"
+    return "MESSAGGIO PERSONALIZZATO"
+
+
+def render_alert_message_center(df, context_key="alert_msg_center"):
+    """Centro operativo: da alert a messaggio WhatsApp pronto, senza far cercare il cliente allo staff."""
+    if df is None or df.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    alert_df = build_alert_dashboard(df)
+    if alert_df.empty:
+        st.success("Nessun alert aperto. Ottimo lavoro.")
+        return
+
+    st.markdown("### 🚨 Alert con azione rapida")
+    st.caption("Scegli un alert: KREO prepara automaticamente il messaggio più coerente per il cliente.")
+
+    priorita = st.multiselect(
+        "Priorità da mostrare",
+        ["ALTA", "MEDIA"],
+        default=["ALTA", "MEDIA"],
+        key=f"{context_key}_priorita",
+    )
+    filtered = alert_df[alert_df["Priorità"].isin(priorita)].copy()
+    if filtered.empty:
+        st.info("Nessun alert con i filtri selezionati.")
+        return
+
+    st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+    options = []
+    for i, row in filtered.reset_index(drop=True).iterrows():
+        label = f"{int(row['ID'])} - {row['Cliente']} | {row['Priorità']} | {row['Alert']}"
+        options.append(label)
+
+    selected_alert = st.selectbox("Alert da gestire", options, key=f"{context_key}_selected")
+    selected_id = int(selected_alert.split(" - ")[0])
+    selected_row = filtered[filtered["ID"].astype(int) == selected_id].iloc[0]
+    cliente = get_cliente(selected_id)
+
+    if not cliente:
+        st.error("Cliente non trovato.")
+        return
+
+    suggested_template = template_from_alert_text(selected_row.get("Alert", ""))
+    template_options = [
+        "CERTIFICATO MEDICO MANCANTE",
+        "CERTIFICATO MEDICO IN SCADENZA",
+        "RESIDUO DA SALDARE",
+        "RINNOVO / PROSSIMA RATA",
+        "LEZIONI RESIDUE BASSE",
+        "PROMEMORIA LEZIONE",
+        "MESSAGGIO PERSONALIZZATO",
+    ]
+    default_idx = template_options.index(suggested_template) if suggested_template in template_options else 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Cliente", f"{cliente.get('nome','')} {cliente.get('cognome','')}")
+    c2.metric("Telefono", cliente.get("cellulare", "") or "mancante")
+    c3.metric("Priorità", selected_row.get("Priorità", ""))
+
+    template = st.selectbox(
+        "Template suggerito",
+        template_options,
+        index=default_idx,
+        key=f"{context_key}_template",
+    )
+
+    custom_message = ""
+    if template == "MESSAGGIO PERSONALIZZATO":
+        custom_message = st.text_area("Messaggio personalizzato", key=f"{context_key}_custom")
+
+    msg = genera_testo_whatsapp(cliente, template, custom_message)
+    msg = st.text_area("Messaggio pronto", value=msg, height=150, key=f"{context_key}_msg")
+    url = build_whatsapp_url(cliente.get("cellulare", ""), msg)
+
+    st.markdown(f"[📲 Apri WhatsApp con messaggio pronto]({url})", unsafe_allow_html=True)
+    if st.button("✅ Registra contatto in cronologia", key=f"{context_key}_register"):
+        registra_notifica(selected_id, template, msg)
+        st.success("Contatto registrato nella cronologia cliente.")
+
+
+
 
 
 def get_setting(key, default=None):
@@ -4701,7 +4797,7 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V33.4")
+    st.sidebar.caption("Navigazione semplificata V34")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
@@ -4717,7 +4813,7 @@ def render_v32_navigation():
         "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
         "🗓 Calendario": ["🗓 Calendario operativo", "⚙️ Disponibilità trainer"],
         "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
-        "📩 Comunicazioni": ["📲 Notifiche WhatsApp"],
+        "📩 Comunicazioni": ["📲 Notifiche WhatsApp", "🚨 Centro alert & messaggi"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
         "📊 Analytics": ["📈 Analytics direzionali"],
@@ -6632,7 +6728,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V33.4")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V34")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -6686,6 +6782,9 @@ def main():
 
         st.markdown("---")
         st.success("Clicca un pulsante: sotto si apre direttamente la schermata operativa completa.")
+
+        with st.expander("🚨 Alert urgenti e messaggi rapidi", expanded=True):
+            render_alert_message_center(df, context_key="reception_alerts")
 
     elif menu == "➕ Nuovo cliente":
         st.header("Nuova iscrizione / aggiornamento cliente")
@@ -7145,8 +7244,7 @@ def main():
                 c1.metric("Alert totali", len(alert_df))
                 c2.metric("Priorità alta", int((alert_df["Priorità"]=="ALTA").sum()))
                 c3.metric("Priorità media", int((alert_df["Priorità"]=="MEDIA").sum()))
-                priorita = st.multiselect("Filtra priorità", ["ALTA","MEDIA"], default=["ALTA","MEDIA"])
-                st.dataframe(alert_df[alert_df["Priorità"].isin(priorita)], use_container_width=True, hide_index=True)
+                render_alert_message_center(df, context_key="alert_page")
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
