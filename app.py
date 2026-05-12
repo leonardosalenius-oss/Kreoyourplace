@@ -2311,38 +2311,39 @@ def insert_lezione(cliente_id, data_lezione, ora_inizio, ora_fine, trainer, stat
 
 def storico_presenze_cliente(cliente_id):
     """
-    Da V46 lo storico presenze del cliente legge da presenze_clienti.
+    Storico presenze del singolo cliente.
+    Usa la tabella lezioni filtrata per cliente e stato PRESENTE.
     """
-    return load_presenze_clienti(cliente_id)
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return pd.DataFrame()
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp["stato_norm"] = tmp["stato"].astype(str).str.upper()
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["stato_norm"] == "PRESENTE")
+        ].sort_values(["data_lezione", "ora_inizio"], ascending=[False, False])
+        return tmp
+    except Exception:
+        return pd.DataFrame()
+
+
 
 def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
     """
     Dopo una presenza di tipo LEZIONE:
-    - pacchetti automatici: ricalcola da presenze reali
-    - pacchetto personalizzato: incrementa manualmente lezioni_utilizzate di 1
+    - ricalcola totale/usate/residue
+    - aggiorna anagrafica cliente
+    Funziona per tutti i pacchetti.
     """
     try:
-        cliente = get_cliente(int(cliente_id))
-        if not cliente:
-            return False
-
-        sb = get_supabase()
-        if not is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")):
-            totale = int(float(cliente.get("numero_lezioni") or 0))
-            usate_old = int(float(cliente.get("lezioni_utilizzate") or 0))
-            usate = usate_old + 1
-            residue = max(totale - usate, 0)
-            sb.table("clienti").update({
-                "lezioni_utilizzate": int(usate),
-                "lezioni_residue": int(residue),
-                "updated_at": now_iso(),
-            }).eq("id", int(cliente_id)).execute()
-            return True
-
         totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
         if "safe_update_cliente_contatori" in globals():
             safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
         else:
+            sb = get_supabase()
             sb.table("clienti").update({
                 "numero_lezioni": int(totale),
                 "lezioni_utilizzate": int(usate),
@@ -2353,58 +2354,48 @@ def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
     except Exception:
         return False
 
+
 def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note=""):
     """
-    V46: ogni presenza viene salvata nella tabella centrale presenze_clienti.
-    Se tipo_attivita = LEZIONE, scala le lezioni tramite ricalcolo contatori.
+    Inserisce una presenza manuale cliente.
+    Salva su lezioni con stato PRESENTE, così aggiorna anche contatori e calendario.
     """
     cliente = get_cliente(int(cliente_id))
     if not cliente:
         return False, "Cliente non trovato."
 
-    ok, msg, presenza_id = insert_presenza_centralizzata(
-        cliente_id=int(cliente_id),
-        data_presenza=data_presenza,
-        ora_inizio=ora_inizio,
-        ora_fine=ora_fine,
-        tipo_attivita=tipo_attivita,
-        trainer=trainer,
-        note=note,
-        fonte="MANUALE",
-        riferimento_id=None,
-    )
-
-    if not ok:
-        return False, msg
+    note_finale = f"Presenza manuale | Tipo attività: {tipo_attivita}"
+    if note:
+        note_finale += f" | Note: {note}"
 
     try:
-        insert_history(
-            int(cliente_id),
-            "presenza centralizzata",
-            "",
-            f"{format_date_it(data_presenza)} {ora_inizio}-{ora_fine}",
-            f"{tipo_attivita} | Trainer: {trainer} | Note: {note}"
+        ok, msg = insert_lezione(
+            cliente_id=int(cliente_id),
+            data_lezione=data_presenza,
+            ora_inizio=str(ora_inizio),
+            ora_fine=str(ora_fine),
+            trainer=trainer,
+            stato="PRESENTE",
+            note=note_finale,
         )
-    except Exception:
-        pass
+        if ok:
+            # Se è una LEZIONE, scala automaticamente dalle lezioni residue
+            # perché viene salvata come stato PRESENTE nella tabella lezioni.
+            if str(tipo_attivita).upper() == "LEZIONE":
+                aggiorna_contatori_dopo_presenza_lezione(int(cliente_id))
 
-    if str(tipo_attivita).upper() == "LEZIONE":
-        try:
-            totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
-            sb = get_supabase()
-            payload = {
-                "lezioni_utilizzate": int(usate),
-                "lezioni_residue": int(residue),
-                "updated_at": now_iso(),
-            }
-            if is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")):
-                payload["numero_lezioni"] = int(totale)
-            sb.table("clienti").update(payload).eq("id", int(cliente_id)).execute()
-        except Exception:
-            pass
-        return True, "Presenza registrata. Lezione scalata dalle residue."
+            insert_history(
+                int(cliente_id),
+                "presenza manuale",
+                "",
+                f"{format_date_it(data_presenza)} {ora_inizio}-{ora_fine}",
+                f"{tipo_attivita} | Trainer: {trainer} | {note}"
+            )
+        return ok, "Presenza registrata correttamente. Lezione scalata dalle residue." if ok and str(tipo_attivita).upper() == "LEZIONE" else ("Presenza registrata correttamente." if ok else msg)
+    except Exception as e:
+        return False, f"Errore registrazione presenza: {e}"
 
-    return True, "Presenza registrata correttamente."
+
 
 def elimina_presenza_lezione_cliente(lezione_id):
     """
@@ -2423,29 +2414,16 @@ def elimina_presenza_lezione_cliente(lezione_id):
         sb.table("lezioni").delete().eq("id", int(lezione_id)).execute()
 
         try:
-            cliente = get_cliente(cliente_id)
-            # personalizzato_delete_fix_v45
-            if cliente and not is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")) and str(lezione.get("stato","")).upper() == "PRESENTE":
-                totale = int(float(cliente.get("numero_lezioni") or 0))
-                usate_old = int(float(cliente.get("lezioni_utilizzate") or 0))
-                usate = max(usate_old - 1, 0)
-                residue = max(totale - usate, 0)
+            totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
+            if "safe_update_cliente_contatori" in globals():
+                safe_update_cliente_contatori(cliente_id, totale, usate, residue)
+            else:
                 sb.table("clienti").update({
+                    "numero_lezioni": int(totale),
                     "lezioni_utilizzate": int(usate),
                     "lezioni_residue": int(residue),
                     "updated_at": now_iso(),
                 }).eq("id", cliente_id).execute()
-            else:
-                totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
-                if "safe_update_cliente_contatori" in globals():
-                    safe_update_cliente_contatori(cliente_id, totale, usate, residue)
-                else:
-                    sb.table("clienti").update({
-                        "numero_lezioni": int(totale),
-                        "lezioni_utilizzate": int(usate),
-                        "lezioni_residue": int(residue),
-                        "updated_at": now_iso(),
-                    }).eq("id", cliente_id).execute()
         except Exception:
             pass
 
@@ -2512,7 +2490,7 @@ def render_presenze_cliente_section(cliente_id):
         if storico.empty:
             st.info("Nessuna presenza registrata per questo cliente.")
         else:
-            cols = ["id", "data_presenza_it", "ora_inizio", "ora_fine", "tipo_attivita", "trainer", "fonte", "note", "registrato_da", "created_at"]
+            cols = ["id", "data_lezione_it", "ora_inizio", "ora_fine", "trainer", "stato", "note", "creata_da", "created_at"]
             st.dataframe(storico[[c for c in cols if c in storico.columns]], use_container_width=True, hide_index=True)
 
             if is_admin():
@@ -2520,13 +2498,13 @@ def render_presenze_cliente_section(cliente_id):
                 labels = []
                 for _, r in storico.iterrows():
                     labels.append(
-                        f"{int(r.get('id'))} - {r.get('data_presenza_it','')} {r.get('ora_inizio','')}-{r.get('ora_fine','')} | {r.get('tipo_attivita','')} | {r.get('trainer','')} | {r.get('note','')}"
+                        f"{int(r.get('id'))} - {r.get('data_lezione_it','')} {r.get('ora_inizio','')}-{r.get('ora_fine','')} | {r.get('trainer','')} | {r.get('note','')}"
                     )
                 selected_del = st.selectbox("Seleziona presenza da eliminare", labels, key=f"delete_presenza_select_{cliente_id}")
                 conferma_del = st.checkbox("Confermo eliminazione presenza selezionata", key=f"delete_presenza_confirm_{cliente_id}")
                 if conferma_del and st.button("🗑️ Elimina presenza / lezione", key=f"delete_presenza_btn_{cliente_id}"):
                     lezione_id = int(selected_del.split(" - ")[0])
-                    ok, msg = delete_presenza_centralizzata(lezione_id)
+                    ok, msg = elimina_presenza_lezione_cliente(lezione_id)
                     if ok:
                         st.success(msg)
                         st.rerun()
@@ -4245,352 +4223,30 @@ def lezioni_maturate_cumulative(cliente, data_ref=None):
     return settimane * 3
 
 
-
-def ensure_presenze_clienti_table_message():
-    return """
-create table if not exists public.presenze_clienti (
-  id bigint generated by default as identity primary key,
-  cliente_id bigint not null,
-  data_presenza date not null,
-  ora_inizio text,
-  ora_fine text,
-  tipo_attivita text default 'LEZIONE',
-  trainer text,
-  fonte text default 'MANUALE',
-  riferimento_id text,
-  note text,
-  registrato_da text,
-  created_at timestamp with time zone default now(),
-  updated_at timestamp with time zone
-);
-
-create index if not exists idx_presenze_clienti_cliente_id on public.presenze_clienti(cliente_id);
-create index if not exists idx_presenze_clienti_data on public.presenze_clienti(data_presenza);
-create index if not exists idx_presenze_clienti_tipo on public.presenze_clienti(tipo_attivita);
-"""
-
-
-def load_presenze_clienti(cliente_id=None):
+def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
+    """
+    Conta tutte le lezioni PRESENTE del cliente.
+    Se data_da è indicata, conta dal primo giorno pacchetto.
+    """
     try:
-        sb = get_supabase()
-        q = sb.table("presenze_clienti").select("*").order("data_presenza", desc=True).order("id", desc=True).range(0, 9999)
-        if cliente_id is not None:
-            q = q.eq("cliente_id", int(cliente_id))
-        data = q.execute().data
-        df = pd.DataFrame(data)
-        if df.empty:
-            return df
-        if "data_presenza" in df.columns:
-            df["data_presenza_it"] = df["data_presenza"].apply(format_date_it)
-        return df
-    except Exception:
-        return pd.DataFrame()
-
-
-def insert_presenza_centralizzata(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note="", fonte="MANUALE", riferimento_id=None):
-    try:
-        sb = get_supabase()
-        payload = {
-            "cliente_id": int(cliente_id),
-            "data_presenza": str(data_presenza),
-            "ora_inizio": str(ora_inizio or ""),
-            "ora_fine": str(ora_fine or ""),
-            "tipo_attivita": str(tipo_attivita or "LEZIONE"),
-            "trainer": str(trainer or ""),
-            "fonte": str(fonte or "MANUALE"),
-            "riferimento_id": str(riferimento_id or ""),
-            "note": str(note or ""),
-            "registrato_da": user_label(),
-            "created_at": now_iso(),
-            "updated_at": now_iso(),
-        }
-        res = sb.table("presenze_clienti").insert(payload).execute()
-        new_id = None
-        try:
-            if res.data:
-                new_id = res.data[0].get("id")
-        except Exception:
-            pass
-        return True, "Presenza registrata correttamente.", new_id
-    except Exception as e:
-        return False, f"Errore registrazione presenza centralizzata. Probabilmente devi eseguire kreo_v46_presenze_clienti.sql. Dettaglio: {e}", None
-
-
-def delete_presenza_centralizzata(presenza_id):
-    try:
-        sb = get_supabase()
-        data = sb.table("presenze_clienti").select("*").eq("id", int(presenza_id)).limit(1).execute().data
-        if not data:
-            return False, "Presenza non trovata."
-        row = data[0]
-        cliente_id = int(row.get("cliente_id"))
-        sb.table("presenze_clienti").delete().eq("id", int(presenza_id)).execute()
-
-        insert_history(
-            cliente_id,
-            "eliminazione presenza centralizzata",
-            f"{row.get('data_presenza')} {row.get('ora_inizio')}-{row.get('ora_fine')}",
-            "",
-            f"Eliminata da {user_label()} | Tipo: {row.get('tipo_attivita')} | Trainer: {row.get('trainer')}"
-        )
-
-        try:
-            totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
-            sb.table("clienti").update({
-                "lezioni_utilizzate": int(usate),
-                "lezioni_residue": int(residue),
-                "updated_at": now_iso(),
-            }).eq("id", cliente_id).execute()
-        except Exception:
-            pass
-
-        return True, "Presenza eliminata e contatori aggiornati."
-    except Exception as e:
-        return False, f"Errore eliminazione presenza: {e}"
-
-
-def presenze_centralizzate_lezione_cliente(cliente_id, data_da=None, data_a=None):
-    df = load_presenze_clienti(cliente_id)
-    if df.empty:
-        return df
-
-    tmp = df.copy()
-    tipo = tmp["tipo_attivita"].astype(str).str.upper() if "tipo_attivita" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
-    tmp = tmp[tipo.str.contains("LEZIONE", na=False)]
-
-    if "data_presenza" in tmp.columns:
+        lez = load_lezioni()
+        if lez.empty:
+            return 0
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp["stato_norm"] = tmp["stato"].astype(str).str.upper()
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["stato_norm"] == "PRESENTE")
+        ]
         if data_da:
-            tmp = tmp[tmp["data_presenza"].astype(str) >= str(parse_date(data_da, date.today()))]
+            tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
         if data_a:
-            tmp = tmp[tmp["data_presenza"].astype(str) <= str(parse_date(data_a, date.today()))]
-
-    return tmp
-
-
-def lezioni_usate_da_presenze_centralizzate(cliente_id, data_da=None, data_a=None):
-    try:
-        df = presenze_centralizzate_lezione_cliente(cliente_id, data_da=data_da, data_a=data_a)
-        return 0 if df.empty else int(len(df))
+            tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
+        return len(tmp)
     except Exception:
         return 0
 
-
-def sincronizza_presenze_storiche_in_centrale():
-    """
-    Importa presenze già presenti nelle vecchie fonti dentro presenze_clienti.
-    Evita duplicati usando fonte + riferimento_id.
-    """
-    sb = get_supabase()
-    creati = 0
-    saltati = 0
-
-    clienti = load_clienti()
-    if clienti.empty:
-        return {"creati": 0, "saltati": 0}
-
-    for _, c in clienti.iterrows():
-        try:
-            cid = int(c.get("id"))
-
-            # Vecchie fonti già normalizzate da V45.3
-            old = presenze_cliente_multi_fonte(
-                cid,
-                data_da=c.get("data_inizio_pacchetto") or c.get("data_iscrizione"),
-                data_a=date.today()
-            )
-
-            if old.empty:
-                continue
-
-            for _, r in old.iterrows():
-                fonte = str(r.get("fonte", "storico"))
-                ref = str(r.get("ref_id", ""))
-                data_p = r.get("data") or date.today()
-                ora = str(r.get("ora") or "")
-                descr = str(r.get("descrizione") or "")
-
-                existing = (
-                    sb.table("presenze_clienti")
-                    .select("id")
-                    .eq("cliente_id", cid)
-                    .eq("fonte", fonte)
-                    .eq("riferimento_id", ref)
-                    .limit(1)
-                    .execute()
-                    .data
-                )
-                if existing:
-                    saltati += 1
-                    continue
-
-                ok, _, _ = insert_presenza_centralizzata(
-                    cliente_id=cid,
-                    data_presenza=parse_date(data_p, date.today()),
-                    ora_inizio=ora[:5],
-                    ora_fine="",
-                    tipo_attivita="LEZIONE",
-                    trainer="",
-                    note=f"Import storico: {descr}",
-                    fonte=fonte,
-                    riferimento_id=ref,
-                )
-                if ok:
-                    creati += 1
-                else:
-                    saltati += 1
-
-        except Exception:
-            saltati += 1
-
-    return {"creati": creati, "saltati": saltati}
-
-
-def render_import_presenze_storiche(key_suffix='main'):
-    st.markdown("### Import presenze storiche")
-    st.caption("Usa questa funzione una sola volta per portare vecchie presenze/accessi/cronologia nella nuova tabella presenze_clienti.")
-    st.warning("Prima devi eseguire il file SQL: kreo_v46_presenze_clienti.sql")
-    if st.button("📥 Importa presenze storiche nella tabella centrale", key=f"import_presenze_storiche_v46_unico_{key_suffix}"):
-        res = sincronizza_presenze_storiche_in_centrale()
-        st.success(f"Import completato. Create: {res['creati']} | saltate/già presenti: {res['saltati']}")
-        st.rerun()
-
-
-def presenze_cliente_multi_fonte(cliente_id, data_da=None, data_a=None):
-    """
-    Recupera presenze/lezioni da più fonti:
-    1) tabella lezioni
-    2) tabella cronologia
-    3) tabella accessi_tornello
-
-    Restituisce un DataFrame normalizzato con una riga per presenza conteggiabile.
-    """
-    rows = []
-    cid = int(cliente_id)
-
-    # 1) LEZIONI
-    try:
-        lez = load_lezioni()
-        if not lez.empty and "cliente_id" in lez.columns:
-            tmp = lez.copy()
-            tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
-            tmp = tmp[tmp["cliente_id_num"] == cid]
-
-            if not tmp.empty:
-                if "data_lezione" in tmp.columns:
-                    if data_da:
-                        tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
-                    if data_a:
-                        tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
-
-                stato = tmp["stato"].astype(str).str.upper() if "stato" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
-                note = tmp["note"].astype(str).str.upper() if "note" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
-
-                exclude = stato.str.contains("ANNULL|CANCEL|DISDET|RICHIESTA", na=False)
-                include = (
-                    stato.str.contains("PRESENTE", na=False) |
-                    note.str.contains("PRESENZA MANUALE|TIPO ATTIVITÀ: LEZIONE|TIPO ATTIVITA: LEZIONE|LEZIONE", na=False)
-                )
-
-                counted = tmp[(~exclude) & include]
-                for _, r in counted.iterrows():
-                    rows.append({
-                        "fonte": "lezioni",
-                        "ref_id": r.get("id", ""),
-                        "cliente_id": cid,
-                        "data": r.get("data_lezione", ""),
-                        "ora": r.get("ora_inizio", ""),
-                        "descrizione": f"{r.get('stato','')} | {r.get('note','')}",
-                    })
-    except Exception:
-        pass
-
-    # 2) CRONOLOGIA
-    try:
-        sb = get_supabase()
-        cron = sb.table("cronologia").select("*").eq("cliente_id", cid).range(0, 9999).execute().data
-        cdf = pd.DataFrame(cron)
-        if not cdf.empty:
-            text_cols = []
-            for c in ["campo", "azione", "descrizione", "note", "valore_nuovo", "new_value", "dettaglio"]:
-                if c in cdf.columns:
-                    text_cols.append(c)
-
-            if text_cols:
-                cdf["_txt"] = ""
-                for c in text_cols:
-                    cdf["_txt"] += " " + cdf[c].astype(str)
-            else:
-                cdf["_txt"] = cdf.astype(str).agg(" ".join, axis=1)
-
-            txt = cdf["_txt"].astype(str).str.upper()
-            include = txt.str.contains("PRESENZA|LEZIONE|PRESENTE", na=False)
-            exclude = txt.str.contains("ELIMINAZIONE|ANNULL|CANCEL|DISDET", na=False)
-            counted = cdf[include & ~exclude]
-
-            for _, r in counted.iterrows():
-                created = str(r.get("created_at", ""))[:10]
-                if data_da and created and created < str(parse_date(data_da, date.today())):
-                    continue
-                if data_a and created and created > str(parse_date(data_a, date.today())):
-                    continue
-                rows.append({
-                    "fonte": "cronologia",
-                    "ref_id": r.get("id", ""),
-                    "cliente_id": cid,
-                    "data": created,
-                    "ora": str(r.get("created_at", ""))[11:16],
-                    "descrizione": r.get("_txt", ""),
-                })
-    except Exception:
-        pass
-
-    # 3) ACCESSI TORNELLO
-    try:
-        sb = get_supabase()
-        acc = sb.table("accessi_tornello").select("*").eq("cliente_id", cid).range(0, 9999).execute().data
-        adf = pd.DataFrame(acc)
-        if not adf.empty:
-            # Se l'accesso è REGISTRATO o PRESENTE lo considero presenza effettiva.
-            stato = adf["stato_accesso"].astype(str).str.upper() if "stato_accesso" in adf.columns else pd.Series([""] * len(adf), index=adf.index)
-            note = adf["note"].astype(str).str.upper() if "note" in adf.columns else pd.Series([""] * len(adf), index=adf.index)
-            include = stato.str.contains("REGISTRATO|PRESENTE|AUTORIZZATO", na=False) | note.str.contains("PRESENTE|LEZIONE", na=False)
-            exclude = stato.str.contains("NEGATO|DA_VERIFICARE|RIFIUT", na=False)
-
-            counted = adf[include & ~exclude]
-            for _, r in counted.iterrows():
-                data_acc = r.get("data_accesso", "")
-                if data_da and str(data_acc) < str(parse_date(data_da, date.today())):
-                    continue
-                if data_a and str(data_acc) > str(parse_date(data_a, date.today())):
-                    continue
-                rows.append({
-                    "fonte": "accessi_tornello",
-                    "ref_id": r.get("id", ""),
-                    "cliente_id": cid,
-                    "data": data_acc,
-                    "ora": r.get("ora_accesso", ""),
-                    "descrizione": f"{r.get('stato_accesso','')} | {r.get('note','')}",
-                })
-    except Exception:
-        pass
-
-    out = pd.DataFrame(rows)
-    if out.empty:
-        return out
-
-    # deduplica per giorno/fonte/ref e, in fallback, per data+descrizione
-    for c in ["fonte", "ref_id", "data", "ora", "descrizione"]:
-        if c not in out.columns:
-            out[c] = ""
-    out = out.drop_duplicates(subset=["fonte", "ref_id", "data", "ora"])
-    return out.sort_values(["data", "ora"], ascending=[False, False])
-
-
-def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
-    """
-    Da V46 la fonte ufficiale per scalare lezioni è presenze_clienti.
-    """
-    return lezioni_usate_da_presenze_centralizzate(cliente_id, data_da=data_da, data_a=data_a)
 
 def contatori_cumulativi_cliente(cliente_id, data_ref=None):
     cliente = get_cliente(int(cliente_id))
@@ -4598,8 +4254,6 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         return 0, 0, 0
 
     pac = cliente.get("pacchetto", "")
-
-    # Pacchetti automatici: maturano 3 lezioni a settimana cumulative.
     if is_pacchetto_settimanale_kreo(pac):
         totale = lezioni_maturate_cumulative(cliente, data_ref or date.today())
         data_da = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione")
@@ -4607,61 +4261,42 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         residue = max(int(totale) - int(usate), 0)
         return int(totale), int(usate), int(residue)
 
-    # Pacchetto personalizzato:
-    # - il totale lezioni NON viene mai ricalcolato automaticamente;
-    # - resta quello inserito manualmente dallo staff;
-    # - le usate/residue si aggiornano dalle presenze LEZIONE già registrate.
     try:
         totale = int(float(cliente.get("numero_lezioni") or cliente.get("numero_lezioni_totali") or 0))
     except Exception:
         totale = 0
-
-    data_da = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione")
-    usate = lezioni_usate_totali_cliente(cliente_id, data_da=data_da, data_a=data_ref or date.today())
+    usate = lezioni_usate_totali_cliente(cliente_id)
     residue = max(totale - usate, 0)
-
     return int(totale), int(usate), int(residue)
 
 
 def aggiorna_contatori_cumulativi_clienti():
-    """
-    Ricalcolo sicuro:
-    - pacchetti automatici: aggiorna totale/usate/residue con maturazione settimanale cumulativa;
-    - pacchetti personalizzati: NON cambia il totale, ma aggiorna usate/residue dalle presenze registrate.
-    """
     sb = get_supabase()
     clienti = load_clienti()
     if clienti.empty:
-        return {"aggiornati": 0, "saltati": 0, "personalizzati_aggiornati": 0}
+        return {"aggiornati": 0, "saltati": 0}
 
     aggiornati = 0
     saltati = 0
-    personalizzati_aggiornati = 0
 
     for _, c in clienti.iterrows():
         try:
             cid = int(c.get("id"))
-            pac = c.get("pacchetto", "")
             totale, usate, residue = contatori_cumulativi_cliente(cid)
-
-            payload = {
-                "lezioni_utilizzate": int(usate),
-                "lezioni_residue": int(residue),
-                "updated_at": now_iso(),
-            }
-
-            if is_pacchetto_settimanale_kreo(pac):
-                payload["numero_lezioni"] = int(totale)
-            else:
-                # personalizzato: totale invariato, aggiorno solo usate/residue
-                personalizzati_aggiornati += 1
-
-            sb.table("clienti").update(payload).eq("id", cid).execute()
+            ok_update, _ = safe_update_cliente_contatori(cid, totale, usate, residue) if "safe_update_cliente_contatori" in globals() else (False, "")
+            if not ok_update:
+                sb.table("clienti").update({
+                    "numero_lezioni": int(totale),
+                    "lezioni_utilizzate": int(usate),
+                    "lezioni_residue": int(residue),
+                    "updated_at": now_iso(),
+                }).eq("id", cid).execute()
             aggiornati += 1
-        except Exception as e:
+        except Exception:
             saltati += 1
 
-    return {"aggiornati": aggiornati, "saltati": saltati, "personalizzati_aggiornati": personalizzati_aggiornati}
+    return {"aggiornati": aggiornati, "saltati": saltati}
+
 
 def dataframe_clienti_con_contatori_cumulativi(df):
     if df.empty:
@@ -4692,57 +4327,13 @@ def render_lezioni_cumulative_admin():
     **Nuova regola KREO**
     - Pacchetti standard: +3 lezioni ogni settimana
     - Le lezioni non usate restano disponibili
-    - Pacchetto personalizzato: totale manuale, usate/residue da presenze registrate
+    - Pacchetto personalizzato: gestione manuale
     """)
-
-    with st.expander("📥 Import presenze storiche in tabella centrale", expanded=False):
-        render_import_presenze_storiche('ricalcolo')
 
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
         res = aggiorna_contatori_cumulativi_clienti()
-        st.success(f"Ricalcolo completato. Clienti aggiornati: {res['aggiornati']} | personalizzati aggiornati solo su usate/residue: {res.get('personalizzati_aggiornati', 0)} | saltati: {res['saltati']}")
+        st.success(f"Ricalcolo completato. Aggiornati: {res['aggiornati']} | saltati: {res['saltati']}")
         st.rerun()
-
-    with st.expander("🔍 Diagnostica presenze conteggiate"):
-        clienti = load_clienti()
-        if clienti.empty:
-            st.info("Nessun cliente.")
-        else:
-            diag = []
-            tutte_presenze = []
-            for _, r in clienti.iterrows():
-                try:
-                    cid = int(r.get("id"))
-                    totale, usate, residue = contatori_cumulativi_cliente(cid)
-                    pres = presenze_centralizzate_lezione_cliente(
-                        cid,
-                        data_da=r.get("data_inizio_pacchetto") or r.get("data_iscrizione"),
-                        data_a=date.today()
-                    )
-                    diag.append({
-                        "id": cid,
-                        "cliente": f"{r.get('nome','')} {r.get('cognome','')}",
-                        "pacchetto": r.get("pacchetto", ""),
-                        "totale": totale,
-                        "usate_da_presenze": usate,
-                        "residue": residue,
-                        "righe_presenze_trovate": 0 if pres.empty else len(pres),
-                    })
-                    if not pres.empty:
-                        pres["cliente"] = f"{r.get('nome','')} {r.get('cognome','')}"
-                        tutte_presenze.append(pres)
-                except Exception:
-                    pass
-
-            st.markdown("#### Riepilogo clienti")
-            st.dataframe(pd.DataFrame(diag), use_container_width=True, hide_index=True)
-
-            st.markdown("#### Dettaglio presenze trovate")
-            if tutte_presenze:
-                allp = pd.concat(tutte_presenze, ignore_index=True)
-                st.dataframe(allp[[c for c in ["cliente", "id", "data_presenza_it", "ora_inizio", "ora_fine", "tipo_attivita", "trainer", "fonte", "note"] if c in allp.columns]], use_container_width=True, hide_index=True)
-            else:
-                st.warning("Nessuna presenza trovata nella tabella centrale presenze_clienti.")
 
 
 def cliente_form(prefix, defaults=None, unique_suffix=""):
@@ -7369,7 +6960,6 @@ def main():
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
 
-
         if is_admin():
             with st.expander("📈 Ricalcolo lezioni cumulative"):
                 render_lezioni_cumulative_admin()
@@ -7384,18 +6974,16 @@ def main():
             with st.expander("📆 Gestione scadenze abbonamento"):
                 render_scadenze_abbonamento_admin()
 
+
+        if is_admin():
+            with st.expander("🔄 Ricalcolo rapido settimanale"):
+                render_recalcolo_settimanale_widget()
+
         if df.empty:
             st.info("Nessun cliente inserito.")
         else:
-            # Mostra contatori effettivi ricalcolati da pacchetto + presenze,
-            # così la tabella non resta bloccata ai valori salvati in anagrafica.
-            try:
-                df_view_clienti = dataframe_clienti_con_contatori_cumulativi(df)
-            except Exception:
-                df_view_clienti = df.copy()
-
             cols = ["id","nome","cognome","cellulare","email","pacchetto","tipologia_pagamento","numero_lezioni","lezioni_utilizzate","lezioni_residue","importo","importo_pagato","residuo","stato_pagamento","data_iscrizione_it","scadenza_abbonamento_it","certificato_medico","scadenza_certificato_it","consenso_foto_video","stato_cliente","note"]
-            st.dataframe(df_view_clienti[[c for c in cols if c in df_view_clienti.columns]], use_container_width=True, hide_index=True)
+            st.dataframe(df[[c for c in cols if c in df.columns]], use_container_width=True, hide_index=True)
             if is_admin():
                 with st.expander("Elimina cliente"):
                     cliente_id = st.number_input("ID cliente da eliminare", min_value=1, step=1)
