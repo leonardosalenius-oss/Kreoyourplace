@@ -4011,12 +4011,30 @@ def get_cliente_alerts(cliente):
     five = today + timedelta(days=5)
     thirty = today + timedelta(days=30)
 
-    residuo = max(float(cliente.get("importo") or 0) - float(cliente.get("importo_pagato") or 0), 0)
-    situazione_rate = calcola_situazione_rate(cliente)
-    if situazione_rate["scoperto_rate"] > 0:
-        alerts["RATA_NON_COPERTA"] = ("ALTA", f"Rata non coperta: da pagare {euro(situazione_rate['scoperto_rate'])} rispetto al dovuto ad oggi.")
-    elif residuo > 0:
-        alerts["RESIDUO_TOTALE"] = ("MEDIA", f"Residuo totale contratto: {euro(residuo)}.")
+    importo_totale = float(cliente.get("importo") or 0)
+    importo_pagato = float(cliente.get("importo_pagato") or 0)
+    residuo = max(importo_totale - importo_pagato, 0)
+
+    # ALERT PAGAMENTI:
+    # Se residuo = 0, il cliente è saldato.
+    # Non devono uscire alert rata/abbonamento anche se la vecchia scadenza è passata.
+    if residuo > 0.01:
+        situazione_rate = calcola_situazione_rate(cliente)
+        if situazione_rate["scoperto_rate"] > 0:
+            alerts["RATA_NON_COPERTA"] = ("ALTA", f"Rata non coperta: da pagare {euro(situazione_rate['scoperto_rate'])} rispetto al dovuto ad oggi.")
+        else:
+            alerts["RESIDUO_TOTALE"] = ("MEDIA", f"Residuo totale contratto: {euro(residuo)}.")
+
+        abb = parse_date(cliente.get("scadenza_abbonamento"))
+        if abb < today:
+            alerts["ABBONAMENTO_SCADUTO"] = ("ALTA", f"Abbonamento/prossima rata scaduto il {format_date_it(abb)}.")
+        elif abb <= five:
+            alerts["ABBONAMENTO_5_GG"] = ("ALTA", f"Abbonamento/prossima rata in scadenza entro 5 giorni: {format_date_it(abb)}.")
+        elif abb <= thirty:
+            alerts["ABBONAMENTO_30_GG"] = ("MEDIA", f"Abbonamento/prossima rata in scadenza entro 30 giorni: {format_date_it(abb)}.")
+
+        if abb <= five:
+            alerts["RATA_DA_INCASSARE_5_GG"] = ("ALTA", f"Rata/importo da incassare entro la scadenza periodo: {euro(residuo)}.")
 
     cert = parse_date(cliente.get("scadenza_certificato"))
     if cliente.get("certificato_medico") != "SI":
@@ -4027,17 +4045,6 @@ def get_cliente_alerts(cliente):
         alerts["CERTIFICATO_5_GG"] = ("ALTA", f"Certificato medico in scadenza entro 5 giorni: {format_date_it(cert)}.")
     elif cert <= thirty:
         alerts["CERTIFICATO_30_GG"] = ("MEDIA", f"Certificato medico in scadenza entro 30 giorni: {format_date_it(cert)}.")
-
-    abb = parse_date(cliente.get("scadenza_abbonamento"))
-    if abb < today:
-        alerts["ABBONAMENTO_SCADUTO"] = ("ALTA", f"Abbonamento/prossima rata scaduto il {format_date_it(abb)}.")
-    elif abb <= five:
-        alerts["ABBONAMENTO_5_GG"] = ("ALTA", f"Abbonamento/prossima rata in scadenza entro 5 giorni: {format_date_it(abb)}.")
-    elif abb <= thirty:
-        alerts["ABBONAMENTO_30_GG"] = ("MEDIA", f"Abbonamento/prossima rata in scadenza entro 30 giorni: {format_date_it(abb)}.")
-
-    if residuo > 0 and abb <= five:
-        alerts["RATA_DA_INCASSARE_5_GG"] = ("ALTA", f"Rata/importo da incassare entro la scadenza periodo: {euro(residuo)}.")
 
     lezioni_tot = int(cliente.get("numero_lezioni") or 0)
     lezioni_usate = int(cliente.get("lezioni_utilizzate") or 0)
