@@ -2166,6 +2166,304 @@ def render_calendario_unificato_staff():
 
 
 
+
+
+def render_agenda_luxury():
+    """V35 - Agenda Luxury: vista operativa rapida, senza rendering pesante del calendario completo."""
+    st.header("✨ Agenda Luxury")
+    st.caption("Vista concierge veloce: oggi, clienti attesi, check-in, WhatsApp e azioni rapide. Il calendario completo resta nella Vista avanzata.")
+
+    today = date.today()
+    c1, c2, c3, c4 = st.columns([1.1, 1.1, 1.4, 1.2])
+    with c1:
+        giorno_base = st.date_input("Giorno", value=today, format="DD/MM/YYYY", key="agenda_luxury_giorno")
+    with c2:
+        vista = st.selectbox("Vista", ["Oggi", "Domani", "7 giorni"], index=0, key="agenda_luxury_vista")
+    if vista == "Domani":
+        date_min = giorno_base + timedelta(days=1)
+        date_max = date_min
+    elif vista == "7 giorni":
+        date_min = giorno_base
+        date_max = giorno_base + timedelta(days=6)
+    else:
+        date_min = giorno_base
+        date_max = giorno_base
+
+    lez = load_lezioni_range(date_min, date_max)
+    clienti_map = load_clienti_calendar_map()
+
+    trainer_options = ["Tutti"]
+    if not lez.empty and "trainer" in lez.columns:
+        trainer_options += sorted([x for x in lez["trainer"].dropna().astype(str).unique().tolist() if x])
+    trainer_options = list(dict.fromkeys(trainer_options))
+    with c3:
+        trainer_filter = st.selectbox("Trainer", trainer_options, key="agenda_luxury_trainer")
+    with c4:
+        mostra_annullate = st.checkbox("Mostra annullate", value=False, key="agenda_luxury_annullate")
+
+    if not lez.empty:
+        if trainer_filter != "Tutti" and "trainer" in lez.columns:
+            lez = lez[lez["trainer"].astype(str) == trainer_filter].copy()
+        if not mostra_annullate and "stato" in lez.columns:
+            lez = lez[~lez["stato"].astype(str).str.upper().isin(["ANNULLATO"])] .copy()
+
+    # arricchimento leggero senza chiamate Supabase per ogni cliente
+    rows = []
+    if not lez.empty:
+        for _, r in lez.iterrows():
+            try:
+                cid = int(r.get("cliente_id")) if r.get("cliente_id") is not None and not pd.isna(r.get("cliente_id")) else 0
+            except Exception:
+                cid = 0
+            cinfo = clienti_map.get(cid, {})
+            rows.append({
+                "id": int(r.get("id")),
+                "data": str(r.get("data_lezione", "")),
+                "ora": str(r.get("ora_inizio", ""))[:5],
+                "fine": str(r.get("ora_fine", ""))[:5],
+                "cliente_id": cid,
+                "cliente": cinfo.get("nome", "Cliente"),
+                "cellulare": cinfo.get("cellulare", ""),
+                "pacchetto": cinfo.get("pacchetto", ""),
+                "tipo": cinfo.get("tipo", ""),
+                "residue": cinfo.get("lezioni_residue", ""),
+                "trainer": str(r.get("trainer", "")),
+                "stato": str(r.get("stato", "PRENOTATO")),
+                "note": str(r.get("note", "") or ""),
+            })
+
+    agenda_df = pd.DataFrame(rows)
+    if not agenda_df.empty:
+        agenda_df = agenda_df.sort_values(["data", "ora", "trainer", "cliente"], ascending=True)
+
+    # KPI rapidi, senza caricare la griglia completa degli slot.
+    tot = int(len(agenda_df)) if not agenda_df.empty else 0
+    presenti = int((agenda_df["stato"].astype(str).str.upper() == "PRESENTE").sum()) if not agenda_df.empty else 0
+    prenotati = int((agenda_df["stato"].astype(str).str.upper() == "PRENOTATO").sum()) if not agenda_df.empty else 0
+    richieste = int((agenda_df["stato"].astype(str).str.upper().str.contains("RICHIESTA", na=False)).sum()) if not agenda_df.empty else 0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Clienti attesi", tot)
+    k2.metric("Check-in", presenti)
+    k3.metric("Prenotati", prenotati)
+    k4.metric("Richieste", richieste)
+
+    st.markdown("---")
+
+    left, right = st.columns([1.8, 1])
+    with left:
+        st.subheader("Timeline operativa")
+        if agenda_df.empty:
+            st.success("Nessuna lezione nel range selezionato. Vista pulita e caricamento immediato.")
+        else:
+            for _, row in agenda_df.iterrows():
+                lezione_id = int(row["id"])
+                stato = str(row.get("stato", ""))
+                tipo = str(row.get("tipo", ""))
+                color = calendar_color_for_type(tipo, stato if "RICHIESTA" in stato.upper() or "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper() else None)
+                border = "#1d1d1f"
+                if stato.upper() == "PRESENTE":
+                    status_badge = "✅ Presente"
+                elif stato.upper() == "ANNULLATO":
+                    status_badge = "🚫 Annullata"
+                elif "RICHIESTA" in stato.upper():
+                    status_badge = "🟣 Richiesta"
+                else:
+                    status_badge = "⏳ Prenotata"
+
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid rgba(255,255,255,.10); border-left:7px solid {color}; border-radius:18px; padding:14px 16px; margin:10px 0; background:linear-gradient(135deg, rgba(255,255,255,.055), rgba(255,255,255,.025)); box-shadow:0 10px 28px rgba(0,0,0,.18);">
+                        <div style="display:flex; justify-content:space-between; gap:14px; align-items:center;">
+                            <div>
+                                <div style="font-size:18px; font-weight:900; color:#ffffff;">{format_date_it(row['data'])} · {row['ora']} - {row['fine']}</div>
+                                <div style="font-size:15px; color:#f3f3f3; margin-top:4px;"><b>{row['cliente']}</b> · {row['pacchetto'] or row['tipo']} · {row['trainer']}</div>
+                                <div style="font-size:12px; color:#cfcfcf; margin-top:4px;">Lezioni residue: {row['residue']} · {status_badge}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
+                with b1:
+                    if st.button("Apri", key=f"agenda_open_{lezione_id}", use_container_width=True):
+                        st.session_state["agenda_luxury_selected"] = lezione_id
+                        st.rerun()
+                with b2:
+                    if st.button("✅ Check-in", key=f"agenda_checkin_{lezione_id}", use_container_width=True, disabled=(stato.upper()=="PRESENTE")):
+                        ok, msg = update_stato_lezione(lezione_id, "PRESENTE")
+                        try:
+                            if int(row.get("cliente_id") or 0):
+                                aggiorna_contatori_dopo_presenza_lezione(int(row.get("cliente_id")))
+                        except Exception:
+                            pass
+                        if ok:
+                            clear_calendar_cache()
+                            st.success("Check-in registrato.")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                with b3:
+                    cliente = None
+                    if int(row.get("cliente_id") or 0):
+                        # Chiamata solo quando serve renderizzare il bottone WhatsApp della riga.
+                        cliente = {"cellulare": row.get("cellulare", ""), "nome": str(row.get("cliente", "")).split(" ")[0], "cognome": "", "pacchetto": row.get("pacchetto", "")}
+                    if cliente and cliente.get("cellulare"):
+                        msg = genera_testo_whatsapp(cliente, "PROMEMORIA LEZIONE")
+                        st.link_button("📲 WhatsApp", build_whatsapp_url(cliente.get("cellulare", ""), msg), use_container_width=True)
+                    else:
+                        st.button("📲 WhatsApp", key=f"agenda_wa_disabled_{lezione_id}", use_container_width=True, disabled=True)
+                with b4:
+                    if st.button("🚫 Annulla", key=f"agenda_cancel_{lezione_id}", use_container_width=True, disabled=(stato.upper()=="ANNULLATO")):
+                        ok, msg = update_stato_lezione(lezione_id, "ANNULLATO")
+                        if ok:
+                            clear_calendar_cache()
+                            st.warning("Lezione annullata.")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+    with right:
+        st.subheader("Dettaglio concierge")
+        selected_id = st.session_state.get("agenda_luxury_selected")
+        if not selected_id:
+            st.info("Seleziona una lezione dalla timeline per aprire il dettaglio operativo.")
+        else:
+            selected_row = agenda_df[agenda_df["id"] == int(selected_id)] if not agenda_df.empty else pd.DataFrame()
+            if selected_row.empty:
+                st.warning("La lezione selezionata non è più nel range corrente.")
+                st.session_state.pop("agenda_luxury_selected", None)
+            else:
+                sr = selected_row.iloc[0].to_dict()
+                cliente = get_cliente(int(sr.get("cliente_id") or 0)) if int(sr.get("cliente_id") or 0) else None
+                st.markdown(f"### {sr.get('cliente')}")
+                st.caption(f"{format_date_it(sr.get('data'))} · {sr.get('ora')} - {sr.get('fine')} · {sr.get('trainer')}")
+                d1, d2 = st.columns(2)
+                d1.metric("Pacchetto", sr.get("pacchetto") or sr.get("tipo") or "-")
+                d2.metric("Stato", sr.get("stato") or "-")
+                d3, d4 = st.columns(2)
+                d3.metric("Lezioni residue", sr.get("residue") if sr.get("residue") != "" else "-")
+                if cliente:
+                    try:
+                        residuo = max(float(cliente.get("importo") or 0) - float(cliente.get("importo_pagato") or 0), 0)
+                    except Exception:
+                        residuo = 0
+                    d4.metric("Saldo aperto", euro(residuo))
+                    alerts = get_cliente_alerts(cliente)
+                    if alerts:
+                        st.markdown("#### Alert cliente")
+                        render_alerts(alerts)
+                    else:
+                        st.success("Nessun alert critico sul cliente.")
+
+                    msg = genera_testo_whatsapp(cliente, "PROMEMORIA LEZIONE")
+                    st.link_button("📲 Invia promemoria WhatsApp", build_whatsapp_url(cliente.get("cellulare", ""), msg), use_container_width=True)
+                    if st.button("Apri scheda cliente", key=f"agenda_open_cliente_{selected_id}", use_container_width=True):
+                        st.session_state["reception_target"] = "✏️ Modifica cliente"
+                        st.info("Vai su Clienti → Modifica cliente per aprire la scheda completa.")
+                else:
+                    st.info("Cliente non trovato o lezione non collegata a cliente.")
+
+                st.markdown("#### Azioni rapide")
+                q1, q2 = st.columns(2)
+                with q1:
+                    if st.button("✅ Conferma presenza", key=f"agenda_detail_checkin_{selected_id}", use_container_width=True):
+                        ok, msg = update_stato_lezione(int(selected_id), "PRESENTE")
+                        try:
+                            if int(sr.get("cliente_id") or 0):
+                                aggiorna_contatori_dopo_presenza_lezione(int(sr.get("cliente_id")))
+                        except Exception:
+                            pass
+                        if ok:
+                            clear_calendar_cache()
+                            st.success("Presenza confermata.")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                with q2:
+                    if st.button("🚫 Annulla lezione", key=f"agenda_detail_cancel_{selected_id}", use_container_width=True):
+                        ok, msg = update_stato_lezione(int(selected_id), "ANNULLATO")
+                        if ok:
+                            clear_calendar_cache()
+                            st.warning("Lezione annullata.")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+                with st.expander("✏️ Modifica rapida orario / trainer"):
+                    m1, m2 = st.columns(2)
+                    with m1:
+                        nuova_data = st.date_input("Data", value=parse_date(sr.get("data"), date.today()), format="DD/MM/YYYY", key=f"agenda_mod_data_{selected_id}")
+                        nuovo_start = st.time_input("Ora inizio", value=datetime.strptime(sr.get("ora") or "09:00", "%H:%M").time(), key=f"agenda_mod_start_{selected_id}")
+                    with m2:
+                        nuovo_end = st.time_input("Ora fine", value=datetime.strptime(sr.get("fine") or "10:00", "%H:%M").time(), key=f"agenda_mod_end_{selected_id}")
+                        nuovo_trainer = st.text_input("Trainer", value=sr.get("trainer", ""), key=f"agenda_mod_trainer_{selected_id}")
+                    if st.button("💾 Salva modifica", key=f"agenda_mod_save_{selected_id}", use_container_width=True):
+                        try:
+                            sb = get_supabase()
+                            sb.table("lezioni").update({
+                                "data_lezione": str(nuova_data),
+                                "ora_inizio": nuovo_start.strftime("%H:%M"),
+                                "ora_fine": nuovo_end.strftime("%H:%M"),
+                                "trainer": nuovo_trainer,
+                                "updated_at": now_iso(),
+                                "aggiornata_da": user_label(),
+                            }).eq("id", int(selected_id)).execute()
+                            clear_calendar_cache()
+                            st.success("Lezione aggiornata.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore modifica lezione: {e}")
+
+    st.markdown("---")
+    with st.expander("➕ Inserimento rapido lezione", expanded=False):
+        st.caption("Creazione veloce senza aprire il calendario pesante.")
+        df_clienti = load_clienti()
+        if df_clienti.empty:
+            st.info("Nessun cliente disponibile.")
+        else:
+            dfc = df_clienti.sort_values("id", ascending=True).copy()
+            labels = (dfc["id"].astype(str) + " - " + dfc["nome"] + " " + dfc["cognome"]).tolist()
+            i1, i2, i3 = st.columns([1.8, 1, 1])
+            with i1:
+                selected = st.selectbox("Cliente", labels, key="agenda_quick_cliente")
+                cliente_id = int(selected.split(" - ")[0])
+            with i2:
+                data_lezione = st.date_input("Data", value=giorno_base, format="DD/MM/YYYY", key="agenda_quick_data")
+            with i3:
+                ora_inizio = st.time_input("Ora", value=datetime.strptime("09:00", "%H:%M").time(), key="agenda_quick_ora")
+            j1, j2, j3 = st.columns(3)
+            with j1:
+                durata = st.number_input("Durata min", min_value=30, max_value=180, value=60, step=15, key="agenda_quick_durata")
+            with j2:
+                trainer = st.text_input("Trainer", value=get_kreo_settings().get("trainer_default", "Vincenzo Crinisio"), key="agenda_quick_trainer")
+            with j3:
+                stato = st.selectbox("Stato", ["PRENOTATO", "RICHIESTA CLIENTE", "RECUPERO"], key="agenda_quick_stato")
+            ora_fine_dt = (datetime.combine(date.today(), ora_inizio) + timedelta(minutes=int(durata))).time()
+            note = st.text_input("Note", value="", key="agenda_quick_note")
+            if st.button("Salva lezione rapida", key="agenda_quick_save", use_container_width=True):
+                try:
+                    sb = get_supabase()
+                    sb.table("lezioni").insert({
+                        "cliente_id": int(cliente_id),
+                        "slot_id": None,
+                        "data_lezione": str(data_lezione),
+                        "ora_inizio": ora_inizio.strftime("%H:%M"),
+                        "ora_fine": ora_fine_dt.strftime("%H:%M"),
+                        "trainer": trainer,
+                        "stato": stato,
+                        "note": note,
+                        "created_at": now_iso(),
+                        "created_by": user_label(),
+                    }).execute()
+                    insert_history(int(cliente_id), "lezione rapida", "", f"{format_date_it(data_lezione)} {ora_inizio.strftime('%H:%M')}", "Inserita da Agenda Luxury")
+                    clear_calendar_cache()
+                    st.success("Lezione inserita in Agenda Luxury.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Errore inserimento lezione: {e}")
+
 def render_premium_calendar():
     st.header("Premium Calendar KREO")
     st.caption("V34.3 TURBO: carica di default solo le lezioni della settimana. Gli slot liberi si attivano a richiesta.")
@@ -5074,7 +5372,7 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V34.2")
+    st.sidebar.caption("Navigazione semplificata V35 · Agenda Luxury")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
@@ -5088,7 +5386,7 @@ def render_v32_navigation():
         "🛎️ Reception": ["🛎️ Console Reception"],
         "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
         "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
-        "🗓 Calendario": ["🗓 Calendario operativo", "⚙️ Disponibilità trainer"],
+        "🗓 Calendario": ["✨ Agenda Luxury", "🗓 Calendario avanzato", "⚙️ Disponibilità trainer"],
         "💳 Incassi": ["💳 Gestione incassi", "🧾 Stampa ricevuta", "⬇️ Export Excel"],
         "📩 Comunicazioni": ["📲 Notifiche WhatsApp", "🚨 Centro alert & messaggi"],
         "👥 Staff": ["👥 Gestione utenti"],
@@ -7054,7 +7352,7 @@ def main():
         with r2c2: reception_button("🎟️ Associa badge", "🚪 Accessi tornello", "rec_badge")
         with r2c3: reception_button("🔄 Sincronizza accessi / badge", "🚪 Accessi tornello", "rec_sync")
         with r3c1: reception_button("♻️ Ricalcolo lezioni", "♻️ Ricalcolo lezioni", "rec_recalc")
-        with r3c2: reception_button("📅 Inserimento rapido lezione", "🗓 Calendario operativo", "rec_lezione")
+        with r3c2: reception_button("📅 Agenda / lezione", "✨ Agenda Luxury", "rec_lezione")
         with r3c3: reception_button("✅ Check-in cliente", "🚪 Accessi tornello", "rec_checkin")
         with r4c1: reception_button("📩 Messaggio cliente", "📲 Notifiche WhatsApp", "rec_messaggio_cliente")
         with r4c2: reception_button("🧾 Stampa ricevuta", "🧾 Stampa ricevuta", "rec_stampa_ricevuta")
@@ -7716,12 +8014,16 @@ def main():
 
 
 
+    elif menu == "✨ Agenda Luxury":
+        render_agenda_luxury()
+
+
+    elif menu in ["🗓 Calendario avanzato", "🗓 Premium Calendar"]:
+        render_premium_calendar()
+
+
     elif menu in ["🗓 Calendario unificato", "🗓 Calendario operativo"]:
         render_calendario_unificato_staff()
-
-
-    elif menu == "🗓 Premium Calendar":
-        render_premium_calendar()
 
 
     elif menu == "🗓 Planner Slot":
