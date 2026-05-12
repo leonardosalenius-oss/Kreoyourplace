@@ -1480,31 +1480,55 @@ def calendar_color_for_type(tipo, stato=None):
 
 
 def build_premium_calendar_events():
+    """
+    Costruisce gli eventi del calendario in modo più leggero.
+    Ottimizzazioni V33.3:
+    - limita il caricamento visuale a una finestra temporale ragionevole;
+    - evita chiamate cliente-per-cliente dentro il calendario;
+    - colora le lezioni PRENOTATE secondo il pacchetto cliente, non grigio generico.
+    """
     events = []
+
+    # Finestra visuale: evita di disegnare anni di storico dentro FullCalendar.
+    today = date.today()
+    date_min = today - timedelta(days=21)
+    date_max = today + timedelta(days=120)
 
     try:
         slots = load_disponibilita()
+        if not slots.empty and "data_slot" in slots.columns:
+            slots["_data_dt"] = pd.to_datetime(slots["data_slot"], errors="coerce").dt.date
+            slots = slots[(slots["_data_dt"] >= date_min) & (slots["_data_dt"] <= date_max)].copy()
     except Exception:
         slots = pd.DataFrame()
 
     try:
         lez = load_lezioni()
+        if not lez.empty and "data_lezione" in lez.columns:
+            lez["_data_dt"] = pd.to_datetime(lez["data_lezione"], errors="coerce").dt.date
+            lez = lez[(lez["_data_dt"] >= date_min) & (lez["_data_dt"] <= date_max)].copy()
     except Exception:
         lez = pd.DataFrame()
 
-    # Occupazione per slot e nomi clienti
+    # Mappa clienti unica: nome + pacchetto + tipo colore.
     clienti_map = {}
     try:
         clienti_df = load_clienti()
         if not clienti_df.empty:
             for _, c in clienti_df.iterrows():
-                clienti_map[int(c["id"])] = f"{c.get('nome','')} {c.get('cognome','')}".strip()
+                cid = int(c["id"])
+                pac = c.get("pacchetto", "")
+                clienti_map[cid] = {
+                    "nome": f"{c.get('nome','')} {c.get('cognome','')}".strip(),
+                    "pacchetto": pac,
+                    "tipo": pacchetto_tipo(pac),
+                }
     except Exception:
         clienti_map = {}
 
     pren_by_slot = {}
     if not lez.empty and "slot_id" in lez.columns:
-        lez_valid = lez[~lez["stato"].isin(["ANNULLATO"])].copy()
+        lez_valid = lez[~lez["stato"].astype(str).str.upper().isin(["ANNULLATO"])].copy()
         for _, r in lez_valid.iterrows():
             sid = r.get("slot_id")
             if pd.isna(sid):
@@ -1513,15 +1537,15 @@ def build_premium_calendar_events():
             pren_by_slot.setdefault(sid, []).append(r.to_dict())
 
     if not slots.empty:
-        for _, s in slots.iterrows():
+        for _, srow in slots.iterrows():
             try:
-                sid = int(s["id"])
-                data_slot = str(s.get("data_slot"))
-                start = str(s.get("ora_inizio"))[:5]
-                end = str(s.get("ora_fine"))[:5]
-                tipo = s.get("tipo_slot", "")
-                trainer = s.get("trainer", "")
-                maxp = int(s.get("max_posti") or 1)
+                sid = int(srow["id"])
+                data_slot = str(srow.get("data_slot"))
+                start = str(srow.get("ora_inizio"))[:5]
+                end = str(srow.get("ora_fine"))[:5]
+                tipo = srow.get("tipo_slot", "")
+                trainer = srow.get("trainer", "")
+                maxp = int(srow.get("max_posti") or 1)
                 pren = pren_by_slot.get(sid, [])
                 occ = len(pren)
                 liberi = max(maxp - occ, 0)
@@ -1529,7 +1553,8 @@ def build_premium_calendar_events():
                 if trainer:
                     title += f" · {trainer}"
 
-                color = calendar_color_for_type(tipo, "PIENO" if liberi <= 0 else "")
+                color = calendar_color_for_type(tipo)
+                border = "#111827" if liberi <= 0 else color
 
                 events.append({
                     "id": f"slot-{sid}",
@@ -1537,20 +1562,23 @@ def build_premium_calendar_events():
                     "start": f"{data_slot}T{start}:00",
                     "end": f"{data_slot}T{end}:00",
                     "backgroundColor": color,
-                    "borderColor": color,
+                    "borderColor": border,
                     "extendedProps": {
                         "kind": "slot",
                         "slot_id": sid,
                         "tipo": tipo,
                         "trainer": trainer,
                         "posti": f"{occ}/{maxp}",
-                        "clienti": ", ".join([clienti_map.get(int(p.get("cliente_id")), "Cliente") for p in pren if p.get("cliente_id")]),
+                        "clienti": ", ".join([
+                            clienti_map.get(int(p.get("cliente_id")), {}).get("nome", "Cliente")
+                            for p in pren if p.get("cliente_id")
+                        ]),
                     }
                 })
             except Exception:
                 continue
 
-    # Lezioni senza slot_id, così non si perdono prenotazioni manuali vecchie
+    # Lezioni senza slot_id: vengono colorate in base al pacchetto del cliente.
     if not lez.empty:
         for _, r in lez.iterrows():
             try:
@@ -1560,11 +1588,21 @@ def build_premium_calendar_events():
                 data_l = str(r.get("data_lezione"))
                 start = str(r.get("ora_inizio"))[:5]
                 end = str(r.get("ora_fine"))[:5]
-                stato = r.get("stato", "")
+                stato = str(r.get("stato", ""))
                 trainer = r.get("trainer", "")
-                cliente_nome = clienti_map.get(int(r.get("cliente_id")), "Cliente")
+                cid = int(r.get("cliente_id")) if not pd.isna(r.get("cliente_id")) else 0
+                cinfo = clienti_map.get(cid, {})
+                cliente_nome = cinfo.get("nome", "Cliente")
+                tipo_cliente = cinfo.get("tipo", "")
+
                 title = f"{cliente_nome} · {stato}"
-                color = calendar_color_for_type("", stato)
+                # Richieste cliente restano arancioni; prenotazioni ordinarie seguono il pacchetto.
+                if "RICHIESTA" in stato.upper():
+                    color = calendar_color_for_type(tipo_cliente, stato)
+                elif "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper():
+                    color = calendar_color_for_type(tipo_cliente, stato)
+                else:
+                    color = calendar_color_for_type(tipo_cliente)
 
                 events.append({
                     "id": f"lezione-{lid}",
@@ -1579,13 +1617,13 @@ def build_premium_calendar_events():
                         "cliente": cliente_nome,
                         "trainer": trainer,
                         "stato": stato,
+                        "tipo": tipo_cliente,
                     }
                 })
             except Exception:
                 continue
 
     return events
-
 
 
 def time_to_minutes(t):
@@ -1917,7 +1955,7 @@ def render_premium_calendar():
         "slotMinTime": get_kreo_settings().get("apertura", "07:30") + ":00",
         "slotMaxTime": get_kreo_settings().get("chiusura", "20:00") + ":00",
         "allDaySlot": False,
-        "height": 760,
+        "height": 650,
         "editable": False,
         "selectable": True,
         "nowIndicator": True,
@@ -2006,7 +2044,7 @@ def render_premium_calendar():
     l1.markdown("🟨 **Luxury / One to One**")
     l2.markdown("🟦 **Gold / Two to One**")
     l3.markdown("🟪 **VIP / Three to One**")
-    l4.markdown("🟦 **Coaching in sede**")
+    l4.markdown("🔵 **Coaching in sede**")
     l5.markdown("🟧 **Richiesta cliente**")
 
 
@@ -4663,7 +4701,7 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V33.2")
+    st.sidebar.caption("Navigazione semplificata V33.3")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
@@ -6593,7 +6631,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V33.2")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V33.3")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
