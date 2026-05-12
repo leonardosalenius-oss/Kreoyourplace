@@ -7408,7 +7408,7 @@ def inject_kreo_luxury_sidebar_style():
             right: 22px;
             z-index: 999999;
             background: #050505;
-            color: #FFFFFF;
+            color: #F4D675;
             border: 1.5px solid #D4AF37;
             padding: 9px 14px;
             border-radius: 14px;
@@ -7435,7 +7435,9 @@ def inject_kreo_luxury_sidebar_style():
             }
         }
         </style>
-        <div class="pentti-footer">Developed by Pentti Salenius © 2026</div>
+        <div class="pentti-footer">
+            <span style="color:#FFFFFF !important;">Developed by Pentti Salenius © 2026</span>
+        </div>
         """,
         unsafe_allow_html=True
     )
