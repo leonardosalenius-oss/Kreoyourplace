@@ -4445,7 +4445,7 @@ def sincronizza_presenze_storiche_in_centrale():
     return {"creati": creati, "saltati": saltati}
 
 
-def render_import_presenze_storiche():
+def render_import_presenze_storiche(key_suffix='main'):
     st.markdown("### Import presenze storiche")
     st.caption("Usa questa funzione una sola volta per portare vecchie presenze/accessi/cronologia nella nuova tabella presenze_clienti.")
     st.warning("Prima devi eseguire il file SQL: kreo_v46_presenze_clienti.sql")
@@ -4695,8 +4695,8 @@ def render_lezioni_cumulative_admin():
     - Pacchetto personalizzato: totale manuale, usate/residue da presenze registrate
     """)
 
-    with st.expander("📥 Import presenze storiche in tabella centrale", expanded=True):
-        render_import_presenze_storiche()
+    with st.expander("📥 Import presenze storiche in tabella centrale", expanded=False):
+        render_import_presenze_storiche('generale')
 
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
         res = aggiorna_contatori_cumulativi_clienti()
@@ -7371,7 +7371,7 @@ def main():
 
         if is_admin():
             with st.expander("📥 Import presenze centralizzate diretto"):
-                render_import_presenze_storiche()
+                render_import_presenze_storiche('ricalcolo')
 
 
         if is_admin():
