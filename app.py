@@ -7332,9 +7332,122 @@ def render_accessi_tornello_page():
     with tab12:
         render_console_reception_premium()
 
+
+# ---- KREO LUXURY SIDEBAR / FOOTER STYLE ----
+def inject_kreo_luxury_sidebar_style():
+    st.markdown(
+        """
+        <style>
+        :root {
+            --kreo-gold: #D4AF37;
+            --kreo-gold-soft: #F4D675;
+            --kreo-black: #050505;
+        }
+
+        section[data-testid="stSidebar"] div.stButton > button,
+        section[data-testid="stSidebar"] button[kind="secondary"],
+        section[data-testid="stSidebar"] button[kind="primary"] {
+            background: #050505 !important;
+            background-color: #050505 !important;
+            color: #F4D675 !important;
+            border: 1.4px solid #D4AF37 !important;
+            border-radius: 12px !important;
+            box-shadow: 0 0 0 1px rgba(212,175,55,0.10), 0 6px 18px rgba(0,0,0,0.32) !important;
+            font-weight: 700 !important;
+            transition: all .18s ease-in-out !important;
+        }
+
+        section[data-testid="stSidebar"] div.stButton > button:hover,
+        section[data-testid="stSidebar"] button[kind="secondary"]:hover,
+        section[data-testid="stSidebar"] button[kind="primary"]:hover {
+            background: #121212 !important;
+            background-color: #121212 !important;
+            color: #FFFFFF !important;
+            border: 1.6px solid #F4D675 !important;
+            box-shadow: 0 0 12px rgba(212,175,55,0.35) !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+        section[data-testid="stSidebar"] div[data-baseweb="select"] div[role="button"],
+        section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="control"],
+        section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"] {
+            background: #050505 !important;
+            background-color: #050505 !important;
+            color: #F4D675 !important;
+            border-color: #D4AF37 !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+            border: 1.5px solid #D4AF37 !important;
+            border-radius: 12px !important;
+            box-shadow: 0 0 0 1px rgba(212,175,55,0.10), 0 6px 18px rgba(0,0,0,0.32) !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+        section[data-testid="stSidebar"] div[data-baseweb="select"] svg,
+        section[data-testid="stSidebar"] div[data-baseweb="select"] input {
+            color: #F4D675 !important;
+            fill: #F4D675 !important;
+        }
+
+        section[data-testid="stSidebar"] input,
+        section[data-testid="stSidebar"] textarea {
+            background: #050505 !important;
+            color: #F4D675 !important;
+            border: 1.4px solid #D4AF37 !important;
+            border-radius: 12px !important;
+        }
+
+        section[data-testid="stSidebar"] [role="radiogroup"] label {
+            color: #FFFFFF !important;
+        }
+
+        .pentti-footer {
+            position: fixed;
+            bottom: 58px;
+            right: 22px;
+            z-index: 999999;
+            background: #050505;
+            color: #F4D675;
+            border: 1.5px solid #D4AF37;
+            padding: 9px 14px;
+            border-radius: 14px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            opacity: 0.98;
+            box-shadow: 0 0 18px rgba(212,175,55,0.38), 0 8px 28px rgba(0,0,0,0.40);
+        }
+
+        .pentti-footer small {
+            color: #FFFFFF;
+            font-weight: 500;
+            opacity: 0.82;
+        }
+
+        @media (max-width: 900px) {
+            .pentti-footer {
+                left: 16px;
+                right: 16px;
+                bottom: 70px;
+                text-align: center;
+                font-size: 11px;
+            }
+        }
+        </style>
+        <div class="pentti-footer">
+            Developed by Pentti Salenius © 2026<br>
+            <small>KREO Platform — v35.4 Production Test</small>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
     style()
+    inject_kreo_luxury_sidebar_style()
 
     if not login_gate():
         return
@@ -8569,32 +8682,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# ---- PLATFORM FOOTER ----
-
-st.markdown(
-    '''
-    <style>
-    .pentti-footer {
-        position: fixed;
-        bottom: 10px;
-        right: 18px;
-        z-index: 9999;
-        background: #000000;
-        color: #d4af37;
-        border: 1px solid #d4af37;
-        padding: 6px 12px;
-        border-radius: 10px;
-        font-size: 11px;
-        opacity: 0.92;
-        box-shadow: 0 0 10px rgba(212,175,55,0.25);
-    }
-    </style>
-    <div class="pentti-footer">
-        Developed by Pentti Salenius © 2026 — KREO Platform v35.4
-    </div>
-    ''',
-    unsafe_allow_html=True
-)
-
