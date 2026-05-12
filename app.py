@@ -2396,6 +2396,50 @@ def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, t
         return False, f"Errore registrazione presenza: {e}"
 
 
+
+def elimina_presenza_lezione_cliente(lezione_id):
+    """
+    Elimina una presenza/lezione del cliente dalla tabella lezioni
+    e ricalcola i contatori del cliente.
+    """
+    try:
+        sb = get_supabase()
+        data = sb.table("lezioni").select("*").eq("id", int(lezione_id)).limit(1).execute().data
+        if not data:
+            return False, "Presenza/lezione non trovata."
+
+        lezione = data[0]
+        cliente_id = int(lezione.get("cliente_id"))
+
+        sb.table("lezioni").delete().eq("id", int(lezione_id)).execute()
+
+        try:
+            totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
+            if "safe_update_cliente_contatori" in globals():
+                safe_update_cliente_contatori(cliente_id, totale, usate, residue)
+            else:
+                sb.table("clienti").update({
+                    "numero_lezioni": int(totale),
+                    "lezioni_utilizzate": int(usate),
+                    "lezioni_residue": int(residue),
+                    "updated_at": now_iso(),
+                }).eq("id", cliente_id).execute()
+        except Exception:
+            pass
+
+        insert_history(
+            cliente_id,
+            "eliminazione presenza/lezione",
+            f"{lezione.get('data_lezione')} {lezione.get('ora_inizio')}-{lezione.get('ora_fine')}",
+            "",
+            f"Eliminata da {user_label()} | Stato: {lezione.get('stato')} | Note: {lezione.get('note','')}"
+        )
+
+        return True, "Presenza/lezione eliminata e contatori aggiornati."
+    except Exception as e:
+        return False, f"Errore eliminazione presenza: {e}"
+
+
 def render_presenze_cliente_section(cliente_id):
     st.markdown("### Presenze cliente")
     st.caption("Registra una presenza manuale. Se scegli LEZIONE, viene scalata automaticamente dalle lezioni residue.")
@@ -2446,8 +2490,26 @@ def render_presenze_cliente_section(cliente_id):
         if storico.empty:
             st.info("Nessuna presenza registrata per questo cliente.")
         else:
-            cols = ["data_lezione_it", "ora_inizio", "ora_fine", "trainer", "stato", "note", "creata_da", "created_at"]
+            cols = ["id", "data_lezione_it", "ora_inizio", "ora_fine", "trainer", "stato", "note", "creata_da", "created_at"]
             st.dataframe(storico[[c for c in cols if c in storico.columns]], use_container_width=True, hide_index=True)
+
+            if is_admin():
+                st.markdown("#### Elimina presenza / lezione")
+                labels = []
+                for _, r in storico.iterrows():
+                    labels.append(
+                        f"{int(r.get('id'))} - {r.get('data_lezione_it','')} {r.get('ora_inizio','')}-{r.get('ora_fine','')} | {r.get('trainer','')} | {r.get('note','')}"
+                    )
+                selected_del = st.selectbox("Seleziona presenza da eliminare", labels, key=f"delete_presenza_select_{cliente_id}")
+                conferma_del = st.checkbox("Confermo eliminazione presenza selezionata", key=f"delete_presenza_confirm_{cliente_id}")
+                if conferma_del and st.button("🗑️ Elimina presenza / lezione", key=f"delete_presenza_btn_{cliente_id}"):
+                    lezione_id = int(selected_del.split(" - ")[0])
+                    ok, msg = elimina_presenza_lezione_cliente(lezione_id)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
 
 def update_stato_lezione(lezione_id, nuovo_stato):
@@ -4318,12 +4380,12 @@ def render_v32_navigation():
     submenu_map = {
         "🏠 Dashboard": ["📊 Dashboard", "🚨 Alert clienti"],
         "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
-        "🚪 Accessi tornello", "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
+        "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
         "🗓 Calendario": ["🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
         "💳 Incassi": ["💳 Gestione incassi", "⬇️ Export Excel"],
         "👥 Staff": ["👥 Gestione utenti"],
         "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
-        "📊 Analytics": ["📊 Dashboard", "🚨 Alert clienti"],
+        "📊 Analytics": ["📈 Analytics direzionali", "🚨 Alert clienti"],
     }
 
     items = submenu_map.get(macro, ["📊 Dashboard"])
@@ -7218,7 +7280,7 @@ def main():
                                     st.error(msg)
 
 
-    elif menu == "📊 Dashboard":
+    elif menu == "📊 Dashboard" or menu == "📈 Analytics direzionali":
         st.header("Dashboard")
         if df.empty:
             st.info("Inserisci almeno un cliente.")
