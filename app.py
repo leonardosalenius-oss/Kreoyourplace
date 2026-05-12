@@ -4712,6 +4712,26 @@ def render_v32_navigation():
     else:
         allowed_macros = all_macros
 
+    # Se un pulsante Reception richiede una funzione, posiziono anche la macro corretta
+    # PRIMA di creare i widget Streamlit. Così i pulsanti funzionano anche per staff limitati.
+    forced = st.session_state.get("kreo_force_menu")
+    forced_macro_map = {
+        "🛎️ Reception rapida": "🛎️ Reception",
+        "🖥️ Console accessi": "🛎️ Reception",
+        "➕ Nuovo cliente": "🛎️ Reception",
+        "✏️ Modifica cliente": "🛎️ Reception",
+        "💳 Gestione incassi": "🛎️ Reception",
+        "🧾 Stampa ricevuta": "🛎️ Reception",
+        "📲 Notifiche WhatsApp": "🛎️ Reception",
+        "🚨 Alert clienti": "🛎️ Reception",
+        "🚪 Accessi tornello": "🛎️ Reception",
+        "✨ Agenda Luxury": "🗓 Calendario",
+        "🗓 Calendario unificato": "🗓 Calendario",
+        "📅 Calendario lezioni": "🗓 Calendario",
+    }
+    if forced in forced_macro_map and forced_macro_map[forced] in allowed_macros:
+        st.session_state["v32_macro_nav"] = forced_macro_map[forced]
+
     macro = st.sidebar.radio(
         "Sezione",
         allowed_macros,
@@ -4770,10 +4790,15 @@ def render_v32_navigation():
         items = ["🛎️ Reception rapida"]
 
     # Gestione pulsanti rapidi: forza la voce al rerun senza modificare il widget dopo la sua creazione.
+    # Impostare la session_state PRIMA della selectbox evita che Streamlit ignori l'index
+    # quando il widget ha già una chiave valorizzata.
     forced = st.session_state.pop("kreo_force_menu", None)
     index = 0
     if forced in items:
         index = items.index(forced)
+        st.session_state["v32_sub_nav"] = forced
+    elif st.session_state.get("v32_sub_nav") not in items:
+        st.session_state["v32_sub_nav"] = items[index]
 
     selected = st.sidebar.selectbox("👇 Scegli la funzione operativa", items, index=index, key="v32_sub_nav")
 
@@ -6665,6 +6690,8 @@ def render_accessi_tornello_page():
 
 
 def kreo_go_to(menu_name):
+    # Navigazione sicura da pulsanti Reception:
+    # imposta il target PRIMA che radio/selectbox vengano ricreati.
     st.session_state["kreo_force_menu"] = menu_name
     st.rerun()
 
