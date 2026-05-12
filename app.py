@@ -1,3 +1,28 @@
+
+# ============================================================
+# KREO PLATFORM
+# Developed by Pentti Salenius © 2026
+#
+# Proprietary Wellness Management Platform
+# Internal architecture:
+# - Reception workflow
+# - Agenda Luxury
+# - Badge & access integration
+# - Payments & receipts
+# - WhatsApp communications
+# - Role management
+# - Analytics & operational flows
+#
+# This platform is proprietary software.
+# Unauthorized redistribution or reproduction is prohibited.
+# ============================================================
+
+PLATFORM_NAME = "KREO Platform"
+PLATFORM_VERSION = "v35.4 Production Test"
+PLATFORM_AUTHOR = "Pentti Salenius"
+PLATFORM_COPYRIGHT = "Developed by Pentti Salenius © 2026"
+
+
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -552,31 +577,19 @@ def area_cliente_premium_style():
         margin-top: 12px;
     }
 
-    /* Selectbox sidebar: nero + bordo dorato SEMPRE, non solo hover */
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:hover,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {
-        background: #050505 !important;
-        background-color: #050505 !important;
-        border: 2px solid #d4af37 !important;
-        border-radius: 14px !important;
-        min-height: 46px !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.25), 0 8px 18px rgba(0,0,0,0.35) !important;
-    }
-
+    /* Selectbox sidebar: valore selezionato sempre leggibile */
     section[data-testid="stSidebar"] div[data-baseweb="select"] div,
     section[data-testid="stSidebar"] div[data-baseweb="select"] span,
     section[data-testid="stSidebar"] div[data-baseweb="select"] input {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
         font-weight: 900 !important;
         opacity: 1 !important;
     }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] svg {
-        fill: #d4af37 !important;
-        color: #d4af37 !important;
+        fill: #111111 !important;
+        color: #111111 !important;
     }
 
     /* Radio sidebar leggibili */
@@ -585,35 +598,29 @@ def area_cliente_premium_style():
         font-weight: 800 !important;
     }
 
-    /* Pulsanti sidebar, incluso Logout: nero + bordo dorato SEMPRE */
-    section[data-testid="stSidebar"] button,
-    section[data-testid="stSidebar"] button[kind="secondary"],
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-        background: #050505 !important;
-        background-color: #050505 !important;
-        color: #f7e7a6 !important;
-        border: 2px solid #d4af37 !important;
-        border-radius: 14px !important;
+    /* Pulsanti sidebar, incluso Logout */
+    section[data-testid="stSidebar"] button {
+        background: #d4af37 !important;
+        color: #111111 !important;
+        border: 1px solid #f3d77a !important;
+        border-radius: 12px !important;
         font-weight: 900 !important;
         opacity: 1 !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.22), 0 8px 18px rgba(0,0,0,0.35) !important;
     }
 
     section[data-testid="stSidebar"] button p,
     section[data-testid="stSidebar"] button span,
     section[data-testid="stSidebar"] button div {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
+        color: #111111 !important;
+        -webkit-text-fill-color: #111111 !important;
         font-weight: 900 !important;
         opacity: 1 !important;
     }
 
-    section[data-testid="stSidebar"] button:hover,
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
-        background: #111111 !important;
-        color: #ffffff !important;
-        border-color: #f3d77a !important;
-        transform: translateY(-1px);
+    section[data-testid="stSidebar"] button:hover {
+        background: #f3d77a !important;
+        color: #111111 !important;
+        border-color: #ffffff !important;
     }
 
     /* Etichette */
@@ -5370,67 +5377,25 @@ def render_v32_navigation():
         color: #ffffff !important;
     }
 
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:hover,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div:focus-within {
-        background: #050505 !important;
-        background-color: #050505 !important;
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background-color: #ffffff !important;
         border: 2px solid #d4af37 !important;
-        border-radius: 14px !important;
+        border-radius: 12px !important;
         min-height: 46px !important;
-        color: #f7e7a6 !important;
-        font-weight: 900 !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.25), 0 8px 18px rgba(0,0,0,0.35) !important;
+        color: #111111 !important;
+        font-weight: 800 !important;
+        box-shadow: 0 0 0 2px rgba(212,175,55,0.15) !important;
     }
 
-    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
-    section[data-testid="stSidebar"] div[data-baseweb="select"] div {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
-        font-weight: 900 !important;
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
+        color: #111111 !important;
+        font-weight: 800 !important;
         font-size: 15px !important;
     }
 
-    section[data-testid="stSidebar"] div[data-baseweb="select"] svg {
-        fill: #d4af37 !important;
-        color: #d4af37 !important;
-    }
-
     section[data-testid="stSidebar"] input {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
-        font-weight: 900 !important;
-    }
-
-    section[data-testid="stSidebar"] button,
-    section[data-testid="stSidebar"] button[kind="secondary"],
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-        background: #050505 !important;
-        background-color: #050505 !important;
-        color: #f7e7a6 !important;
-        border: 2px solid #d4af37 !important;
-        border-radius: 14px !important;
-        font-weight: 900 !important;
-        opacity: 1 !important;
-        box-shadow: 0 0 0 1px rgba(212,175,55,0.22), 0 8px 18px rgba(0,0,0,0.35) !important;
-    }
-
-    section[data-testid="stSidebar"] button p,
-    section[data-testid="stSidebar"] button span,
-    section[data-testid="stSidebar"] button div {
-        color: #f7e7a6 !important;
-        -webkit-text-fill-color: #f7e7a6 !important;
-        font-weight: 900 !important;
-        opacity: 1 !important;
-    }
-
-    section[data-testid="stSidebar"] button:hover,
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
-        background: #111111 !important;
-        color: #ffffff !important;
-        border-color: #f3d77a !important;
-        transform: translateY(-1px);
+        color: #111111 !important;
+        font-weight: 800 !important;
     }
 
     .kreo-nav-help {
@@ -8604,3 +8569,32 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ---- PLATFORM FOOTER ----
+
+st.markdown(
+    '''
+    <style>
+    .pentti-footer {
+        position: fixed;
+        bottom: 10px;
+        right: 18px;
+        z-index: 9999;
+        background: #000000;
+        color: #d4af37;
+        border: 1px solid #d4af37;
+        padding: 6px 12px;
+        border-radius: 10px;
+        font-size: 11px;
+        opacity: 0.92;
+        box-shadow: 0 0 10px rgba(212,175,55,0.25);
+    }
+    </style>
+    <div class="pentti-footer">
+        Developed by Pentti Salenius © 2026 — KREO Platform v35.4
+    </div>
+    ''',
+    unsafe_allow_html=True
+)
+
