@@ -4695,6 +4695,9 @@ def render_lezioni_cumulative_admin():
     - Pacchetto personalizzato: totale manuale, usate/residue da presenze registrate
     """)
 
+    with st.expander("📥 Import presenze storiche in tabella centrale", expanded=True):
+        render_import_presenze_storiche()
+
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
         res = aggiorna_contatori_cumulativi_clienti()
         st.success(f"Ricalcolo completato. Clienti aggiornati: {res['aggiornati']} | personalizzati aggiornati solo su usate/residue: {res.get('personalizzati_aggiornati', 0)} | saltati: {res['saltati']}")
@@ -7365,6 +7368,11 @@ def main():
 
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
+
+        if is_admin():
+            with st.expander("📥 Import presenze centralizzate diretto"):
+                render_import_presenze_storiche()
+
 
         if is_admin():
             with st.expander("📈 Ricalcolo lezioni cumulative"):
