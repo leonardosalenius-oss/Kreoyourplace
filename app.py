@@ -4252,28 +4252,49 @@ def lezioni_maturate_cumulative(cliente, data_ref=None):
 
 def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
     """
-    Conta tutte le lezioni PRESENTE del cliente.
-    Se data_da è indicata, conta dal primo giorno pacchetto.
+    Conta le lezioni/presenze realmente effettuate dal cliente.
+    Versione robusta:
+    - conta stato PRESENTE;
+    - conta note/tipo attività che indicano presenza manuale o lezione;
+    - ignora annullate/cancellate;
+    - applica periodo se presente.
     """
     try:
         lez = load_lezioni()
         if lez.empty:
             return 0
+
         tmp = lez.copy()
+        if "cliente_id" not in tmp.columns:
+            return 0
+
         tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
-        tmp["stato_norm"] = tmp["stato"].astype(str).str.upper()
-        tmp = tmp[
-            (tmp["cliente_id_num"] == int(cliente_id)) &
-            (tmp["stato_norm"] == "PRESENTE")
-        ]
-        if data_da:
-            tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
-        if data_a:
-            tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
-        return len(tmp)
+        tmp = tmp[tmp["cliente_id_num"] == int(cliente_id)]
+
+        if tmp.empty:
+            return 0
+
+        if "data_lezione" in tmp.columns:
+            if data_da:
+                tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
+            if data_a:
+                tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
+
+        stato = tmp["stato"].astype(str).str.upper() if "stato" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
+        note = tmp["note"].astype(str).str.upper() if "note" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
+
+        # stati da escludere
+        exclude = stato.str.contains("ANNULL|CANCEL|DISDET|RICHIESTA", na=False)
+
+        # presenze certe
+        is_presente = stato.str.contains("PRESENTE", na=False)
+        is_lezione_manual = note.str.contains("PRESENZA MANUALE|TIPO ATTIVITÀ: LEZIONE|TIPO ATTIVITA: LEZIONE|LEZIONE", na=False)
+
+        counted = tmp[(~exclude) & (is_presente | is_lezione_manual)]
+
+        return int(len(counted))
     except Exception:
         return 0
-
 
 def contatori_cumulativi_cliente(cliente_id, data_ref=None):
     cliente = get_cliente(int(cliente_id))
@@ -4333,19 +4354,18 @@ def aggiorna_contatori_cumulativi_clienti():
                 "updated_at": now_iso(),
             }
 
-            # Solo i pacchetti automatici aggiornano anche il totale maturato.
             if is_pacchetto_settimanale_kreo(pac):
                 payload["numero_lezioni"] = int(totale)
             else:
+                # personalizzato: totale invariato, aggiorno solo usate/residue
                 personalizzati_aggiornati += 1
 
             sb.table("clienti").update(payload).eq("id", cid).execute()
             aggiornati += 1
-        except Exception:
+        except Exception as e:
             saltati += 1
 
     return {"aggiornati": aggiornati, "saltati": saltati, "personalizzati_aggiornati": personalizzati_aggiornati}
-
 
 def dataframe_clienti_con_contatori_cumulativi(df):
     if df.empty:
@@ -4383,6 +4403,28 @@ def render_lezioni_cumulative_admin():
         res = aggiorna_contatori_cumulativi_clienti()
         st.success(f"Ricalcolo completato. Clienti aggiornati: {res['aggiornati']} | personalizzati aggiornati solo su usate/residue: {res.get('personalizzati_aggiornati', 0)} | saltati: {res['saltati']}")
         st.rerun()
+
+    with st.expander("🔍 Diagnostica presenze conteggiate"):
+        clienti = load_clienti()
+        if clienti.empty:
+            st.info("Nessun cliente.")
+        else:
+            diag = []
+            for _, r in clienti.iterrows():
+                try:
+                    cid = int(r.get("id"))
+                    totale, usate, residue = contatori_cumulativi_cliente(cid)
+                    diag.append({
+                        "id": cid,
+                        "cliente": f"{r.get('nome','')} {r.get('cognome','')}",
+                        "pacchetto": r.get("pacchetto", ""),
+                        "totale": totale,
+                        "usate_da_presenze": usate,
+                        "residue": residue,
+                    })
+                except Exception:
+                    pass
+            st.dataframe(pd.DataFrame(diag), use_container_width=True, hide_index=True)
 
 
 def cliente_form(prefix, defaults=None, unique_suffix=""):
@@ -7026,8 +7068,15 @@ def main():
         if df.empty:
             st.info("Nessun cliente inserito.")
         else:
+            # Mostra contatori effettivi ricalcolati da pacchetto + presenze,
+            # così la tabella non resta bloccata ai valori salvati in anagrafica.
+            try:
+                df_view_clienti = dataframe_clienti_con_contatori_cumulativi(df)
+            except Exception:
+                df_view_clienti = df.copy()
+
             cols = ["id","nome","cognome","cellulare","email","pacchetto","tipologia_pagamento","numero_lezioni","lezioni_utilizzate","lezioni_residue","importo","importo_pagato","residuo","stato_pagamento","data_iscrizione_it","scadenza_abbonamento_it","certificato_medico","scadenza_certificato_it","consenso_foto_video","stato_cliente","note"]
-            st.dataframe(df[[c for c in cols if c in df.columns]], use_container_width=True, hide_index=True)
+            st.dataframe(df_view_clienti[[c for c in cols if c in df_view_clienti.columns]], use_container_width=True, hide_index=True)
             if is_admin():
                 with st.expander("Elimina cliente"):
                     cliente_id = st.number_input("ID cliente da eliminare", min_value=1, step=1)
