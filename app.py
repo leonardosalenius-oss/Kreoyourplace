@@ -1575,38 +1575,107 @@ def calendar_color_for_type(tipo, stato=None):
     return "#64748b"
 
 
-def build_premium_calendar_events():
+
+def load_disponibilita_range(date_min, date_max):
+    """Carica solo gli slot nel range visibile del calendario."""
+    sb = get_supabase()
+    try:
+        data = (
+            sb.table("disponibilita_calendario")
+            .select("*")
+            .gte("data_slot", str(date_min))
+            .lte("data_slot", str(date_max))
+            .order("data_slot", desc=False)
+            .execute()
+            .data
+        )
+    except Exception:
+        data = []
+    df = pd.DataFrame(data)
+    return df
+
+
+def load_lezioni_range(date_min, date_max):
+    """Carica solo lezioni/prenotazioni nel range visibile del calendario."""
+    sb = get_supabase()
+    try:
+        data = (
+            sb.table("lezioni")
+            .select("*")
+            .gte("data_lezione", str(date_min))
+            .lte("data_lezione", str(date_max))
+            .order("data_lezione", desc=False)
+            .execute()
+            .data
+        )
+    except Exception:
+        data = []
+    df = pd.DataFrame(data)
+    if not df.empty and "data_lezione" in df.columns:
+        df["data_lezione_it"] = df["data_lezione"].apply(format_date_it)
+    return df
+
+
+def get_calendar_trainer_options(date_min, date_max):
+    opts = ["Tutti"]
+    try:
+        default_trainer = get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+        if default_trainer and default_trainer not in opts:
+            opts.append(default_trainer)
+    except Exception:
+        pass
+    try:
+        lez = load_lezioni_range(date_min, date_max)
+        if not lez.empty and "trainer" in lez.columns:
+            for t in sorted(lez["trainer"].dropna().astype(str).unique().tolist()):
+                if t and t not in opts:
+                    opts.append(t)
+    except Exception:
+        pass
+    try:
+        slots = load_disponibilita_range(date_min, date_max)
+        if not slots.empty and "trainer" in slots.columns:
+            for t in sorted(slots["trainer"].dropna().astype(str).unique().tolist()):
+                if t and t not in opts:
+                    opts.append(t)
+    except Exception:
+        pass
+    return opts
+
+
+def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="Tutti"):
     """
-    Costruisce gli eventi del calendario in modo più leggero.
-    Ottimizzazioni V33.3:
-    - limita il caricamento visuale a una finestra temporale ragionevole;
-    - evita chiamate cliente-per-cliente dentro il calendario;
-    - colora le lezioni PRENOTATE secondo il pacchetto cliente, non grigio generico.
+    V34.2 - Calendario leggero e coerente:
+    - carica solo il range selezionato;
+    - filtra per trainer;
+    - mostra le prenotazioni con il colore del pacchetto cliente;
+    - mostra gli slot disponibili solo quando non hanno clienti prenotati.
     """
     events = []
 
-    # Finestra visuale: evita di disegnare anni di storico dentro FullCalendar.
     today = date.today()
-    date_min = today - timedelta(days=21)
-    date_max = today + timedelta(days=120)
+    if date_min is None:
+        date_min = today - timedelta(days=today.weekday())
+    if date_max is None:
+        date_max = date_min + timedelta(days=27)
 
     try:
-        slots = load_disponibilita()
-        if not slots.empty and "data_slot" in slots.columns:
-            slots["_data_dt"] = pd.to_datetime(slots["data_slot"], errors="coerce").dt.date
-            slots = slots[(slots["_data_dt"] >= date_min) & (slots["_data_dt"] <= date_max)].copy()
+        slots = load_disponibilita_range(date_min, date_max)
     except Exception:
         slots = pd.DataFrame()
 
     try:
-        lez = load_lezioni()
-        if not lez.empty and "data_lezione" in lez.columns:
-            lez["_data_dt"] = pd.to_datetime(lez["data_lezione"], errors="coerce").dt.date
-            lez = lez[(lez["_data_dt"] >= date_min) & (lez["_data_dt"] <= date_max)].copy()
+        lez = load_lezioni_range(date_min, date_max)
     except Exception:
         lez = pd.DataFrame()
 
-    # Mappa clienti unica: nome + pacchetto + tipo colore.
+    trainer_filter_norm = str(trainer_filter or "Tutti").strip()
+    if trainer_filter_norm and trainer_filter_norm != "Tutti":
+        if not slots.empty and "trainer" in slots.columns:
+            slots = slots[slots["trainer"].astype(str) == trainer_filter_norm].copy()
+        if not lez.empty and "trainer" in lez.columns:
+            lez = lez[lez["trainer"].astype(str) == trainer_filter_norm].copy()
+
     clienti_map = {}
     try:
         clienti_df = load_clienti()
@@ -1616,25 +1685,33 @@ def build_premium_calendar_events():
                 pac = c.get("pacchetto", "")
                 clienti_map[cid] = {
                     "nome": f"{c.get('nome','')} {c.get('cognome','')}".strip(),
+                    "cellulare": c.get("cellulare", ""),
                     "pacchetto": pac,
                     "tipo": pacchetto_tipo(pac),
+                    "lezioni_residue": int(c.get("lezioni_residue") or max(int(c.get("numero_lezioni") or 0) - int(c.get("lezioni_utilizzate") or 0), 0)),
                 }
     except Exception:
         clienti_map = {}
 
     pren_by_slot = {}
     if not lez.empty and "slot_id" in lez.columns:
-        lez_valid = lez[~lez["stato"].astype(str).str.upper().isin(["ANNULLATO"])].copy()
+        lez_valid = lez[~lez["stato"].astype(str).str.upper().isin(["ANNULLATO"])] .copy()
         for _, r in lez_valid.iterrows():
             sid = r.get("slot_id")
             if pd.isna(sid):
                 continue
-            sid = int(sid)
+            try:
+                sid = int(sid)
+            except Exception:
+                continue
             pren_by_slot.setdefault(sid, []).append(r.to_dict())
 
+    # Slot disponibili o prenotazioni legate a slot.
     if not slots.empty:
         for _, srow in slots.iterrows():
             try:
+                if "attivo" in srow and str(srow.get("attivo")).lower() in ["false", "0", "no"]:
+                    continue
                 sid = int(srow["id"])
                 data_slot = str(srow.get("data_slot"))
                 start = str(srow.get("ora_inizio"))[:5]
@@ -1644,37 +1721,60 @@ def build_premium_calendar_events():
                 maxp = int(srow.get("max_posti") or 1)
                 pren = pren_by_slot.get(sid, [])
                 occ = len(pren)
-                liberi = max(maxp - occ, 0)
-                title = f"{tipo} · {occ}/{maxp}"
-                if trainer:
-                    title += f" · {trainer}"
 
-                color = calendar_color_for_type(tipo)
-                border = "#111827" if liberi <= 0 else color
-
-                events.append({
-                    "id": f"slot-{sid}",
-                    "title": title,
-                    "start": f"{data_slot}T{start}:00",
-                    "end": f"{data_slot}T{end}:00",
-                    "backgroundColor": color,
-                    "borderColor": border,
-                    "extendedProps": {
-                        "kind": "slot",
-                        "slot_id": sid,
-                        "tipo": tipo,
-                        "trainer": trainer,
-                        "posti": f"{occ}/{maxp}",
-                        "clienti": ", ".join([
-                            clienti_map.get(int(p.get("cliente_id")), {}).get("nome", "Cliente")
-                            for p in pren if p.get("cliente_id")
-                        ]),
-                    }
-                })
+                if pren:
+                    # Le prenotazioni reali vincono graficamente sullo slot: colore = pacchetto cliente.
+                    for p_lez in pren:
+                        lid = int(p_lez.get("id"))
+                        cid = int(p_lez.get("cliente_id")) if p_lez.get("cliente_id") is not None else 0
+                        cinfo = clienti_map.get(cid, {})
+                        cliente_nome = cinfo.get("nome", "Cliente")
+                        stato = str(p_lez.get("stato", "PRENOTATO"))
+                        tipo_cliente = cinfo.get("tipo", tipo)
+                        color = calendar_color_for_type(tipo_cliente, stato if "RICHIESTA" in stato.upper() or "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper() else None)
+                        events.append({
+                            "id": f"lezione-{lid}",
+                            "title": f"{cliente_nome} · {stato}",
+                            "start": f"{data_slot}T{start}:00",
+                            "end": f"{data_slot}T{end}:00",
+                            "backgroundColor": color,
+                            "borderColor": color,
+                            "extendedProps": {
+                                "kind": "lezione",
+                                "lezione_id": lid,
+                                "cliente_id": cid,
+                                "cliente": cliente_nome,
+                                "pacchetto": cinfo.get("pacchetto", ""),
+                                "lezioni_residue": cinfo.get("lezioni_residue", ""),
+                                "trainer": trainer,
+                                "stato": stato,
+                                "tipo": tipo_cliente,
+                                "slot_id": sid,
+                            }
+                        })
+                else:
+                    # Slot libero: colore tenue del tipo slot.
+                    color = calendar_color_for_type(tipo)
+                    events.append({
+                        "id": f"slot-{sid}",
+                        "title": f"DISPONIBILE · {tipo} · 0/{maxp}",
+                        "start": f"{data_slot}T{start}:00",
+                        "end": f"{data_slot}T{end}:00",
+                        "backgroundColor": color,
+                        "borderColor": color,
+                        "extendedProps": {
+                            "kind": "slot",
+                            "slot_id": sid,
+                            "tipo": tipo,
+                            "trainer": trainer,
+                            "posti": f"0/{maxp}",
+                            "clienti": "",
+                        }
+                    })
             except Exception:
                 continue
 
-    # Lezioni senza slot_id: vengono colorate in base al pacchetto del cliente.
+    # Lezioni senza slot_id.
     if not lez.empty:
         for _, r in lez.iterrows():
             try:
@@ -1690,19 +1790,11 @@ def build_premium_calendar_events():
                 cinfo = clienti_map.get(cid, {})
                 cliente_nome = cinfo.get("nome", "Cliente")
                 tipo_cliente = cinfo.get("tipo", "")
-
-                title = f"{cliente_nome} · {stato}"
-                # Richieste cliente restano arancioni; prenotazioni ordinarie seguono il pacchetto.
-                if "RICHIESTA" in stato.upper():
-                    color = calendar_color_for_type(tipo_cliente, stato)
-                elif "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper():
-                    color = calendar_color_for_type(tipo_cliente, stato)
-                else:
-                    color = calendar_color_for_type(tipo_cliente)
+                color = calendar_color_for_type(tipo_cliente, stato if "RICHIESTA" in stato.upper() or "ANNULLATO" in stato.upper() or "ASSENTE" in stato.upper() else None)
 
                 events.append({
                     "id": f"lezione-{lid}",
-                    "title": title,
+                    "title": f"{cliente_nome} · {stato}",
                     "start": f"{data_l}T{start}:00",
                     "end": f"{data_l}T{end}:00",
                     "backgroundColor": color,
@@ -1710,7 +1802,10 @@ def build_premium_calendar_events():
                     "extendedProps": {
                         "kind": "lezione",
                         "lezione_id": lid,
+                        "cliente_id": cid,
                         "cliente": cliente_nome,
+                        "pacchetto": cinfo.get("pacchetto", ""),
+                        "lezioni_residue": cinfo.get("lezioni_residue", ""),
                         "trainer": trainer,
                         "stato": stato,
                         "tipo": tipo_cliente,
@@ -2028,9 +2123,10 @@ def render_calendario_unificato_staff():
                 st.rerun()
 
 
+
 def render_premium_calendar():
     st.header("Premium Calendar KREO")
-    st.caption("Vista calendario professionale: slot, capienza, richieste cliente, presenze e trainer.")
+    st.caption("V34.2: vista più veloce, filtri trainer, colori pacchetto e azioni rapide sulla lezione.")
 
     if st_calendar is None:
         st.warning("Modulo calendario premium non installato. Installa/aggiorna requirements.txt e fai Reboot app.")
@@ -2042,27 +2138,40 @@ def render_premium_calendar():
             st.dataframe(slots, use_container_width=True, hide_index=True)
         return
 
-    events = build_premium_calendar_events()
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    f1, f2, f3 = st.columns([1.2, 1.2, 1.6])
+    with f1:
+        data_da = st.date_input("Da", value=monday, format="DD/MM/YYYY", key="cal_v342_da")
+    with f2:
+        giorni_vista = st.selectbox("Vista", [7, 14, 28, 60], index=2, format_func=lambda x: f"{x} giorni", key="cal_v342_giorni")
+    data_a = data_da + timedelta(days=int(giorni_vista) - 1)
+    with f3:
+        trainer_options = get_calendar_trainer_options(data_da, data_a)
+        trainer_filter = st.selectbox("Trainer", trainer_options, key="cal_v342_trainer")
+
+    events = build_premium_calendar_events(data_da, data_a, trainer_filter)
 
     calendar_options = {
         "initialView": "timeGridWeek",
+        "initialDate": str(data_da),
         "locale": "it",
         "firstDay": 1,
         "slotMinTime": get_kreo_settings().get("apertura", "07:30") + ":00",
         "slotMaxTime": get_kreo_settings().get("chiusura", "20:00") + ":00",
         "allDaySlot": False,
-        "height": 650,
+        "height": 560,
         "editable": False,
         "selectable": True,
         "nowIndicator": True,
+        "eventDisplay": "block",
         "headerToolbar": {
             "left": "prev,next today",
             "center": "title",
-            "right": "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+            "right": "timeGridWeek,timeGridDay,listWeek",
         },
         "buttonText": {
             "today": "Oggi",
-            "month": "Mese",
             "week": "Settimana",
             "day": "Giorno",
             "list": "Lista",
@@ -2070,26 +2179,18 @@ def render_premium_calendar():
     }
 
     custom_css = """
-    .fc .fc-toolbar-title {
-        font-size: 1.35rem;
-        font-weight: 900;
-    }
-    .fc-event {
-        border-radius: 10px;
-        padding: 3px;
-        font-size: 0.78rem;
-        font-weight: 700;
-    }
-    .fc-timegrid-slot {
-        height: 44px !important;
-    }
+    .fc .fc-toolbar-title { font-size: 1.22rem; font-weight: 900; }
+    .fc-event { border-radius: 10px; padding: 3px; font-size: 0.74rem; font-weight: 800; }
+    .fc-timegrid-slot { height: 36px !important; }
+    .fc .fc-button { border-radius: 10px; }
     """
 
+    st.caption(f"Caricati {len(events)} eventi dal {format_date_it(data_da)} al {format_date_it(data_a)}.")
     state = st_calendar(
         events=events,
         options=calendar_options,
         custom_css=custom_css,
-        key="premium_calendar_kreo",
+        key=f"premium_calendar_kreo_v342_{data_da}_{giorni_vista}_{trainer_filter}",
     )
 
     st.markdown("---")
@@ -2105,11 +2206,7 @@ def render_premium_calendar():
             c1.metric("Tipo", props.get("tipo", ""))
             c2.metric("Trainer", props.get("trainer", ""))
             c3.metric("Posti", props.get("posti", ""))
-            clienti = props.get("clienti", "")
-            if clienti:
-                st.info(f"Clienti prenotati: {clienti}")
-            else:
-                st.info("Nessun cliente prenotato su questo slot.")
+            st.info("Slot disponibile. Per prenotare usa il pannello 'Inserimento rapido lezione cliente' sopra il calendario.")
 
             slot_id = int(props.get("slot_id"))
             with st.expander("Gestione slot"):
@@ -2123,25 +2220,97 @@ def render_premium_calendar():
                             st.error(msg)
 
         elif props.get("kind") == "lezione":
-            st.write(f"Cliente: **{props.get('cliente','')}**")
-            st.write(f"Trainer: **{props.get('trainer','')}**")
-            st.write(f"Stato: **{props.get('stato','')}**")
+            lezione_id = int(props.get("lezione_id"))
+            cliente_id = int(props.get("cliente_id") or 0)
+            cliente = get_cliente(cliente_id) if cliente_id else None
+
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric("Cliente", props.get("cliente", ""))
+            d2.metric("Pacchetto", props.get("pacchetto", props.get("tipo", "")))
+            d3.metric("Trainer", props.get("trainer", ""))
+            d4.metric("Stato", props.get("stato", ""))
+
+            if cliente:
+                st.caption(f"Lezioni residue: {cliente.get('lezioni_residue', props.get('lezioni_residue', ''))}")
+
+            a1, a2, a3, a4 = st.columns(4)
+            with a1:
+                if st.button("✅ Conferma presenza", key=f"cal_presente_{lezione_id}"):
+                    ok, msg = update_stato_lezione(lezione_id, "PRESENTE")
+                    try:
+                        if cliente_id:
+                            aggiorna_contatori_dopo_presenza_lezione(cliente_id)
+                    except Exception:
+                        pass
+                    if ok:
+                        st.success("Presenza confermata e lezioni aggiornate.")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with a2:
+                if st.button("🚫 Annulla", key=f"cal_annulla_{lezione_id}"):
+                    ok, msg = update_stato_lezione(lezione_id, "ANNULLATO")
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            with a3:
+                if cliente:
+                    msg = genera_testo_whatsapp(cliente, "PROMEMORIA LEZIONE")
+                    st.link_button("📲 WhatsApp", build_whatsapp_url(cliente.get("cellulare", ""), msg))
+            with a4:
+                if is_admin() and st.button("🗑 Elimina", key=f"cal_delete_lez_{lezione_id}"):
+                    ok, msg = delete_lezione(lezione_id)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            with st.expander("✏️ Modifica orario / trainer"):
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    nuova_data = st.date_input("Data", value=parse_date(ev.get("start", "")[:10], date.today()), format="DD/MM/YYYY", key=f"cal_mod_data_{lezione_id}")
+                with m2:
+                    nuovo_start = st.time_input("Ora inizio", value=datetime.strptime(ev.get("start", "09:00")[11:16] or "09:00", "%H:%M").time(), key=f"cal_mod_start_{lezione_id}")
+                with m3:
+                    nuovo_end = st.time_input("Ora fine", value=datetime.strptime(ev.get("end", "10:00")[11:16] or "10:00", "%H:%M").time(), key=f"cal_mod_end_{lezione_id}")
+                nuovo_trainer = st.text_input("Trainer", value=props.get("trainer", ""), key=f"cal_mod_trainer_{lezione_id}")
+                if st.button("💾 Salva modifica lezione", key=f"cal_mod_save_{lezione_id}"):
+                    try:
+                        sb = get_supabase()
+                        sb.table("lezioni").update({
+                            "data_lezione": str(nuova_data),
+                            "ora_inizio": nuovo_start.strftime("%H:%M"),
+                            "ora_fine": nuovo_end.strftime("%H:%M"),
+                            "trainer": nuovo_trainer,
+                            "updated_at": now_iso(),
+                            "aggiornata_da": user_label(),
+                        }).eq("id", int(lezione_id)).execute()
+                        if cliente_id:
+                            insert_history(cliente_id, "modifica lezione", "", f"{format_date_it(nuova_data)} {nuovo_start.strftime('%H:%M')}-{nuovo_end.strftime('%H:%M')}", f"Modifica calendario da {user_label()}")
+                        st.success("Lezione aggiornata.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Errore modifica lezione: {e}")
 
     elif state and state.get("dateClick"):
         clicked = state["dateClick"].get("dateStr")
         st.info(f"Hai cliccato: {clicked}")
-        st.caption("Nelle prossime versioni questo click aprirà direttamente la creazione slot/lezione.")
+        st.caption("Usa l'inserimento rapido sopra il calendario per creare la lezione su questo orario.")
     else:
-        st.info("Clicca su uno slot o su una lezione per vedere il dettaglio.")
+        st.info("Clicca su uno slot o su una lezione per vedere il dettaglio e le azioni rapide.")
 
     st.markdown("---")
     st.subheader("Legenda")
-    l1, l2, l3, l4, l5 = st.columns(5)
+    l1, l2, l3, l4, l5, l6 = st.columns(6)
     l1.markdown("🟨 **Luxury / One to One**")
     l2.markdown("🟦 **Gold / Two to One**")
     l3.markdown("🟪 **VIP / Three to One**")
     l4.markdown("🔵 **Coaching in sede**")
     l5.markdown("🟧 **Richiesta cliente**")
+    l6.markdown("🟩 **Presente**")
 
 
 def render_weekly_planner(selected_week):
@@ -4859,7 +5028,7 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V34.1")
+    st.sidebar.caption("Navigazione semplificata V34.2")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
