@@ -4250,49 +4250,144 @@ def lezioni_maturate_cumulative(cliente, data_ref=None):
     return settimane * 3
 
 
-def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
+def presenze_cliente_multi_fonte(cliente_id, data_da=None, data_a=None):
     """
-    Conta le lezioni/presenze realmente effettuate dal cliente.
-    Versione robusta:
-    - conta stato PRESENTE;
-    - conta note/tipo attività che indicano presenza manuale o lezione;
-    - ignora annullate/cancellate;
-    - applica periodo se presente.
+    Recupera presenze/lezioni da più fonti:
+    1) tabella lezioni
+    2) tabella cronologia
+    3) tabella accessi_tornello
+
+    Restituisce un DataFrame normalizzato con una riga per presenza conteggiabile.
     """
+    rows = []
+    cid = int(cliente_id)
+
+    # 1) LEZIONI
     try:
         lez = load_lezioni()
-        if lez.empty:
-            return 0
+        if not lez.empty and "cliente_id" in lez.columns:
+            tmp = lez.copy()
+            tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+            tmp = tmp[tmp["cliente_id_num"] == cid]
 
-        tmp = lez.copy()
-        if "cliente_id" not in tmp.columns:
-            return 0
+            if not tmp.empty:
+                if "data_lezione" in tmp.columns:
+                    if data_da:
+                        tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
+                    if data_a:
+                        tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
 
-        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
-        tmp = tmp[tmp["cliente_id_num"] == int(cliente_id)]
+                stato = tmp["stato"].astype(str).str.upper() if "stato" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
+                note = tmp["note"].astype(str).str.upper() if "note" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
 
-        if tmp.empty:
-            return 0
+                exclude = stato.str.contains("ANNULL|CANCEL|DISDET|RICHIESTA", na=False)
+                include = (
+                    stato.str.contains("PRESENTE", na=False) |
+                    note.str.contains("PRESENZA MANUALE|TIPO ATTIVITÀ: LEZIONE|TIPO ATTIVITA: LEZIONE|LEZIONE", na=False)
+                )
 
-        if "data_lezione" in tmp.columns:
-            if data_da:
-                tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
-            if data_a:
-                tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
+                counted = tmp[(~exclude) & include]
+                for _, r in counted.iterrows():
+                    rows.append({
+                        "fonte": "lezioni",
+                        "ref_id": r.get("id", ""),
+                        "cliente_id": cid,
+                        "data": r.get("data_lezione", ""),
+                        "ora": r.get("ora_inizio", ""),
+                        "descrizione": f"{r.get('stato','')} | {r.get('note','')}",
+                    })
+    except Exception:
+        pass
 
-        stato = tmp["stato"].astype(str).str.upper() if "stato" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
-        note = tmp["note"].astype(str).str.upper() if "note" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
+    # 2) CRONOLOGIA
+    try:
+        sb = get_supabase()
+        cron = sb.table("cronologia").select("*").eq("cliente_id", cid).range(0, 9999).execute().data
+        cdf = pd.DataFrame(cron)
+        if not cdf.empty:
+            text_cols = []
+            for c in ["campo", "azione", "descrizione", "note", "valore_nuovo", "new_value", "dettaglio"]:
+                if c in cdf.columns:
+                    text_cols.append(c)
 
-        # stati da escludere
-        exclude = stato.str.contains("ANNULL|CANCEL|DISDET|RICHIESTA", na=False)
+            if text_cols:
+                cdf["_txt"] = ""
+                for c in text_cols:
+                    cdf["_txt"] += " " + cdf[c].astype(str)
+            else:
+                cdf["_txt"] = cdf.astype(str).agg(" ".join, axis=1)
 
-        # presenze certe
-        is_presente = stato.str.contains("PRESENTE", na=False)
-        is_lezione_manual = note.str.contains("PRESENZA MANUALE|TIPO ATTIVITÀ: LEZIONE|TIPO ATTIVITA: LEZIONE|LEZIONE", na=False)
+            txt = cdf["_txt"].astype(str).str.upper()
+            include = txt.str.contains("PRESENZA|LEZIONE|PRESENTE", na=False)
+            exclude = txt.str.contains("ELIMINAZIONE|ANNULL|CANCEL|DISDET", na=False)
+            counted = cdf[include & ~exclude]
 
-        counted = tmp[(~exclude) & (is_presente | is_lezione_manual)]
+            for _, r in counted.iterrows():
+                created = str(r.get("created_at", ""))[:10]
+                if data_da and created and created < str(parse_date(data_da, date.today())):
+                    continue
+                if data_a and created and created > str(parse_date(data_a, date.today())):
+                    continue
+                rows.append({
+                    "fonte": "cronologia",
+                    "ref_id": r.get("id", ""),
+                    "cliente_id": cid,
+                    "data": created,
+                    "ora": str(r.get("created_at", ""))[11:16],
+                    "descrizione": r.get("_txt", ""),
+                })
+    except Exception:
+        pass
 
-        return int(len(counted))
+    # 3) ACCESSI TORNELLO
+    try:
+        sb = get_supabase()
+        acc = sb.table("accessi_tornello").select("*").eq("cliente_id", cid).range(0, 9999).execute().data
+        adf = pd.DataFrame(acc)
+        if not adf.empty:
+            # Se l'accesso è REGISTRATO o PRESENTE lo considero presenza effettiva.
+            stato = adf["stato_accesso"].astype(str).str.upper() if "stato_accesso" in adf.columns else pd.Series([""] * len(adf), index=adf.index)
+            note = adf["note"].astype(str).str.upper() if "note" in adf.columns else pd.Series([""] * len(adf), index=adf.index)
+            include = stato.str.contains("REGISTRATO|PRESENTE|AUTORIZZATO", na=False) | note.str.contains("PRESENTE|LEZIONE", na=False)
+            exclude = stato.str.contains("NEGATO|DA_VERIFICARE|RIFIUT", na=False)
+
+            counted = adf[include & ~exclude]
+            for _, r in counted.iterrows():
+                data_acc = r.get("data_accesso", "")
+                if data_da and str(data_acc) < str(parse_date(data_da, date.today())):
+                    continue
+                if data_a and str(data_acc) > str(parse_date(data_a, date.today())):
+                    continue
+                rows.append({
+                    "fonte": "accessi_tornello",
+                    "ref_id": r.get("id", ""),
+                    "cliente_id": cid,
+                    "data": data_acc,
+                    "ora": r.get("ora_accesso", ""),
+                    "descrizione": f"{r.get('stato_accesso','')} | {r.get('note','')}",
+                })
+    except Exception:
+        pass
+
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+
+    # deduplica per giorno/fonte/ref e, in fallback, per data+descrizione
+    for c in ["fonte", "ref_id", "data", "ora", "descrizione"]:
+        if c not in out.columns:
+            out[c] = ""
+    out = out.drop_duplicates(subset=["fonte", "ref_id", "data", "ora"])
+    return out.sort_values(["data", "ora"], ascending=[False, False])
+
+
+def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
+    """
+    Conta le lezioni/presenze realmente effettuate dal cliente da più fonti.
+    """
+    try:
+        presenze = presenze_cliente_multi_fonte(cliente_id, data_da=data_da, data_a=data_a)
+        return 0 if presenze.empty else int(len(presenze))
     except Exception:
         return 0
 
@@ -4410,10 +4505,16 @@ def render_lezioni_cumulative_admin():
             st.info("Nessun cliente.")
         else:
             diag = []
+            tutte_presenze = []
             for _, r in clienti.iterrows():
                 try:
                     cid = int(r.get("id"))
                     totale, usate, residue = contatori_cumulativi_cliente(cid)
+                    pres = presenze_cliente_multi_fonte(
+                        cid,
+                        data_da=r.get("data_inizio_pacchetto") or r.get("data_iscrizione"),
+                        data_a=date.today()
+                    )
                     diag.append({
                         "id": cid,
                         "cliente": f"{r.get('nome','')} {r.get('cognome','')}",
@@ -4421,10 +4522,23 @@ def render_lezioni_cumulative_admin():
                         "totale": totale,
                         "usate_da_presenze": usate,
                         "residue": residue,
+                        "righe_presenze_trovate": 0 if pres.empty else len(pres),
                     })
+                    if not pres.empty:
+                        pres["cliente"] = f"{r.get('nome','')} {r.get('cognome','')}"
+                        tutte_presenze.append(pres)
                 except Exception:
                     pass
+
+            st.markdown("#### Riepilogo clienti")
             st.dataframe(pd.DataFrame(diag), use_container_width=True, hide_index=True)
+
+            st.markdown("#### Dettaglio presenze trovate")
+            if tutte_presenze:
+                allp = pd.concat(tutte_presenze, ignore_index=True)
+                st.dataframe(allp[["cliente", "fonte", "ref_id", "data", "ora", "descrizione"]], use_container_width=True, hide_index=True)
+            else:
+                st.warning("Nessuna presenza trovata in lezioni / cronologia / accessi_tornello.")
 
 
 def cliente_form(prefix, defaults=None, unique_suffix=""):
