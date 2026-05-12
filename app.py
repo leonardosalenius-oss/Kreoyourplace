@@ -2311,25 +2311,9 @@ def insert_lezione(cliente_id, data_lezione, ora_inizio, ora_fine, trainer, stat
 
 def storico_presenze_cliente(cliente_id):
     """
-    Storico presenze del singolo cliente.
-    Usa la tabella lezioni filtrata per cliente e stato PRESENTE.
+    Da V46 lo storico presenze del cliente legge da presenze_clienti.
     """
-    try:
-        lez = load_lezioni()
-        if lez.empty:
-            return pd.DataFrame()
-        tmp = lez.copy()
-        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
-        tmp["stato_norm"] = tmp["stato"].astype(str).str.upper()
-        tmp = tmp[
-            (tmp["cliente_id_num"] == int(cliente_id)) &
-            (tmp["stato_norm"] == "PRESENTE")
-        ].sort_values(["data_lezione", "ora_inizio"], ascending=[False, False])
-        return tmp
-    except Exception:
-        return pd.DataFrame()
-
-
+    return load_presenze_clienti(cliente_id)
 
 def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
     """
@@ -2371,45 +2355,56 @@ def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
 
 def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note=""):
     """
-    Inserisce una presenza manuale cliente.
-    Salva su lezioni con stato PRESENTE, così aggiorna anche contatori e calendario.
+    V46: ogni presenza viene salvata nella tabella centrale presenze_clienti.
+    Se tipo_attivita = LEZIONE, scala le lezioni tramite ricalcolo contatori.
     """
     cliente = get_cliente(int(cliente_id))
     if not cliente:
         return False, "Cliente non trovato."
 
-    note_finale = f"Presenza manuale | Tipo attività: {tipo_attivita}"
-    if note:
-        note_finale += f" | Note: {note}"
+    ok, msg, presenza_id = insert_presenza_centralizzata(
+        cliente_id=int(cliente_id),
+        data_presenza=data_presenza,
+        ora_inizio=ora_inizio,
+        ora_fine=ora_fine,
+        tipo_attivita=tipo_attivita,
+        trainer=trainer,
+        note=note,
+        fonte="MANUALE",
+        riferimento_id=None,
+    )
+
+    if not ok:
+        return False, msg
 
     try:
-        ok, msg = insert_lezione(
-            cliente_id=int(cliente_id),
-            data_lezione=data_presenza,
-            ora_inizio=str(ora_inizio),
-            ora_fine=str(ora_fine),
-            trainer=trainer,
-            stato="PRESENTE",
-            note=note_finale,
+        insert_history(
+            int(cliente_id),
+            "presenza centralizzata",
+            "",
+            f"{format_date_it(data_presenza)} {ora_inizio}-{ora_fine}",
+            f"{tipo_attivita} | Trainer: {trainer} | Note: {note}"
         )
-        if ok:
-            # Se è una LEZIONE, scala automaticamente dalle lezioni residue
-            # perché viene salvata come stato PRESENTE nella tabella lezioni.
-            if str(tipo_attivita).upper() == "LEZIONE":
-                aggiorna_contatori_dopo_presenza_lezione(int(cliente_id))
+    except Exception:
+        pass
 
-            insert_history(
-                int(cliente_id),
-                "presenza manuale",
-                "",
-                f"{format_date_it(data_presenza)} {ora_inizio}-{ora_fine}",
-                f"{tipo_attivita} | Trainer: {trainer} | {note}"
-            )
-        return ok, "Presenza registrata correttamente. Lezione scalata dalle residue." if ok and str(tipo_attivita).upper() == "LEZIONE" else ("Presenza registrata correttamente." if ok else msg)
-    except Exception as e:
-        return False, f"Errore registrazione presenza: {e}"
+    if str(tipo_attivita).upper() == "LEZIONE":
+        try:
+            totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
+            sb = get_supabase()
+            payload = {
+                "lezioni_utilizzate": int(usate),
+                "lezioni_residue": int(residue),
+                "updated_at": now_iso(),
+            }
+            if is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")):
+                payload["numero_lezioni"] = int(totale)
+            sb.table("clienti").update(payload).eq("id", int(cliente_id)).execute()
+        except Exception:
+            pass
+        return True, "Presenza registrata. Lezione scalata dalle residue."
 
-
+    return True, "Presenza registrata correttamente."
 
 def elimina_presenza_lezione_cliente(lezione_id):
     """
@@ -2517,7 +2512,7 @@ def render_presenze_cliente_section(cliente_id):
         if storico.empty:
             st.info("Nessuna presenza registrata per questo cliente.")
         else:
-            cols = ["id", "data_lezione_it", "ora_inizio", "ora_fine", "trainer", "stato", "note", "creata_da", "created_at"]
+            cols = ["id", "data_presenza_it", "ora_inizio", "ora_fine", "tipo_attivita", "trainer", "fonte", "note", "registrato_da", "created_at"]
             st.dataframe(storico[[c for c in cols if c in storico.columns]], use_container_width=True, hide_index=True)
 
             if is_admin():
@@ -2525,13 +2520,13 @@ def render_presenze_cliente_section(cliente_id):
                 labels = []
                 for _, r in storico.iterrows():
                     labels.append(
-                        f"{int(r.get('id'))} - {r.get('data_lezione_it','')} {r.get('ora_inizio','')}-{r.get('ora_fine','')} | {r.get('trainer','')} | {r.get('note','')}"
+                        f"{int(r.get('id'))} - {r.get('data_presenza_it','')} {r.get('ora_inizio','')}-{r.get('ora_fine','')} | {r.get('tipo_attivita','')} | {r.get('trainer','')} | {r.get('note','')}"
                     )
                 selected_del = st.selectbox("Seleziona presenza da eliminare", labels, key=f"delete_presenza_select_{cliente_id}")
                 conferma_del = st.checkbox("Confermo eliminazione presenza selezionata", key=f"delete_presenza_confirm_{cliente_id}")
                 if conferma_del and st.button("🗑️ Elimina presenza / lezione", key=f"delete_presenza_btn_{cliente_id}"):
                     lezione_id = int(selected_del.split(" - ")[0])
-                    ok, msg = elimina_presenza_lezione_cliente(lezione_id)
+                    ok, msg = delete_presenza_centralizzata(lezione_id)
                     if ok:
                         st.success(msg)
                         st.rerun()
@@ -4250,6 +4245,216 @@ def lezioni_maturate_cumulative(cliente, data_ref=None):
     return settimane * 3
 
 
+
+def ensure_presenze_clienti_table_message():
+    return """
+create table if not exists public.presenze_clienti (
+  id bigint generated by default as identity primary key,
+  cliente_id bigint not null,
+  data_presenza date not null,
+  ora_inizio text,
+  ora_fine text,
+  tipo_attivita text default 'LEZIONE',
+  trainer text,
+  fonte text default 'MANUALE',
+  riferimento_id text,
+  note text,
+  registrato_da text,
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone
+);
+
+create index if not exists idx_presenze_clienti_cliente_id on public.presenze_clienti(cliente_id);
+create index if not exists idx_presenze_clienti_data on public.presenze_clienti(data_presenza);
+create index if not exists idx_presenze_clienti_tipo on public.presenze_clienti(tipo_attivita);
+"""
+
+
+def load_presenze_clienti(cliente_id=None):
+    try:
+        sb = get_supabase()
+        q = sb.table("presenze_clienti").select("*").order("data_presenza", desc=True).order("id", desc=True).range(0, 9999)
+        if cliente_id is not None:
+            q = q.eq("cliente_id", int(cliente_id))
+        data = q.execute().data
+        df = pd.DataFrame(data)
+        if df.empty:
+            return df
+        if "data_presenza" in df.columns:
+            df["data_presenza_it"] = df["data_presenza"].apply(format_date_it)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def insert_presenza_centralizzata(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note="", fonte="MANUALE", riferimento_id=None):
+    try:
+        sb = get_supabase()
+        payload = {
+            "cliente_id": int(cliente_id),
+            "data_presenza": str(data_presenza),
+            "ora_inizio": str(ora_inizio or ""),
+            "ora_fine": str(ora_fine or ""),
+            "tipo_attivita": str(tipo_attivita or "LEZIONE"),
+            "trainer": str(trainer or ""),
+            "fonte": str(fonte or "MANUALE"),
+            "riferimento_id": str(riferimento_id or ""),
+            "note": str(note or ""),
+            "registrato_da": user_label(),
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+        res = sb.table("presenze_clienti").insert(payload).execute()
+        new_id = None
+        try:
+            if res.data:
+                new_id = res.data[0].get("id")
+        except Exception:
+            pass
+        return True, "Presenza registrata correttamente.", new_id
+    except Exception as e:
+        return False, f"Errore registrazione presenza centralizzata. Probabilmente devi eseguire kreo_v46_presenze_clienti.sql. Dettaglio: {e}", None
+
+
+def delete_presenza_centralizzata(presenza_id):
+    try:
+        sb = get_supabase()
+        data = sb.table("presenze_clienti").select("*").eq("id", int(presenza_id)).limit(1).execute().data
+        if not data:
+            return False, "Presenza non trovata."
+        row = data[0]
+        cliente_id = int(row.get("cliente_id"))
+        sb.table("presenze_clienti").delete().eq("id", int(presenza_id)).execute()
+
+        insert_history(
+            cliente_id,
+            "eliminazione presenza centralizzata",
+            f"{row.get('data_presenza')} {row.get('ora_inizio')}-{row.get('ora_fine')}",
+            "",
+            f"Eliminata da {user_label()} | Tipo: {row.get('tipo_attivita')} | Trainer: {row.get('trainer')}"
+        )
+
+        try:
+            totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
+            sb.table("clienti").update({
+                "lezioni_utilizzate": int(usate),
+                "lezioni_residue": int(residue),
+                "updated_at": now_iso(),
+            }).eq("id", cliente_id).execute()
+        except Exception:
+            pass
+
+        return True, "Presenza eliminata e contatori aggiornati."
+    except Exception as e:
+        return False, f"Errore eliminazione presenza: {e}"
+
+
+def presenze_centralizzate_lezione_cliente(cliente_id, data_da=None, data_a=None):
+    df = load_presenze_clienti(cliente_id)
+    if df.empty:
+        return df
+
+    tmp = df.copy()
+    tipo = tmp["tipo_attivita"].astype(str).str.upper() if "tipo_attivita" in tmp.columns else pd.Series([""] * len(tmp), index=tmp.index)
+    tmp = tmp[tipo.str.contains("LEZIONE", na=False)]
+
+    if "data_presenza" in tmp.columns:
+        if data_da:
+            tmp = tmp[tmp["data_presenza"].astype(str) >= str(parse_date(data_da, date.today()))]
+        if data_a:
+            tmp = tmp[tmp["data_presenza"].astype(str) <= str(parse_date(data_a, date.today()))]
+
+    return tmp
+
+
+def lezioni_usate_da_presenze_centralizzate(cliente_id, data_da=None, data_a=None):
+    try:
+        df = presenze_centralizzate_lezione_cliente(cliente_id, data_da=data_da, data_a=data_a)
+        return 0 if df.empty else int(len(df))
+    except Exception:
+        return 0
+
+
+def sincronizza_presenze_storiche_in_centrale():
+    """
+    Importa presenze già presenti nelle vecchie fonti dentro presenze_clienti.
+    Evita duplicati usando fonte + riferimento_id.
+    """
+    sb = get_supabase()
+    creati = 0
+    saltati = 0
+
+    clienti = load_clienti()
+    if clienti.empty:
+        return {"creati": 0, "saltati": 0}
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+
+            # Vecchie fonti già normalizzate da V45.3
+            old = presenze_cliente_multi_fonte(
+                cid,
+                data_da=c.get("data_inizio_pacchetto") or c.get("data_iscrizione"),
+                data_a=date.today()
+            )
+
+            if old.empty:
+                continue
+
+            for _, r in old.iterrows():
+                fonte = str(r.get("fonte", "storico"))
+                ref = str(r.get("ref_id", ""))
+                data_p = r.get("data") or date.today()
+                ora = str(r.get("ora") or "")
+                descr = str(r.get("descrizione") or "")
+
+                existing = (
+                    sb.table("presenze_clienti")
+                    .select("id")
+                    .eq("cliente_id", cid)
+                    .eq("fonte", fonte)
+                    .eq("riferimento_id", ref)
+                    .limit(1)
+                    .execute()
+                    .data
+                )
+                if existing:
+                    saltati += 1
+                    continue
+
+                ok, _, _ = insert_presenza_centralizzata(
+                    cliente_id=cid,
+                    data_presenza=parse_date(data_p, date.today()),
+                    ora_inizio=ora[:5],
+                    ora_fine="",
+                    tipo_attivita="LEZIONE",
+                    trainer="",
+                    note=f"Import storico: {descr}",
+                    fonte=fonte,
+                    riferimento_id=ref,
+                )
+                if ok:
+                    creati += 1
+                else:
+                    saltati += 1
+
+        except Exception:
+            saltati += 1
+
+    return {"creati": creati, "saltati": saltati}
+
+
+def render_import_presenze_storiche():
+    st.markdown("### Import presenze storiche")
+    st.caption("Usa questa funzione una sola volta per portare vecchie presenze/accessi/cronologia nella nuova tabella presenze_clienti.")
+    st.warning("Prima devi eseguire il file SQL: kreo_v46_presenze_clienti.sql")
+    if st.button("📥 Importa presenze storiche nella tabella centrale", key="import_presenze_storiche_v46"):
+        res = sincronizza_presenze_storiche_in_centrale()
+        st.success(f"Import completato. Create: {res['creati']} | saltate/già presenti: {res['saltati']}")
+        st.rerun()
+
+
 def presenze_cliente_multi_fonte(cliente_id, data_da=None, data_a=None):
     """
     Recupera presenze/lezioni da più fonti:
@@ -4383,13 +4588,9 @@ def presenze_cliente_multi_fonte(cliente_id, data_da=None, data_a=None):
 
 def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
     """
-    Conta le lezioni/presenze realmente effettuate dal cliente da più fonti.
+    Da V46 la fonte ufficiale per scalare lezioni è presenze_clienti.
     """
-    try:
-        presenze = presenze_cliente_multi_fonte(cliente_id, data_da=data_da, data_a=data_a)
-        return 0 if presenze.empty else int(len(presenze))
-    except Exception:
-        return 0
+    return lezioni_usate_da_presenze_centralizzate(cliente_id, data_da=data_da, data_a=data_a)
 
 def contatori_cumulativi_cliente(cliente_id, data_ref=None):
     cliente = get_cliente(int(cliente_id))
@@ -4510,7 +4711,7 @@ def render_lezioni_cumulative_admin():
                 try:
                     cid = int(r.get("id"))
                     totale, usate, residue = contatori_cumulativi_cliente(cid)
-                    pres = presenze_cliente_multi_fonte(
+                    pres = presenze_centralizzate_lezione_cliente(
                         cid,
                         data_da=r.get("data_inizio_pacchetto") or r.get("data_iscrizione"),
                         data_a=date.today()
@@ -4536,9 +4737,9 @@ def render_lezioni_cumulative_admin():
             st.markdown("#### Dettaglio presenze trovate")
             if tutte_presenze:
                 allp = pd.concat(tutte_presenze, ignore_index=True)
-                st.dataframe(allp[["cliente", "fonte", "ref_id", "data", "ora", "descrizione"]], use_container_width=True, hide_index=True)
+                st.dataframe(allp[[c for c in ["cliente", "id", "data_presenza_it", "ora_inizio", "ora_fine", "tipo_attivita", "trainer", "fonte", "note"] if c in allp.columns]], use_container_width=True, hide_index=True)
             else:
-                st.warning("Nessuna presenza trovata in lezioni / cronologia / accessi_tornello.")
+                st.warning("Nessuna presenza trovata nella tabella centrale presenze_clienti.")
 
 
 def cliente_form(prefix, defaults=None, unique_suffix=""):
