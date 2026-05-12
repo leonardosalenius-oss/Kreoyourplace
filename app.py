@@ -172,10 +172,30 @@ def load_clienti():
 
 
 def get_cliente(cliente_id):
-    sb = get_supabase()
-    data = sb.table("clienti").select("*").eq("id", int(cliente_id)).limit(1).execute().data
-    return data[0] if data else None
+    """
+    Lettura robusta cliente.
+    Prima prova Supabase diretto; se Supabase dà timeout/read error,
+    usa fallback da load_clienti() per evitare crash nel calendario.
+    """
+    try:
+        sb = get_supabase()
+        data = sb.table("clienti").select("*").eq("id", int(cliente_id)).limit(1).execute().data
+        if data:
+            return data[0]
+    except Exception:
+        pass
 
+    # fallback locale: evita crash se Supabase/PostgREST ha un ReadError temporaneo
+    try:
+        df = load_clienti()
+        if not df.empty and "id" in df.columns:
+            tmp = df[pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(int) == int(cliente_id)]
+            if not tmp.empty:
+                return tmp.iloc[0].to_dict()
+    except Exception:
+        pass
+
+    return None
 
 def load_history(cliente_id):
     sb = get_supabase()
@@ -1759,9 +1779,61 @@ def richiesta_prenotazione_intelligente_cliente(cliente_id, data_slot, ora_inizi
     return True, "Richiesta prenotazione inviata allo staff."
 
 
+
+def safe_cliente_or_warning(cliente_id, context="cliente"):
+    cliente = get_cliente(cliente_id)
+    if not cliente:
+        st.warning(f"Impossibile caricare {context}. Supabase potrebbe aver avuto un timeout temporaneo. Riprova o aggiorna la pagina.")
+        return None
+    return cliente
+
+
 def render_calendario_unificato_staff():
     st.header("Calendario unificato")
     st.caption("Disponibilità automatica del trainer + prenotazioni clienti + coaching in sede.")
+
+
+    with st.expander("➕ Inserimento rapido lezione cliente", expanded=False):
+        st.caption("Usalo se cliccando uno slot del calendario non si apre correttamente il form. Registra una lezione/prestazione direttamente.")
+        dfc_quick = load_clienti()
+        if dfc_quick.empty:
+            st.info("Nessun cliente presente.")
+        else:
+            dfc_quick = dfc_quick.sort_values("id", ascending=True).copy()
+            labels_quick = (dfc_quick["id"].astype(str) + " - " + dfc_quick["nome"].fillna("") + " " + dfc_quick["cognome"].fillna("")).tolist()
+            q1, q2, q3 = st.columns(3)
+            with q1:
+                selected_quick = st.selectbox("Cliente", labels_quick, key="cal_quick_cliente")
+                quick_cid = int(selected_quick.split(" - ")[0])
+                quick_data = st.date_input("Data lezione", value=date.today(), format="DD/MM/YYYY", key="cal_quick_data")
+            with q2:
+                quick_start = st.time_input("Ora inizio", value=datetime.strptime("09:00", "%H:%M").time(), key="cal_quick_start")
+                quick_end = st.time_input("Ora fine", value=datetime.strptime("10:00", "%H:%M").time(), key="cal_quick_end")
+            with q3:
+                try:
+                    default_trainer = get_kreo_settings().get("trainer_default", "Vincenzo Crinisio")
+                except Exception:
+                    default_trainer = "Vincenzo Crinisio"
+                quick_trainer = st.text_input("Trainer", value=default_trainer, key="cal_quick_trainer")
+                quick_stato = st.selectbox("Stato", ["PRENOTATO", "PRESENTE", "RICHIESTA CLIENTE", "RECUPERO"], key="cal_quick_stato")
+
+            quick_note = st.text_area("Note lezione", key="cal_quick_note")
+            if st.button("✅ Registra lezione rapida", key="cal_quick_save_lezione"):
+                ok, msg = insert_lezione(
+                    quick_cid,
+                    quick_data,
+                    quick_start.strftime("%H:%M"),
+                    quick_end.strftime("%H:%M"),
+                    quick_trainer,
+                    quick_stato,
+                    quick_note,
+                )
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
 
     tab1, tab2, tab3 = st.tabs(["Agenda premium", "Disponibilità automatica", "Impostazioni"])
 
@@ -1780,6 +1852,9 @@ def render_calendario_unificato_staff():
             selected = st.selectbox("Cliente", labels, key="simula_disponibilita_cliente")
             cid = int(selected.split(" - ")[0])
             cliente = get_cliente(cid)
+            if not cliente:
+                st.warning("Cliente non caricato da Supabase. Riprova tra pochi secondi oppure aggiorna la pagina.")
+                st.stop()
 
             c1, c2 = st.columns(2)
             with c1:
@@ -2282,7 +2357,7 @@ def load_lezioni():
 def insert_lezione(cliente_id, data_lezione, ora_inizio, ora_fine, trainer, stato, note):
     cliente = get_cliente(cliente_id)
     if not cliente:
-        return False, "Cliente non trovato."
+        return False, "Cliente non trovato o Supabase temporaneamente non raggiungibile. Riprova tra pochi secondi."
 
     sb = get_supabase()
     sb.table("lezioni").insert({
@@ -2334,31 +2409,16 @@ def storico_presenze_cliente(cliente_id):
 def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
     """
     Dopo una presenza di tipo LEZIONE:
-    - pacchetti automatici: ricalcola da presenze reali
-    - pacchetto personalizzato: incrementa manualmente lezioni_utilizzate di 1
+    - ricalcola totale/usate/residue
+    - aggiorna anagrafica cliente
+    Funziona per tutti i pacchetti.
     """
     try:
-        cliente = get_cliente(int(cliente_id))
-        if not cliente:
-            return False
-
-        sb = get_supabase()
-        if not is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")):
-            totale = int(float(cliente.get("numero_lezioni") or 0))
-            usate_old = int(float(cliente.get("lezioni_utilizzate") or 0))
-            usate = usate_old + 1
-            residue = max(totale - usate, 0)
-            sb.table("clienti").update({
-                "lezioni_utilizzate": int(usate),
-                "lezioni_residue": int(residue),
-                "updated_at": now_iso(),
-            }).eq("id", int(cliente_id)).execute()
-            return True
-
         totale, usate, residue = contatori_cumulativi_cliente(int(cliente_id))
         if "safe_update_cliente_contatori" in globals():
             safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
         else:
+            sb = get_supabase()
             sb.table("clienti").update({
                 "numero_lezioni": int(totale),
                 "lezioni_utilizzate": int(usate),
@@ -2368,6 +2428,7 @@ def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
         return True
     except Exception:
         return False
+
 
 def registra_presenza_cliente(cliente_id, data_presenza, ora_inizio, ora_fine, tipo_attivita, trainer, note=""):
     """
@@ -2428,29 +2489,16 @@ def elimina_presenza_lezione_cliente(lezione_id):
         sb.table("lezioni").delete().eq("id", int(lezione_id)).execute()
 
         try:
-            cliente = get_cliente(cliente_id)
-            # personalizzato_delete_fix_v45
-            if cliente and not is_pacchetto_settimanale_kreo(cliente.get("pacchetto", "")) and str(lezione.get("stato","")).upper() == "PRESENTE":
-                totale = int(float(cliente.get("numero_lezioni") or 0))
-                usate_old = int(float(cliente.get("lezioni_utilizzate") or 0))
-                usate = max(usate_old - 1, 0)
-                residue = max(totale - usate, 0)
+            totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
+            if "safe_update_cliente_contatori" in globals():
+                safe_update_cliente_contatori(cliente_id, totale, usate, residue)
+            else:
                 sb.table("clienti").update({
+                    "numero_lezioni": int(totale),
                     "lezioni_utilizzate": int(usate),
                     "lezioni_residue": int(residue),
                     "updated_at": now_iso(),
                 }).eq("id", cliente_id).execute()
-            else:
-                totale, usate, residue = contatori_cumulativi_cliente(cliente_id)
-                if "safe_update_cliente_contatori" in globals():
-                    safe_update_cliente_contatori(cliente_id, totale, usate, residue)
-                else:
-                    sb.table("clienti").update({
-                        "numero_lezioni": int(totale),
-                        "lezioni_utilizzate": int(usate),
-                        "lezioni_residue": int(residue),
-                        "updated_at": now_iso(),
-                    }).eq("id", cliente_id).execute()
         except Exception:
             pass
 
@@ -4202,6 +4250,18 @@ def build_alert_dashboard(df):
 
 
 
+
+def is_pacchetto_standard_auto(pacchetto):
+    """
+    Pacchetti soggetti a ricalcolo automatico settimanale.
+    I personalizzati sono sempre esclusi.
+    """
+    p = str(pacchetto or "").upper()
+    if "PERSONALIZZATO" in p:
+        return False
+    return any(x in p for x in ["LUXURY", "GOLD", "VIP", "COACHING"])
+
+
 def is_pacchetto_settimanale_kreo(pacchetto):
     """
     Pacchetti con diritto automatico a 3 lezioni settimanali cumulative.
@@ -4281,8 +4341,6 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         return 0, 0, 0
 
     pac = cliente.get("pacchetto", "")
-
-    # Pacchetti automatici: maturano 3 lezioni a settimana cumulative.
     if is_pacchetto_settimanale_kreo(pac):
         totale = lezioni_maturate_cumulative(cliente, data_ref or date.today())
         data_da = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione")
@@ -4290,51 +4348,40 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         residue = max(int(totale) - int(usate), 0)
         return int(totale), int(usate), int(residue)
 
-    # Pacchetto personalizzato: NON ricalcolare automaticamente.
-    # I contatori restano quelli salvati manualmente dallo staff.
     try:
         totale = int(float(cliente.get("numero_lezioni") or cliente.get("numero_lezioni_totali") or 0))
     except Exception:
         totale = 0
-    try:
-        usate = int(float(cliente.get("lezioni_utilizzate") or 0))
-    except Exception:
-        usate = 0
-    try:
-        residue_stored = cliente.get("lezioni_residue")
-        if residue_stored not in [None, ""]:
-            residue = int(float(residue_stored))
-        else:
-            residue = max(totale - usate, 0)
-    except Exception:
-        residue = max(totale - usate, 0)
-
+    usate = lezioni_usate_totali_cliente(cliente_id)
+    residue = max(totale - usate, 0)
     return int(totale), int(usate), int(residue)
 
 
 def aggiorna_contatori_cumulativi_clienti():
     """
-    Ricalcola SOLO i pacchetti automatici.
-    I pacchetti personalizzati non vengono mai toccati da questo ricalcolo.
+    Ricalcolo settimanale sicuro:
+    - aggiorna solo pacchetti automatici: Luxury / Gold / VIP / Coaching in sede
+    - esclude completamente i pacchetti personalizzati
     """
     sb = get_supabase()
     clienti = load_clienti()
     if clienti.empty:
-        return {"aggiornati": 0, "saltati": 0, "personalizzati_ignorati": 0}
+        return {"aggiornati": 0, "personalizzati_ignorati": 0, "saltati": 0}
 
     aggiornati = 0
-    saltati = 0
     personalizzati_ignorati = 0
+    saltati = 0
 
     for _, c in clienti.iterrows():
         try:
             pac = c.get("pacchetto", "")
-            if not is_pacchetto_settimanale_kreo(pac):
+            if not is_pacchetto_standard_auto(pac):
                 personalizzati_ignorati += 1
                 continue
 
             cid = int(c.get("id"))
             totale, usate, residue = contatori_cumulativi_cliente(cid)
+
             ok_update, _ = safe_update_cliente_contatori(cid, totale, usate, residue) if "safe_update_cliente_contatori" in globals() else (False, "")
             if not ok_update:
                 sb.table("clienti").update({
@@ -4343,12 +4390,16 @@ def aggiorna_contatori_cumulativi_clienti():
                     "lezioni_residue": int(residue),
                     "updated_at": now_iso(),
                 }).eq("id", cid).execute()
+
             aggiornati += 1
         except Exception:
             saltati += 1
 
-    return {"aggiornati": aggiornati, "saltati": saltati, "personalizzati_ignorati": personalizzati_ignorati}
-
+    return {
+        "aggiornati": aggiornati,
+        "personalizzati_ignorati": personalizzati_ignorati,
+        "saltati": saltati,
+    }
 
 def dataframe_clienti_con_contatori_cumulativi(df):
     if df.empty:
@@ -4379,7 +4430,7 @@ def render_lezioni_cumulative_admin():
     **Nuova regola KREO**
     - Pacchetti standard: +3 lezioni ogni settimana
     - Le lezioni non usate restano disponibili
-    - Pacchetto personalizzato: gestione manuale
+    - Pacchetto personalizzato: escluso dal ricalcolo automatico
     """)
 
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
@@ -7025,6 +7076,11 @@ def main():
         if is_admin():
             with st.expander("📆 Gestione scadenze abbonamento"):
                 render_scadenze_abbonamento_admin()
+
+
+        if is_admin():
+            with st.expander("🔄 Ricalcolo rapido settimanale"):
+                render_recalcolo_settimanale_widget()
 
         if df.empty:
             st.info("Nessun cliente inserito.")
