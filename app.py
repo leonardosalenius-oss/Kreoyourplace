@@ -1576,13 +1576,14 @@ def calendar_color_for_type(tipo, stato=None):
 
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_disponibilita_range(date_min, date_max):
-    """Carica solo gli slot nel range visibile del calendario."""
+    """Carica solo gli slot nel range visibile del calendario. Cache breve per rendere il calendario fluido."""
     sb = get_supabase()
     try:
         data = (
             sb.table("disponibilita_calendario")
-            .select("*")
+            .select("id,data_slot,ora_inizio,ora_fine,trainer,tipo_slot,max_posti,attivo")
             .gte("data_slot", str(date_min))
             .lte("data_slot", str(date_max))
             .order("data_slot", desc=False)
@@ -1595,13 +1596,14 @@ def load_disponibilita_range(date_min, date_max):
     return df
 
 
+@st.cache_data(ttl=45, show_spinner=False)
 def load_lezioni_range(date_min, date_max):
-    """Carica solo lezioni/prenotazioni nel range visibile del calendario."""
+    """Carica solo lezioni/prenotazioni nel range visibile del calendario. Cache breve anti-lentezza."""
     sb = get_supabase()
     try:
         data = (
             sb.table("lezioni")
-            .select("*")
+            .select("id,cliente_id,slot_id,data_lezione,ora_inizio,ora_fine,trainer,stato,note")
             .gte("data_lezione", str(date_min))
             .lte("data_lezione", str(date_max))
             .order("data_lezione", desc=False)
@@ -1614,6 +1616,55 @@ def load_lezioni_range(date_min, date_max):
     if not df.empty and "data_lezione" in df.columns:
         df["data_lezione_it"] = df["data_lezione"].apply(format_date_it)
     return df
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def load_clienti_calendar_map():
+    """Mappa clienti minima per il calendario: evita di caricare tutta l'anagrafica a ogni refresh."""
+    sb = get_supabase()
+    try:
+        data = (
+            sb.table("clienti")
+            .select("id,nome,cognome,cellulare,pacchetto,numero_lezioni,lezioni_utilizzate")
+            .execute()
+            .data
+        )
+    except Exception:
+        data = []
+
+    out = {}
+    for c in data or []:
+        try:
+            cid = int(c.get("id"))
+            pac = c.get("pacchetto", "")
+            numero = int(c.get("numero_lezioni") or 0)
+            usate = int(c.get("lezioni_utilizzate") or 0)
+            out[cid] = {
+                "nome": f"{c.get('nome','')} {c.get('cognome','')}".strip(),
+                "cellulare": c.get("cellulare", ""),
+                "pacchetto": pac,
+                "tipo": pacchetto_tipo(pac),
+                "lezioni_residue": max(numero - usate, 0),
+            }
+        except Exception:
+            continue
+    return out
+
+
+def clear_calendar_cache():
+    """Svuota cache calendario dopo inserimenti/modifiche, così resta veloce ma aggiornato."""
+    try:
+        load_lezioni_range.clear()
+    except Exception:
+        pass
+    try:
+        load_disponibilita_range.clear()
+    except Exception:
+        pass
+    try:
+        load_clienti_calendar_map.clear()
+    except Exception:
+        pass
 
 
 def get_calendar_trainer_options(date_min, date_max):
@@ -1643,13 +1694,13 @@ def get_calendar_trainer_options(date_min, date_max):
     return opts
 
 
-def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="Tutti"):
+def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="Tutti", show_free_slots=False):
     """
     V34.2 - Calendario leggero e coerente:
     - carica solo il range selezionato;
     - filtra per trainer;
     - mostra le prenotazioni con il colore del pacchetto cliente;
-    - mostra gli slot disponibili solo quando non hanno clienti prenotati.
+    - su modalità turbo mostra solo le lezioni; gli slot liberi si attivano a richiesta.
     """
     events = []
 
@@ -1659,9 +1710,12 @@ def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="
     if date_max is None:
         date_max = date_min + timedelta(days=27)
 
-    try:
-        slots = load_disponibilita_range(date_min, date_max)
-    except Exception:
+    if show_free_slots:
+        try:
+            slots = load_disponibilita_range(date_min, date_max)
+        except Exception:
+            slots = pd.DataFrame()
+    else:
         slots = pd.DataFrame()
 
     try:
@@ -1676,20 +1730,8 @@ def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="
         if not lez.empty and "trainer" in lez.columns:
             lez = lez[lez["trainer"].astype(str) == trainer_filter_norm].copy()
 
-    clienti_map = {}
     try:
-        clienti_df = load_clienti()
-        if not clienti_df.empty:
-            for _, c in clienti_df.iterrows():
-                cid = int(c["id"])
-                pac = c.get("pacchetto", "")
-                clienti_map[cid] = {
-                    "nome": f"{c.get('nome','')} {c.get('cognome','')}".strip(),
-                    "cellulare": c.get("cellulare", ""),
-                    "pacchetto": pac,
-                    "tipo": pacchetto_tipo(pac),
-                    "lezioni_residue": int(c.get("lezioni_residue") or max(int(c.get("numero_lezioni") or 0) - int(c.get("lezioni_utilizzate") or 0), 0)),
-                }
+        clienti_map = load_clienti_calendar_map()
     except Exception:
         clienti_map = {}
 
@@ -1778,7 +1820,7 @@ def build_premium_calendar_events(date_min=None, date_max=None, trainer_filter="
     if not lez.empty:
         for _, r in lez.iterrows():
             try:
-                if "slot_id" in r and not pd.isna(r.get("slot_id")):
+                if show_free_slots and "slot_id" in r and not pd.isna(r.get("slot_id")):
                     continue
                 lid = int(r["id"])
                 data_l = str(r.get("data_lezione"))
@@ -2126,7 +2168,7 @@ def render_calendario_unificato_staff():
 
 def render_premium_calendar():
     st.header("Premium Calendar KREO")
-    st.caption("V34.2: vista più veloce, filtri trainer, colori pacchetto e azioni rapide sulla lezione.")
+    st.caption("V34.3 TURBO: carica di default solo le lezioni della settimana. Gli slot liberi si attivano a richiesta.")
 
     if st_calendar is None:
         st.warning("Modulo calendario premium non installato. Installa/aggiorna requirements.txt e fai Reboot app.")
@@ -2144,13 +2186,14 @@ def render_premium_calendar():
     with f1:
         data_da = st.date_input("Da", value=monday, format="DD/MM/YYYY", key="cal_v342_da")
     with f2:
-        giorni_vista = st.selectbox("Vista", [7, 14, 28, 60], index=2, format_func=lambda x: f"{x} giorni", key="cal_v342_giorni")
+        giorni_vista = st.selectbox("Vista", [7, 14, 28], index=0, format_func=lambda x: f"{x} giorni", key="cal_v343_giorni")
     data_a = data_da + timedelta(days=int(giorni_vista) - 1)
     with f3:
         trainer_options = get_calendar_trainer_options(data_da, data_a)
-        trainer_filter = st.selectbox("Trainer", trainer_options, key="cal_v342_trainer")
+        trainer_filter = st.selectbox("Trainer", trainer_options, key="cal_v343_trainer")
+    show_free_slots = st.checkbox("Mostra anche slot liberi", value=False, key="cal_v343_show_free_slots", help="Più completo ma più pesante. Per lavorare veloce lascia disattivato.")
 
-    events = build_premium_calendar_events(data_da, data_a, trainer_filter)
+    events = build_premium_calendar_events(data_da, data_a, trainer_filter, show_free_slots=show_free_slots)
 
     calendar_options = {
         "initialView": "timeGridWeek",
@@ -2160,7 +2203,7 @@ def render_premium_calendar():
         "slotMinTime": get_kreo_settings().get("apertura", "07:30") + ":00",
         "slotMaxTime": get_kreo_settings().get("chiusura", "20:00") + ":00",
         "allDaySlot": False,
-        "height": 560,
+        "height": 520,
         "editable": False,
         "selectable": True,
         "nowIndicator": True,
@@ -2185,12 +2228,12 @@ def render_premium_calendar():
     .fc .fc-button { border-radius: 10px; }
     """
 
-    st.caption(f"Caricati {len(events)} eventi dal {format_date_it(data_da)} al {format_date_it(data_a)}.")
+    st.caption(f"Modalità {'completa' if show_free_slots else 'turbo'} · caricati {len(events)} eventi dal {format_date_it(data_da)} al {format_date_it(data_a)}.")
     state = st_calendar(
         events=events,
         options=calendar_options,
         custom_css=custom_css,
-        key=f"premium_calendar_kreo_v342_{data_da}_{giorni_vista}_{trainer_filter}",
+        key=f"premium_calendar_kreo_v343_{data_da}_{giorni_vista}_{trainer_filter}_{show_free_slots}",
     )
 
     st.markdown("---")
@@ -2215,6 +2258,7 @@ def render_premium_calendar():
                         ok, msg = delete_slot_disponibilita(slot_id)
                         if ok:
                             st.success(msg)
+                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
@@ -2244,6 +2288,7 @@ def render_premium_calendar():
                         pass
                     if ok:
                         st.success("Presenza confermata e lezioni aggiornate.")
+                        clear_calendar_cache()
                         st.rerun()
                     else:
                         st.error(msg)
@@ -2291,6 +2336,7 @@ def render_premium_calendar():
                         if cliente_id:
                             insert_history(cliente_id, "modifica lezione", "", f"{format_date_it(nuova_data)} {nuovo_start.strftime('%H:%M')}-{nuovo_end.strftime('%H:%M')}", f"Modifica calendario da {user_label()}")
                         st.success("Lezione aggiornata.")
+                        clear_calendar_cache()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Errore modifica lezione: {e}")
@@ -6859,6 +6905,7 @@ def render_accessi_tornello_page():
                         ok, msg = disattiva_badge(badge_id)
                         if ok:
                             st.success(msg)
+                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
@@ -7128,6 +7175,7 @@ def main():
                         ok, msg = upload_documento_cliente(cliente_id, file, tipo_documento, note_documento)
                         if ok:
                             st.success(msg)
+                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
@@ -8013,6 +8061,7 @@ def main():
                         ok, msg = update_stato_lezione(lezione_id, nuovo_stato)
                         if ok:
                             st.success(msg)
+                            clear_calendar_cache()
                             st.rerun()
                         else:
                             st.error(msg)
