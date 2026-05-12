@@ -4290,64 +4290,61 @@ def contatori_cumulativi_cliente(cliente_id, data_ref=None):
         residue = max(int(totale) - int(usate), 0)
         return int(totale), int(usate), int(residue)
 
-    # Pacchetto personalizzato: NON ricalcolare automaticamente.
-    # I contatori restano quelli salvati manualmente dallo staff.
+    # Pacchetto personalizzato:
+    # - il totale lezioni NON viene mai ricalcolato automaticamente;
+    # - resta quello inserito manualmente dallo staff;
+    # - le usate/residue si aggiornano dalle presenze LEZIONE già registrate.
     try:
         totale = int(float(cliente.get("numero_lezioni") or cliente.get("numero_lezioni_totali") or 0))
     except Exception:
         totale = 0
-    try:
-        usate = int(float(cliente.get("lezioni_utilizzate") or 0))
-    except Exception:
-        usate = 0
-    try:
-        residue_stored = cliente.get("lezioni_residue")
-        if residue_stored not in [None, ""]:
-            residue = int(float(residue_stored))
-        else:
-            residue = max(totale - usate, 0)
-    except Exception:
-        residue = max(totale - usate, 0)
+
+    data_da = cliente.get("data_inizio_pacchetto") or cliente.get("data_iscrizione")
+    usate = lezioni_usate_totali_cliente(cliente_id, data_da=data_da, data_a=data_ref or date.today())
+    residue = max(totale - usate, 0)
 
     return int(totale), int(usate), int(residue)
 
 
 def aggiorna_contatori_cumulativi_clienti():
     """
-    Ricalcola SOLO i pacchetti automatici.
-    I pacchetti personalizzati non vengono mai toccati da questo ricalcolo.
+    Ricalcolo sicuro:
+    - pacchetti automatici: aggiorna totale/usate/residue con maturazione settimanale cumulativa;
+    - pacchetti personalizzati: NON cambia il totale, ma aggiorna usate/residue dalle presenze registrate.
     """
     sb = get_supabase()
     clienti = load_clienti()
     if clienti.empty:
-        return {"aggiornati": 0, "saltati": 0, "personalizzati_ignorati": 0}
+        return {"aggiornati": 0, "saltati": 0, "personalizzati_aggiornati": 0}
 
     aggiornati = 0
     saltati = 0
-    personalizzati_ignorati = 0
+    personalizzati_aggiornati = 0
 
     for _, c in clienti.iterrows():
         try:
-            pac = c.get("pacchetto", "")
-            if not is_pacchetto_settimanale_kreo(pac):
-                personalizzati_ignorati += 1
-                continue
-
             cid = int(c.get("id"))
+            pac = c.get("pacchetto", "")
             totale, usate, residue = contatori_cumulativi_cliente(cid)
-            ok_update, _ = safe_update_cliente_contatori(cid, totale, usate, residue) if "safe_update_cliente_contatori" in globals() else (False, "")
-            if not ok_update:
-                sb.table("clienti").update({
-                    "numero_lezioni": int(totale),
-                    "lezioni_utilizzate": int(usate),
-                    "lezioni_residue": int(residue),
-                    "updated_at": now_iso(),
-                }).eq("id", cid).execute()
+
+            payload = {
+                "lezioni_utilizzate": int(usate),
+                "lezioni_residue": int(residue),
+                "updated_at": now_iso(),
+            }
+
+            # Solo i pacchetti automatici aggiornano anche il totale maturato.
+            if is_pacchetto_settimanale_kreo(pac):
+                payload["numero_lezioni"] = int(totale)
+            else:
+                personalizzati_aggiornati += 1
+
+            sb.table("clienti").update(payload).eq("id", cid).execute()
             aggiornati += 1
         except Exception:
             saltati += 1
 
-    return {"aggiornati": aggiornati, "saltati": saltati, "personalizzati_ignorati": personalizzati_ignorati}
+    return {"aggiornati": aggiornati, "saltati": saltati, "personalizzati_aggiornati": personalizzati_aggiornati}
 
 
 def dataframe_clienti_con_contatori_cumulativi(df):
@@ -4379,12 +4376,12 @@ def render_lezioni_cumulative_admin():
     **Nuova regola KREO**
     - Pacchetti standard: +3 lezioni ogni settimana
     - Le lezioni non usate restano disponibili
-    - Pacchetto personalizzato: gestione manuale
+    - Pacchetto personalizzato: totale manuale, usate/residue da presenze registrate
     """)
 
     if st.button("🔄 Ricalcola lezioni cumulative", key="ricalcola_lezioni_cumulative"):
         res = aggiorna_contatori_cumulativi_clienti()
-        st.success(f"Ricalcolo completato. Automatici aggiornati: {res['aggiornati']} | personalizzati ignorati: {res.get('personalizzati_ignorati', 0)} | saltati: {res['saltati']}")
+        st.success(f"Ricalcolo completato. Clienti aggiornati: {res['aggiornati']} | personalizzati aggiornati solo su usate/residue: {res.get('personalizzati_aggiornati', 0)} | saltati: {res['saltati']}")
         st.rerun()
 
 
