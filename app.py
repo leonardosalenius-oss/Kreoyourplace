@@ -3605,7 +3605,10 @@ def situazione_rate_cliente(cliente):
 
 def load_pagamenti():
     sb = get_supabase()
-    data = sb.table("pagamenti").select("*").order("id", desc=True).execute().data
+    try:
+        data = sb.table("pagamenti").select("*").order("id", desc=True).range(0, 9999).execute().data
+    except Exception:
+        data = sb.table("pagamenti").select("*").order("id", desc=True).execute().data
     df = pd.DataFrame(data)
     if df.empty:
         return df
@@ -3661,6 +3664,126 @@ def registra_acconto_iniziale_if_needed(cliente_id, data):
         )
     except Exception:
         pass
+
+
+
+def crea_pagamento_da_scheda_cliente(cliente_id, importo=None, data_pagamento=None, metodo="DA SCHEDA CLIENTE", note="Movimento creato per emissione ricevuta da importo già presente in scheda cliente"):
+    """
+    Crea una riga pagamenti senza sommare di nuovo l'importo_pagato del cliente.
+    Serve per storicizzare importi già caricati nella scheda cliente e poter stampare ricevuta.
+    """
+    cliente = get_cliente(int(cliente_id))
+    if not cliente:
+        return False, "Cliente non trovato.", None
+
+    if importo is None:
+        importo = float(cliente.get("importo_pagato") or 0)
+    importo = float(importo or 0)
+    if importo <= 0:
+        return False, "Importo non valido o pari a zero.", None
+
+    data_pagamento = data_pagamento or date.today()
+
+    # evita duplicati identici da scheda
+    try:
+        sb = get_supabase()
+        existing = (
+            sb.table("pagamenti")
+            .select("*")
+            .eq("cliente_id", int(cliente_id))
+            .eq("data_pagamento", str(data_pagamento))
+            .eq("importo", float(importo))
+            .eq("metodo_pagamento", metodo)
+            .limit(1)
+            .execute()
+            .data
+        )
+        if existing:
+            return True, "Movimento già presente nello storico.", int(existing[0]["id"])
+
+        payload = {
+            "cliente_id": int(cliente_id),
+            "data_pagamento": str(data_pagamento),
+            "importo": float(importo),
+            "metodo_pagamento": metodo,
+            "note": note,
+            "registrato_da": user_label(),
+            "created_at": now_iso(),
+            "rata_label": "Pagamento da scheda cliente",
+        }
+        res = sb.table("pagamenti").insert(payload).execute()
+        new_id = None
+        try:
+            if res.data:
+                new_id = int(res.data[0]["id"])
+        except Exception:
+            pass
+
+        if new_id is None:
+            last = (
+                sb.table("pagamenti")
+                .select("id")
+                .eq("cliente_id", int(cliente_id))
+                .eq("data_pagamento", str(data_pagamento))
+                .eq("importo", float(importo))
+                .order("id", desc=True)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if last:
+                new_id = int(last[0]["id"])
+
+        insert_history(
+            int(cliente_id),
+            "storicizzazione pagamento",
+            "",
+            euro(importo),
+            "Creato movimento pagamento da importo già presente in scheda cliente per emissione ricevuta."
+        )
+        return True, "Movimento creato nello storico pagamenti.", new_id
+    except Exception as e:
+        return False, f"Errore creazione movimento da scheda: {e}", None
+
+
+def render_ricevuta_da_scheda_cliente(labels):
+    st.markdown("### Ricevuta da importo già presente in scheda cliente")
+    st.caption("Usa questa funzione se il cliente risulta pagato in anagrafica ma non esiste ancora una riga nello storico pagamenti.")
+
+    selected_cliente = st.selectbox("Cliente per ricevuta da scheda", labels, key="ricevuta_cliente_da_scheda")
+    cid = int(selected_cliente.split(" - ")[0])
+    cliente = get_cliente(cid)
+    if not cliente:
+        st.warning("Cliente non trovato.")
+        return
+
+    importo_pagato = float(cliente.get("importo_pagato") or 0)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Importo contratto", euro(float(cliente.get("importo") or 0)))
+    c2.metric("Importo pagato in scheda", euro(importo_pagato))
+    c3.metric("Residuo", euro(max(float(cliente.get("importo") or 0) - importo_pagato, 0)))
+
+    data_pag = st.date_input("Data ricevuta", value=parse_date(cliente.get("data_iscrizione"), date.today()), format="DD/MM/YYYY", key="ricevuta_scheda_data")
+    importo_mov = st.number_input("Importo ricevuta", min_value=0.0, value=float(importo_pagato), step=10.0, key="ricevuta_scheda_importo")
+    metodo_mov = st.selectbox("Metodo", ["DA SCHEDA CLIENTE", "CONTANTI", "CARTA", "BONIFICO", "ALTRO"], key="ricevuta_scheda_metodo")
+    note_mov = st.text_area("Note ricevuta", value="Ricevuta generata da importo già presente nella scheda cliente.", key="ricevuta_scheda_note")
+
+    if st.button("🧾 Crea movimento e prepara ricevuta", key="crea_movimento_scheda_btn"):
+        ok, msg, new_id = crea_pagamento_da_scheda_cliente(cid, importo_mov, data_pag, metodo_mov, note_mov)
+        if ok:
+            st.success(msg)
+            if new_id:
+                st.session_state["ultimo_pagamento_creato_da_scheda"] = new_id
+                st.rerun()
+        else:
+            st.error(msg)
+
+    new_id = st.session_state.get("ultimo_pagamento_creato_da_scheda")
+    if new_id:
+        pagamento_pdf = get_pagamento_by_id(int(new_id))
+        if pagamento_pdf:
+            st.info(f"Ricevuta pronta per pagamento ID {new_id}.")
+            download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), int(new_id), "da_scheda")
 
 
 def insert_pagamento(cliente_id, data_pagamento, importo, metodo_pagamento, note_pagamento, rata_num=None, rata_label=None):
@@ -6653,30 +6776,59 @@ def main():
 
             with tab4:
                 st.subheader("Storico pagamenti")
-                st.caption("Qui vedi solo i movimenti realmente registrati nella tabella pagamenti. Gli importi scritti solo nella scheda cliente non compaiono come righe di storico finché non vengono registrati come pagamento.")
+                st.caption("Qui vedi tutti i movimenti presenti nella tabella pagamenti. Se un importo è solo nella scheda cliente, puoi creare il movimento per emettere la ricevuta.")
                 pag_df = load_pagamenti()
+                clienti_df = df[["id", "nome", "cognome"]].copy()
+                clienti_df["cliente"] = clienti_df["nome"].fillna("") + " " + clienti_df["cognome"].fillna("")
+
                 if pag_df.empty:
-                    st.info("Nessun pagamento registrato.")
+                    st.info("Nessun pagamento registrato nello storico.")
+                    render_ricevuta_da_scheda_cliente(labels)
                 else:
-                    clienti_df = df[["id", "nome", "cognome"]].copy()
-                    clienti_df["cliente"] = clienti_df["nome"] + " " + clienti_df["cognome"]
                     pag_view = pag_df.merge(clienti_df[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
 
+                    st.markdown("### Filtri storico pagamenti")
+                    f1, f2, f3 = st.columns(3)
+                    with f1:
+                        clienti_filter = ["Tutti"] + sorted([x for x in pag_view["cliente"].dropna().unique().tolist() if str(x).strip()])
+                        filtro_cliente = st.selectbox("Cliente", clienti_filter, key="filtro_storico_pag_cliente")
+                    with f2:
+                        data_da = st.date_input("Da data", value=date(2020, 1, 1), format="DD/MM/YYYY", key="filtro_pag_data_da")
+                    with f3:
+                        data_a = st.date_input("A data", value=date.today(), format="DD/MM/YYYY", key="filtro_pag_data_a")
+
+                    pag_filtrato = pag_view.copy()
+                    if filtro_cliente != "Tutti":
+                        pag_filtrato = pag_filtrato[pag_filtrato["cliente"] == filtro_cliente]
+                    if "data_pagamento" in pag_filtrato.columns:
+                        pag_filtrato = pag_filtrato[
+                            (pag_filtrato["data_pagamento"].astype(str) >= str(data_da)) &
+                            (pag_filtrato["data_pagamento"].astype(str) <= str(data_a))
+                        ]
+
+                    st.caption(f"Movimenti visualizzati: {len(pag_filtrato)} su {len(pag_view)} totali.")
                     cols = ["id", "cliente_id", "cliente", "rata_label", "rata_num", "data_pagamento_it", "importo", "metodo_pagamento", "registrato_da", "note", "created_at"]
-                    st.dataframe(pag_view[[c for c in cols if c in pag_view.columns]], use_container_width=True, hide_index=True)
+                    st.dataframe(pag_filtrato[[c for c in cols if c in pag_filtrato.columns]], use_container_width=True, hide_index=True)
 
                     st.markdown("### Ricevuta PDF pagamento")
-                    pag_view["label_ricevuta"] = (
-                        pag_view["id"].astype(str) + " - " +
-                        pag_view["cliente"].fillna("").astype(str) + " - " +
-                        pag_view["data_pagamento_it"].fillna("").astype(str) + " - " +
-                        pag_view["importo"].apply(lambda x: euro(float(x or 0)))
-                    )
-                    selected_ricevuta = st.selectbox("Seleziona pagamento per ricevuta", pag_view["label_ricevuta"].tolist(), key="select_ricevuta_pagamento")
-                    pagamento_id_pdf = int(selected_ricevuta.split(" - ")[0])
-                    pagamento_pdf = get_pagamento_by_id(pagamento_id_pdf)
-                    if pagamento_pdf:
-                        download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), pagamento_id_pdf, "storico")
+                    pag_receipts = pag_filtrato.copy()
+                    if pag_receipts.empty:
+                        st.warning("Nessun pagamento nel filtro corrente. Allarga il periodo o seleziona Tutti.")
+                    else:
+                        pag_receipts["label_ricevuta"] = (
+                            pag_receipts["id"].astype(str) + " - " +
+                            pag_receipts["cliente"].fillna("").astype(str) + " - " +
+                            pag_receipts["data_pagamento_it"].fillna("").astype(str) + " - " +
+                            pag_receipts["importo"].apply(lambda x: euro(float(x or 0)))
+                        )
+                        selected_ricevuta = st.selectbox("Seleziona pagamento per ricevuta", pag_receipts["label_ricevuta"].tolist(), key="select_ricevuta_pagamento")
+                        pagamento_id_pdf = int(selected_ricevuta.split(" - ")[0])
+                        pagamento_pdf = get_pagamento_by_id(pagamento_id_pdf)
+                        if pagamento_pdf:
+                            download_ricevuta_button(int(pagamento_pdf.get("cliente_id")), pagamento_id_pdf, "storico")
+
+                    with st.expander("🧾 Crea ricevuta da importo già presente in scheda cliente"):
+                        render_ricevuta_da_scheda_cliente(labels)
 
                     if is_admin():
                         with st.expander("Pulizia duplicati pagamenti"):
