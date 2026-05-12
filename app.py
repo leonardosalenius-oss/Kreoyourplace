@@ -4663,7 +4663,7 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V33")
+    st.sidebar.caption("Navigazione semplificata V33.1")
     st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu bianco qui sotto.</div>', unsafe_allow_html=True)
 
     macro = st.sidebar.radio(
@@ -6593,7 +6593,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V32.1")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V33.1")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -6615,41 +6615,35 @@ def main():
         r2c1, r2c2, r2c3 = st.columns(3)
         r3c1, r3c2, r3c3 = st.columns(3)
 
-        def reception_button(label, target, key):
+        def reception_button(label, macro_target, menu_target, key):
             if st.button(label, key=key, use_container_width=True):
-                st.session_state["reception_target"] = target
+                # La Reception deve comportarsi come una pulsantiera: clicco e apro direttamente la schermata operativa.
+                st.session_state["v32_macro_nav"] = macro_target
+                st.session_state["v32_sub_nav"] = menu_target
+                st.session_state.pop("reception_target", None)
                 st.rerun()
 
-        with r1c1: reception_button("➕ Nuovo cliente", "➕ Nuovo cliente", "rec_new_cliente")
-        with r1c2: reception_button("✏️ Modifica cliente", "✏️ Modifica cliente", "rec_edit_cliente")
-        with r1c3: reception_button("💰 Registra incasso", "💳 Gestione incassi", "rec_incasso")
-        with r2c1: reception_button("🚨 Elenco alert", "🚨 Alert clienti", "rec_alert")
-        with r2c2: reception_button("🎟️ Associa badge", "🚪 Accessi tornello", "rec_badge")
-        with r2c3: reception_button("🔄 Sincronizza accessi / badge", "🚪 Accessi tornello", "rec_sync")
-        with r3c1: reception_button("♻️ Ricalcolo lezioni", "♻️ Ricalcolo lezioni", "rec_recalc")
-        with r3c2: reception_button("📅 Inserimento rapido lezione", "🗓 Calendario operativo", "rec_lezione")
-        with r3c3: reception_button("✅ Check-in cliente", "🚪 Accessi tornello", "rec_checkin")
-
-        target = st.session_state.get("reception_target")
-        if target:
-            st.markdown("---")
-            st.info(f"Funzione selezionata: {target}. Usa il menu laterale per aprirla in modalità completa.")
-            if target == "♻️ Ricalcolo lezioni":
-                st.subheader("Ricalcolo lezioni")
+        with r1c1: reception_button("➕ Nuovo cliente", "👤 Clienti", "➕ Nuovo cliente", "rec_new_cliente")
+        with r1c2: reception_button("✏️ Modifica cliente", "👤 Clienti", "✏️ Modifica cliente", "rec_edit_cliente")
+        with r1c3: reception_button("💰 Registra incasso", "💳 Incassi", "💳 Gestione incassi", "rec_incasso")
+        with r2c1: reception_button("🚨 Elenco alert", "🏠 Dashboard", "🚨 Alert clienti", "rec_alert")
+        with r2c2: reception_button("🎟️ Associa badge", "👤 Clienti", "🚪 Accessi tornello", "rec_badge")
+        with r2c3: reception_button("🔄 Sincronizza accessi / badge", "👤 Clienti", "🚪 Accessi tornello", "rec_sync")
+        with r3c1:
+            if st.button("♻️ Ricalcolo lezioni", key="rec_recalc", use_container_width=True):
+                st.markdown("---")
+                st.subheader("♻️ Ricalcolo lezioni")
                 if is_admin():
                     render_recalcolo_settimanale_widget()
                     with st.expander("Ricalcolo cumulativo avanzato"):
                         render_lezioni_cumulative_admin()
                 else:
                     st.error("Funzione riservata all’amministratore.")
-            elif target == "🚨 Alert clienti":
-                alert_df = build_alert_dashboard(df)
-                if alert_df.empty:
-                    st.success("Nessun alert presente.")
-                else:
-                    st.dataframe(alert_df, use_container_width=True, hide_index=True)
-            else:
-                st.warning("Per questa funzione usa il relativo pulsante/voce nel menu laterale: la V33 mantiene la funzione completa nella sua area originale per evitare duplicazioni di codice.")
+        with r3c2: reception_button("📅 Inserimento rapido lezione", "🗓 Calendario", "🗓 Calendario operativo", "rec_lezione")
+        with r3c3: reception_button("✅ Check-in cliente", "👤 Clienti", "🚪 Accessi tornello", "rec_checkin")
+
+        st.markdown("---")
+        st.success("Seleziona un pulsante: la Reception apre direttamente la schermata operativa corretta, senza passaggi manuali nel menu.")
 
     elif menu == "➕ Nuovo cliente":
         st.header("Nuova iscrizione / aggiornamento cliente")
