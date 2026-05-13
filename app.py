@@ -4952,15 +4952,128 @@ def registra_accesso_tornello(badge_uid, data_accesso=None, ora_accesso=None, di
             "raw_payload": str(raw_payload)[:2500] if raw_payload is not None else "",
             "created_at": now_iso(),
         }
-        sb.table("accessi_tornello").insert(payload).execute()
+        res = sb.table("accessi_tornello").insert(payload).execute()
+        access_id = None
+        try:
+            if getattr(res, "data", None):
+                access_id = int(res.data[0].get("id"))
+        except Exception:
+            access_id = None
 
+        msg_scalo = ""
         if cliente_id:
             insert_history(cliente_id, "accesso tornello", "", f"{format_date_it(data_accesso)} {ora_accesso}", f"{direzione} - {stato_accesso} - {note}")
+            ok_scalo, msg_scalo = registra_presenza_da_accesso_badge(cliente_id, data_accesso, ora_accesso, access_id)
 
-        return True, "Accesso registrato.", cliente_id
+        final_msg = "Accesso registrato."
+        if msg_scalo:
+            final_msg += " " + msg_scalo
+        return True, final_msg, cliente_id
     except Exception as e:
         return False, f"Errore registrazione accesso: {e}", cliente_id
 
+
+
+
+def registra_presenza_da_accesso_badge(cliente_id, data_accesso, ora_accesso, access_id=None):
+    """
+    Regola produzione KREO:
+    - ogni accesso badge valido equivale a presenza reale;
+    - scala 1 lezione a tutti i clienti, indipendentemente dal pacchetto;
+    - i pacchetti personalizzati NON ricevono ricarica automatica settimanale,
+      ma se hanno lezioni residue e passano il badge, consumano 1 lezione;
+    - evita doppio scarico se lo stesso cliente risulta già PRESENTE nello stesso giorno.
+    """
+    try:
+        cid = int(cliente_id)
+        cliente = get_cliente(cid)
+        if not cliente:
+            return False, "Cliente non trovato."
+
+        totale, usate, residue = contatori_cumulativi_cliente(cid, parse_date(data_accesso, date.today()))
+        if int(residue) <= 0:
+            insert_history(
+                cid,
+                "accesso badge senza lezioni residue",
+                "",
+                f"{format_date_it(data_accesso)} {str(ora_accesso)[:5]}",
+                "Accesso registrato, ma nessuna lezione scalata perché residue = 0."
+            )
+            return False, "Accesso registrato. Nessuna lezione residua da scalare."
+
+        sb = get_supabase()
+        data_acc = str(data_accesso)
+        ora_acc = str(ora_accesso or "09:00")[:5]
+        access_token = f"access_id={access_id}" if access_id else f"badge_auto_{data_acc}_{ora_acc}"
+
+        lezioni = load_lezioni()
+
+        # Evita doppio scarico sullo stesso accesso o sullo stesso giorno.
+        if not lezioni.empty:
+            tmp = lezioni.copy()
+            tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+            tmp["stato_upper"] = tmp["stato"].fillna("").astype(str).str.upper()
+            tmp["note_txt"] = tmp["note"].fillna("").astype(str)
+
+            same_access = tmp[
+                (tmp["cliente_id_num"] == cid) &
+                (tmp["note_txt"].str.contains(str(access_token), regex=False))
+            ]
+            if not same_access.empty:
+                return False, "Accesso già convertito in presenza. Nessun doppio scarico."
+
+            same_day_present = tmp[
+                (tmp["cliente_id_num"] == cid) &
+                (tmp["data_lezione"].astype(str) == data_acc) &
+                (tmp["stato_upper"] == "PRESENTE")
+            ]
+            if not same_day_present.empty:
+                return False, "Cliente già segnato presente oggi. Nessun doppio scarico."
+
+        pac = cliente.get("pacchetto", "")
+        booking = trova_lezione_giorno(cid, data_acc)
+
+        if booking:
+            old_note = str(booking.get("note") or "")
+            sb.table("lezioni").update({
+                "stato": "PRESENTE",
+                "updated_at": now_iso(),
+                "note": (old_note + f" | Presenza da badge ore {ora_acc}. {access_token}").strip(" |"),
+            }).eq("id", int(booking.get("id"))).execute()
+            azione = "Lezione prenotata confermata da badge"
+        else:
+            start = round_time_up_hhmm(ora_acc, 30)
+            end = add_minutes_hhmm(start, 60)
+            sb.table("lezioni").insert({
+                "cliente_id": cid,
+                "data_lezione": data_acc,
+                "ora_inizio": start,
+                "ora_fine": end,
+                "trainer": trainer_from_pacchetto_app(pac),
+                "stato": "PRESENTE",
+                "note": f"Presenza creata automaticamente da accesso badge ore {ora_acc}. Slot {start}-{end}. Pacchetto: {pac}. Tipo: {tipo_slot_from_pacchetto_app(pac)}. {access_token}",
+                "creata_da": "Accesso badge / tornello",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }).execute()
+            azione = "Presenza creata da badge"
+
+        # Ricalcola e aggiorna i contatori per TUTTI i pacchetti.
+        aggiorna_contatori_dopo_presenza_lezione(cid)
+
+        totale2, usate2, residue2 = contatori_cumulativi_cliente(cid, parse_date(data_accesso, date.today()))
+        insert_history(
+            cid,
+            "lezione scalata da badge",
+            "",
+            f"{format_date_it(data_acc)} {ora_acc}",
+            f"{azione}. Lezioni residue dopo accesso: {residue2}"
+        )
+
+        return True, f"Accesso registrato. 1 lezione scalata. Residue: {residue2}"
+
+    except Exception as e:
+        return False, f"Accesso registrato, ma errore nello scarico lezione: {e}"
 
 
 def find_pagamenti_duplicati():
@@ -5386,20 +5499,19 @@ def recupera_accessi_retroattivi(data_da=None, data_a=None, solo_cliente_id=None
         except Exception:
             stats["saltati"] += 1
 
-    # aggiorna contatori anagrafica per pacchetti standard, basati sulla settimana corrente
+    # Aggiorna contatori anagrafica per TUTTI i clienti coinvolti dagli accessi.
+    # La ricarica automatica resta solo per i pacchetti standard, ma lo scarico da badge vale per tutti.
     try:
-        clienti = load_clienti()
-        if not clienti.empty:
-            for _, c in clienti.iterrows():
-                pac = c.get("pacchetto", "")
-                if is_standard_weekly_package(pac):
-                    cid = int(c.get("id"))
-                    used = min(count_presenti_settimana(cid, date.today()), 3)
-                    sb.table("clienti").update({
-                        "numero_lezioni_totali": 3,
-                        "lezioni_utilizzate": used,
-                        "updated_at": now_iso(),
-                    }).eq("id", cid).execute()
+        if not accessi.empty and "cliente_id" in accessi.columns:
+            touched = (
+                pd.to_numeric(accessi["cliente_id"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+                .tolist()
+            )
+            for cid in touched:
+                aggiorna_contatori_dopo_presenza_lezione(int(cid))
     except Exception:
         pass
 
