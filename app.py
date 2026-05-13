@@ -4349,8 +4349,12 @@ def lezioni_maturate_cumulative(cliente, data_ref=None):
 
 def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
     """
-    Conta tutte le lezioni PRESENTE del cliente.
-    Se data_da è indicata, conta dal primo giorno pacchetto.
+    Conta le presenze effettive del cliente.
+
+    Regola anti-doppio-scarico:
+    se per errore esistono due righe PRESENTE nello stesso giorno
+    (es. badge + recupero retroattivo), viene conteggiata UNA sola lezione
+    per quel giorno.
     """
     try:
         lez = load_lezioni()
@@ -4367,7 +4371,12 @@ def lezioni_usate_totali_cliente(cliente_id, data_da=None, data_a=None):
             tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
         if data_a:
             tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
-        return len(tmp)
+
+        if tmp.empty:
+            return 0
+
+        # 1 accesso/presenza = 1 lezione scalata al giorno.
+        return int(tmp["data_lezione"].astype(str).nunique())
     except Exception:
         return 0
 
@@ -5377,7 +5386,9 @@ def count_presenti_settimana(cliente_id, data_ref):
             (lez["data_lezione"].astype(str) <= str(end)) &
             (lez["stato"].astype(str).str.upper() == "PRESENTE")
         ]
-        return len(tmp)
+        if tmp.empty:
+            return 0
+        return int(tmp["data_lezione"].astype(str).nunique())
     except Exception:
         return 0
 
@@ -5447,15 +5458,28 @@ def recupera_accessi_retroattivi(data_da=None, data_a=None, solo_cliente_id=None
 
             stats["processati"] += 1
 
-            # se esiste già una lezione presente con nota dello stesso accesso, salta
+            # Anti-doppio-scarico:
+            # se esiste già una presenza PRESENTE nello stesso giorno, non creare/confermare altro.
+            # Questo evita che un solo passaggio badge venga conteggiato due volte.
             lezioni = load_lezioni()
             if not lezioni.empty:
-                same = lezioni[
-                    (pd.to_numeric(lezioni["cliente_id"], errors="coerce").fillna(0).astype(int) == cid) &
-                    (lezioni["data_lezione"].astype(str) == data_acc) &
-                    (lezioni["note"].fillna("").astype(str).str.contains(f"access_id={access_id}", regex=False))
+                lez_tmp = lezioni.copy()
+                lez_tmp["cliente_id_num"] = pd.to_numeric(lez_tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+                lez_tmp["stato_upper"] = lez_tmp["stato"].fillna("").astype(str).str.upper()
+                lez_tmp["note_txt"] = lez_tmp["note"].fillna("").astype(str)
+
+                same_access = lez_tmp[
+                    (lez_tmp["cliente_id_num"] == cid) &
+                    (lez_tmp["data_lezione"].astype(str) == data_acc) &
+                    (lez_tmp["note_txt"].str.contains(f"access_id={access_id}", regex=False))
                 ]
-                if not same.empty:
+                same_day_present = lez_tmp[
+                    (lez_tmp["cliente_id_num"] == cid) &
+                    (lez_tmp["data_lezione"].astype(str) == data_acc) &
+                    (lez_tmp["stato_upper"] == "PRESENTE")
+                ]
+
+                if not same_access.empty or not same_day_present.empty:
                     stats["saltati"] += 1
                     continue
 
