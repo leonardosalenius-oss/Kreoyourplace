@@ -4806,6 +4806,12 @@ def render_v32_navigation():
     st.sidebar.markdown(f"**Area:** {macro}")
     st.sidebar.markdown(f"**Funzione:** {selected}")
 
+    if selected != "🛎️ Reception rapida":
+        if st.sidebar.button("⬅️ Torna a Reception", use_container_width=True, key="btn_torna_reception_global"):
+            st.session_state["kreo_force_menu"] = "🛎️ Reception rapida"
+            st.session_state["v32_macro_nav"] = "🛎️ Reception"
+            st.rerun()
+
     return selected
 
 def load_badge_clienti():
