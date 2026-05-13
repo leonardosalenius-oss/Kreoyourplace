@@ -7057,7 +7057,6 @@ def main():
         with back_col:
             if st.button("⬅️ Torna a Reception", key="top_return_reception_global", use_container_width=True):
                 st.session_state["kreo_force_menu"] = "🛎️ Reception rapida"
-                st.session_state["v32_macro_nav"] = "🛎️ Reception"
                 st.rerun()
         st.markdown('<div class="kreo-top-return-spacer"></div>', unsafe_allow_html=True)
 
