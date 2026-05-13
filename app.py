@@ -4806,12 +4806,6 @@ def render_v32_navigation():
     st.sidebar.markdown(f"**Area:** {macro}")
     st.sidebar.markdown(f"**Funzione:** {selected}")
 
-    if selected != "🛎️ Reception rapida":
-        if st.sidebar.button("⬅️ Torna a Reception", use_container_width=True, key="btn_torna_reception_global"):
-            st.session_state["kreo_force_menu"] = "🛎️ Reception rapida"
-            st.session_state["v32_macro_nav"] = "🛎️ Reception"
-            st.rerun()
-
     return selected
 
 def load_badge_clienti():
@@ -6921,9 +6915,90 @@ def render_stampa_ricevuta_rapida():
 
 
 
+
 def inject_kreo_luxury_sidebar_style():
     st.markdown("""
     <style>
+    /* Pulsanti sidebar: nero fisso + bordo oro, anche senza hover */
+    section[data-testid="stSidebar"] div.stButton > button,
+    section[data-testid="stSidebar"] button,
+    section[data-testid="stSidebar"] button[kind="secondary"],
+    section[data-testid="stSidebar"] button[kind="primary"] {
+        background: #050505 !important;
+        background-color: #050505 !important;
+        color: #F4D675 !important;
+        -webkit-text-fill-color: #F4D675 !important;
+        border: 1.5px solid #D4AF37 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.12), 0 6px 18px rgba(0,0,0,0.35) !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }
+
+    section[data-testid="stSidebar"] div.stButton > button *,
+    section[data-testid="stSidebar"] button *,
+    section[data-testid="stSidebar"] button p,
+    section[data-testid="stSidebar"] button span,
+    section[data-testid="stSidebar"] button div {
+        color: #F4D675 !important;
+        -webkit-text-fill-color: #F4D675 !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }
+
+    section[data-testid="stSidebar"] div.stButton > button:hover,
+    section[data-testid="stSidebar"] button:hover {
+        background: #121212 !important;
+        background-color: #121212 !important;
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        border: 1.7px solid #F4D675 !important;
+        box-shadow: 0 0 14px rgba(212,175,55,0.42) !important;
+    }
+
+    section[data-testid="stSidebar"] div.stButton > button:hover *,
+    section[data-testid="stSidebar"] button:hover * {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }
+
+    /* Dropdown funzioni operative: nero fisso + bordo oro */
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] div[role="button"],
+    section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="control"],
+    section[data-testid="stSidebar"] div[data-baseweb="select"] div[class*="ValueContainer"] {
+        background: #050505 !important;
+        background-color: #050505 !important;
+        color: #F4D675 !important;
+        -webkit-text-fill-color: #F4D675 !important;
+        border-color: #D4AF37 !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        border: 1.6px solid #D4AF37 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 0 0 1px rgba(212,175,55,0.12), 0 6px 18px rgba(0,0,0,0.35) !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] span,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] svg,
+    section[data-testid="stSidebar"] div[data-baseweb="select"] input {
+        color: #F4D675 !important;
+        -webkit-text-fill-color: #F4D675 !important;
+        fill: #F4D675 !important;
+        font-weight: 800 !important;
+    }
+
+    /* Pulsante principale Torna a Reception */
+    div.stButton > button {
+        border-radius: 12px !important;
+        font-weight: 800 !important;
+    }
+
+    .kreo-top-return-spacer {
+        height: 18px;
+    }
+
     .pentti-footer {
         position: fixed;
         bottom: 55px;
@@ -6938,10 +7013,19 @@ def inject_kreo_luxury_sidebar_style():
         font-weight: 700;
         box-shadow: 0 0 14px rgba(212,175,55,0.35), 0 8px 24px rgba(0,0,0,0.40);
     }
+
+    @media (max-width: 900px) {
+        .pentti-footer {
+            left: 16px;
+            right: 16px;
+            bottom: 70px;
+            text-align: center;
+            font-size: 11px;
+        }
+    }
     </style>
     <div class="pentti-footer">Developed by Pentti Salenius © 2026</div>
     """, unsafe_allow_html=True)
-
 
 def main():
     st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
@@ -6966,6 +7050,16 @@ def main():
         st.rerun()
 
     menu = render_v32_navigation()
+
+    if menu != "🛎️ Reception rapida":
+        st.markdown('<div class="kreo-top-return-spacer"></div>', unsafe_allow_html=True)
+        back_col, _ = st.columns([1.35, 5])
+        with back_col:
+            if st.button("⬅️ Torna a Reception", key="top_return_reception_global", use_container_width=True):
+                st.session_state["kreo_force_menu"] = "🛎️ Reception rapida"
+                st.session_state["v32_macro_nav"] = "🛎️ Reception"
+                st.rerun()
+        st.markdown('<div class="kreo-top-return-spacer"></div>', unsafe_allow_html=True)
 
     df = load_clienti()
 
