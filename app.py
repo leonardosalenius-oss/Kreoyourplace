@@ -5433,6 +5433,10 @@ def recupera_accessi_retroattivi(data_da=None, data_a=None, solo_cliente_id=None
         accessi["cliente_id"] = pd.to_numeric(accessi["cliente_id"], errors="coerce").astype("Int64")
         accessi = accessi[accessi["cliente_id"] == int(solo_cliente_id)]
 
+    # Non ricalcolare accessi annullati manualmente.
+    if "stato_accesso" in accessi.columns:
+        accessi = accessi[accessi["stato_accesso"].fillna("").astype(str).str.upper() != "ANNULLATO_DA_NON_RICALCOLARE"]
+
     stats = {"processati": 0, "creati": 0, "confermati": 0, "saltati": 0, "extra": 0}
 
     # ordina cronologicamente per far funzionare bene il conteggio settimanale
@@ -6643,6 +6647,223 @@ def render_console_reception_premium():
     """, unsafe_allow_html=True)
 
 
+def annulla_accesso_e_presenza(accesso_id, motivo="Annullamento manuale da KREO"):
+    """
+    Annulla un accesso tornello e la presenza/lezione collegata.
+    Importante: l'accesso viene marcato come ANNULLATO_DA_NON_RICALCOLARE,
+    così recupero/ricalcolo non ricreano la lezione.
+    """
+    try:
+        sb = get_supabase()
+
+        accessi = sb.table("accessi_tornello").select("*").eq("id", int(accesso_id)).limit(1).execute().data
+        if not accessi:
+            return False, "Accesso non trovato."
+
+        accesso = accessi[0]
+        cliente_id = accesso.get("cliente_id")
+        data_acc = str(accesso.get("data_accesso") or "")
+        source_id = accesso.get("source_record_id") or accesso.get("id")
+        old_note = str(accesso.get("note") or "")
+
+        sb.table("accessi_tornello").update({
+            "stato_accesso": "ANNULLATO_DA_NON_RICALCOLARE",
+            "note": (old_note + f" | ANNULLATO: {motivo}").strip(" |"),
+        }).eq("id", int(accesso_id)).execute()
+
+        lezioni_annullate = 0
+
+        if cliente_id and data_acc:
+            lez = sb.table("lezioni").select("*").eq("cliente_id", int(cliente_id)).eq("data_lezione", data_acc).execute().data or []
+
+            candidates = []
+            for l in lez:
+                note = str(l.get("note") or "")
+                stato = str(l.get("stato") or "").upper()
+
+                if stato != "PRESENTE":
+                    continue
+
+                # collegamenti possibili nel tempo: source_id del bridge vecchio, access_id KREO, o unica presenza del giorno
+                if (
+                    f"source_id={source_id}" in note
+                    or f"access_id={source_id}" in note
+                    or "accesso tornello" in note.lower()
+                    or "accesso badge" in note.lower()
+                    or "tornello" in str(l.get("creata_da") or "").lower()
+                    or "badge" in str(l.get("creata_da") or "").lower()
+                ):
+                    candidates.append(l)
+
+            # Se non trovo match esplicito ma c'è una sola presenza quel giorno, annullo quella.
+            if not candidates:
+                presenti = [l for l in lez if str(l.get("stato") or "").upper() == "PRESENTE"]
+                if len(presenti) == 1:
+                    candidates = presenti
+
+            for l in candidates:
+                old_l_note = str(l.get("note") or "")
+                sb.table("lezioni").update({
+                    "stato": "ANNULLATA",
+                    "updated_at": now_iso(),
+                    "note": (old_l_note + f" | ANNULLATA DA ACCESSO ID {accesso_id}: {motivo}").strip(" |"),
+                }).eq("id", int(l.get("id"))).execute()
+                lezioni_annullate += 1
+
+            try:
+                aggiorna_contatori_dopo_presenza_lezione(int(cliente_id))
+            except Exception:
+                pass
+
+            try:
+                insert_history(
+                    int(cliente_id),
+                    "annullamento accesso/presenza",
+                    f"Accesso ID {accesso_id}",
+                    "Accesso annullato",
+                    f"{motivo} | Presenze annullate: {lezioni_annullate}"
+                )
+            except Exception:
+                pass
+
+        return True, f"Accesso annullato. Presenze/lezioni annullate: {lezioni_annullate}. Il ricalcolo non lo ricreerà."
+
+    except Exception as e:
+        return False, f"Errore annullamento accesso/presenza: {e}"
+
+
+def render_annulla_accesso_operativo():
+    st.subheader("🧯 Annulla accesso / presenza")
+    st.caption("Usalo quando un badge è stato passato per errore o una presenza non deve scalare lezioni.")
+
+    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    if accessi.empty:
+        st.info("Nessun accesso presente.")
+        return
+
+    accessi = accessi.copy()
+    if "stato_accesso" in accessi.columns:
+        accessi = accessi[accessi["stato_accesso"].fillna("").astype(str).str.upper() != "ANNULLATO_DA_NON_RICALCOLARE"]
+
+    accessi = accessi.sort_values("id", ascending=False).head(80)
+
+    def label_accesso(r):
+        cliente = r.get("cliente") or f"cliente_id {r.get('cliente_id')}"
+        return f"{int(r.get('id'))} | {r.get('data_accesso')} {r.get('ora_accesso')} | {cliente} | badge {r.get('badge_uid')} | {r.get('stato_accesso')}"
+
+    labels = [label_accesso(r) for _, r in accessi.iterrows()]
+    selected = st.selectbox("Seleziona accesso da annullare", labels, key="annulla_accesso_select")
+
+    if selected:
+        accesso_id = int(str(selected).split("|")[0].strip())
+        motivo = st.text_input("Motivo annullamento", value="Test / accesso passato per errore", key="motivo_annulla_accesso")
+        st.warning("Questa operazione annulla l'accesso e marca l'eventuale presenza collegata come ANNULLATA. Il ricalcolo non la ricreerà.")
+        if st.button("🧯 Annulla accesso e presenza", type="primary", use_container_width=True, key="btn_annulla_accesso_presenza"):
+            ok, msg = annulla_accesso_e_presenza(accesso_id, motivo)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+
+def render_accessi_tornello_operativo_page():
+    st.header("Accessi tornello")
+    st.caption("Area operativa semplificata: badge, ultimi accessi, annullamento presenza e console.")
+
+    if is_admin():
+        c1, c2 = st.columns([1.2, 3])
+        with c1:
+            if st.button("🔄 Sincronizza accessi-badge", key="sync_accessi_badge_operativo", use_container_width=True):
+                n = sync_accessi_cliente_da_badge()
+                st.success(f"Accessi collegati automaticamente: {n}")
+                st.rerun()
+        with c2:
+            st.info("Il tornello/PerfectGym resta fonte evento. KREO decide cliente, alert e scarico lezioni.")
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Registro accessi",
+        "Badge clienti",
+        "Annulla accesso/presenza",
+        "Console reception",
+    ])
+
+    with tab1:
+        st.subheader("Registro accessi")
+        accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+        if accessi.empty:
+            st.info("Nessun accesso registrato.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                filtro_data = st.date_input("Data", value=date.today(), format="DD/MM/YYYY", key="op_filtro_accessi_data")
+            with c2:
+                solo_alert = st.checkbox("Solo accessi con alert", value=False, key="op_solo_alert")
+            with c3:
+                mostra_annullati = st.checkbox("Mostra annullati", value=False, key="op_mostra_annullati")
+
+            view = accessi.copy()
+            if "data_accesso" in view.columns:
+                view = view[view["data_accesso"].astype(str) == str(filtro_data)]
+            if solo_alert and "alert_flags" in view.columns:
+                view = view[view["alert_flags"].fillna("").astype(str).str.len() > 0]
+            if not mostra_annullati and "stato_accesso" in view.columns:
+                view = view[view["stato_accesso"].fillna("").astype(str).str.upper() != "ANNULLATO_DA_NON_RICALCOLARE"]
+
+            cols = ["id", "data_accesso_it", "ora_accesso", "cliente", "badge_uid", "direzione", "tornello", "stato_accesso", "note"]
+            st.dataframe(view[[c for c in cols if c in view.columns]].head(100), use_container_width=True, hide_index=True)
+
+    with tab2:
+        st.subheader("Badge clienti")
+        df = load_clienti()
+        if df.empty:
+            st.info("Nessun cliente presente.")
+        else:
+            labels = (df["id"].astype(str) + " - " + df["nome"] + " " + df["cognome"]).tolist()
+            selected = st.selectbox("Cliente", labels, key="op_badge_cliente_select")
+            cliente_id = int(selected.split(" - ")[0])
+            badge_uid = st.text_input("Codice badge/transponder", placeholder="Inserisci codice badge")
+            note = st.text_area("Note badge", key="op_note_badge")
+            if st.button("🎟️ Assegna badge al cliente", use_container_width=True, key="op_assegna_badge"):
+                ok, msg = assegna_badge_cliente(cliente_id, badge_uid, note)
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        st.markdown("---")
+        badges = load_badge_clienti()
+        if badges.empty:
+            st.info("Nessun badge registrato.")
+        else:
+            clienti = load_clienti()
+            if not clienti.empty:
+                cm = clienti[["id", "nome", "cognome"]].copy()
+                cm["id"] = pd.to_numeric(cm["id"], errors="coerce").astype("Int64")
+                badges["cliente_id"] = pd.to_numeric(badges["cliente_id"], errors="coerce").astype("Int64")
+                cm["cliente"] = cm["nome"].fillna("").astype(str) + " " + cm["cognome"].fillna("").astype(str)
+                badges = badges.merge(cm[["id", "cliente"]], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+            cols = ["id", "cliente", "badge_uid", "attivo", "note", "updated_by", "updated_at"]
+            st.dataframe(badges[[c for c in cols if c in badges.columns]], use_container_width=True, hide_index=True)
+
+    with tab3:
+        render_annulla_accesso_operativo()
+
+    with tab4:
+        render_console_reception_premium()
+
+    if is_admin():
+        with st.expander("Area tecnica avanzata"):
+            st.warning("Usare solo per diagnostica, recuperi massivi o problemi tecnici.")
+            if st.button("Apri vecchia area tecnica completa", key="open_old_accessi_area"):
+                st.session_state["kreo_show_accessi_advanced_once"] = True
+                st.rerun()
+
+            if st.session_state.get("kreo_show_accessi_advanced_once"):
+                render_accessi_tornello_page()
+
+
 def render_accessi_tornello_page():
     st.header("Accessi tornello")
     st.caption("Integrazione passiva: KREO registra e analizza gli ingressi senza comandare il tornello.")
@@ -7599,7 +7820,7 @@ def main():
 
 
     elif menu == "🚪 Accessi tornello":
-        render_accessi_tornello_page()
+        render_accessi_tornello_operativo_page()
 
 
     elif menu == "👤 Area Cliente":
