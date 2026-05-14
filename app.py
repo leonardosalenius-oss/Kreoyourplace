@@ -6735,46 +6735,291 @@ def ultimo_badge_letto_non_annullato():
         return None
 
 
-def render_reception_accessi_smart_panel():
-    st.subheader("🛎️ Accessi rapidi reception")
-    st.caption("Passa badge → associa se serve → KREO gestisce presenza e lezioni.")
 
-    latest = ultimo_badge_letto_non_annullato()
-    if not latest:
-        st.info("Nessun badge letto al momento.")
+def kreo_cliente_summary_map():
+    """
+    Mappa rapida clienti per Check-In Center.
+    Non rompe se alcune colonne non esistono.
+    """
+    try:
+        df = load_clienti()
+        if df.empty:
+            return {}
+        out = {}
+        for _, r in df.iterrows():
+            try:
+                cid = int(r.get("id"))
+            except Exception:
+                continue
+            nome = str(r.get("nome") or "").strip()
+            cognome = str(r.get("cognome") or "").strip()
+            out[cid] = {
+                "cliente": (nome + " " + cognome).strip() or f"Cliente {cid}",
+                "pacchetto": str(r.get("pacchetto") or ""),
+                "lezioni_utilizzate": r.get("lezioni_utilizzate"),
+                "numero_lezioni": r.get("numero_lezioni") or r.get("numero_lezioni_totali"),
+                "lezioni_residue": r.get("lezioni_residue"),
+                "certificato": r.get("certificato_medico") or r.get("certificato") or r.get("certificato_scadenza"),
+                "residuo": r.get("residuo") or r.get("residuo_totale") or r.get("importo_residuo"),
+            }
+        return out
+    except Exception:
+        return {}
+
+
+def kreo_accessi_con_cooldown(df, seconds=90):
+    """
+    Marca visivamente i doppi passaggi ravvicinati.
+    Non modifica il DB: prima del lancio è più sicuro usare il cooldown come warning operativo.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    out["cooldown_duplicate"] = False
+
+    if "badge_uid" not in out.columns:
+        return out
+
+    data_col = "data_accesso" if "data_accesso" in out.columns else None
+    ora_col = "ora_accesso" if "ora_accesso" in out.columns else None
+    if not data_col or not ora_col:
+        return out
+
+    try:
+        out["_dt_accesso"] = pd.to_datetime(out[data_col].astype(str) + " " + out[ora_col].astype(str), errors="coerce")
+        out["_id_num"] = pd.to_numeric(out["id"], errors="coerce").fillna(0).astype(int)
+        out = out.sort_values(["badge_uid", "_dt_accesso", "_id_num"], ascending=[True, True, True])
+
+        prev_badge = None
+        prev_dt = None
+        prev_tornello = None
+        prev_dir = None
+
+        for idx, r in out.iterrows():
+            badge = str(r.get("badge_uid") or "")
+            dtv = r.get("_dt_accesso")
+            tornello = str(r.get("tornello") or "")
+            direzione = str(r.get("direzione") or "")
+
+            if badge and prev_badge == badge and pd.notna(dtv) and pd.notna(prev_dt):
+                delta = abs((dtv - prev_dt).total_seconds())
+                if delta <= seconds and tornello == prev_tornello and direzione == prev_dir:
+                    out.at[idx, "cooldown_duplicate"] = True
+
+            prev_badge = badge
+            prev_dt = dtv
+            prev_tornello = tornello
+            prev_dir = direzione
+
+        out = out.sort_values("_id_num", ascending=False)
+    except Exception:
+        pass
+
+    return out
+
+
+def kreo_checkin_status(row, clienti_map=None):
+    """
+    Stato UX: accesso/presenza/consumo separati.
+    """
+    clienti_map = clienti_map or {}
+    stato_accesso = str(row.get("stato_accesso") or "").upper()
+    cliente_id = row.get("cliente_id")
+    try:
+        cid = int(cliente_id) if cliente_id not in [None, "", "None"] and not pd.isna(cliente_id) else None
+    except Exception:
+        cid = None
+
+    cliente_info = clienti_map.get(cid, {}) if cid else {}
+    cliente_nome = row.get("cliente") or cliente_info.get("cliente") or ""
+    pacchetto = cliente_info.get("pacchetto") or ""
+
+    if str(row.get("cooldown_duplicate") or "").lower() == "true":
+        return {
+            "color": "🔵",
+            "title": "DOPPIO PASSAGGIO",
+            "level": "INFO",
+            "message": "Badge ripassato entro il cooldown. Verificare prima di scalare.",
+            "cliente": cliente_nome or "Cliente da verificare",
+            "pacchetto": pacchetto,
+        }
+
+    if "ANNULLATO" in stato_accesso:
+        return {
+            "color": "⚫",
+            "title": "ANNULLATO",
+            "level": "OFF",
+            "message": "Accesso escluso dal ricalcolo.",
+            "cliente": cliente_nome or "Accesso annullato",
+            "pacchetto": pacchetto,
+        }
+
+    if not cid:
+        return {
+            "color": "🟡",
+            "title": "BADGE NON ASSOCIATO",
+            "level": "WARNING",
+            "message": "Associare il badge a un cliente KREO.",
+            "cliente": "Non associato",
+            "pacchetto": "",
+        }
+
+    # KREO decide: PerfectGym è solo fonte evento
+    residuo = cliente_info.get("residuo")
+    lez_residue = cliente_info.get("lezioni_residue")
+    cert = cliente_info.get("certificato")
+
+    alerts = []
+    try:
+        if residuo not in [None, "", "nan"] and float(str(residuo).replace(",", ".")) > 0:
+            alerts.append("residuo aperto")
+    except Exception:
+        pass
+
+    try:
+        if lez_residue not in [None, "", "nan"] and float(str(lez_residue).replace(",", ".")) <= 0:
+            alerts.append("lezioni esaurite")
+    except Exception:
+        pass
+
+    if "NEGATO" in stato_accesso or "VERIFICARE" in stato_accesso:
+        # Ora non blocca più automaticamente: è warning di origine PerfectGym.
+        return {
+            "color": "🟡",
+            "title": "ACCESSO DA VERIFICARE",
+            "level": "WARNING",
+            "message": "Evento letto. PerfectGym segnala anomalia, ma KREO decide la logica gestionale.",
+            "cliente": cliente_nome,
+            "pacchetto": pacchetto,
+        }
+
+    if alerts:
+        return {
+            "color": "🔴",
+            "title": "CLIENTE CON ALERT",
+            "level": "ALERT",
+            "message": ", ".join(alerts),
+            "cliente": cliente_nome,
+            "pacchetto": pacchetto,
+        }
+
+    return {
+        "color": "🟢",
+        "title": "CHECK-IN OK",
+        "level": "OK",
+        "message": "Evento ricevuto. Presenza/consumo gestiti da KREO.",
+        "cliente": cliente_nome,
+        "pacchetto": pacchetto,
+    }
+
+
+def render_checkin_event_card(row, clienti_map=None, key_prefix="checkin"):
+    status = kreo_checkin_status(row, clienti_map)
+    accesso_id = int(row.get("id"))
+    badge_uid = str(row.get("badge_uid") or "-")
+    ora = str(row.get("ora_accesso") or "-")
+    data_txt = row.get("data_accesso_it") or row.get("data_accesso") or "-"
+    note = str(row.get("note") or "")
+
+    border_color = {
+        "OK": "#2ecc71",
+        "WARNING": "#f1c40f",
+        "ALERT": "#e74c3c",
+        "INFO": "#3498db",
+        "OFF": "#555555",
+    }.get(status["level"], "#d4af37")
+
+    st.markdown(
+        f"""
+        <div style="
+            border:2px solid {border_color};
+            border-radius:18px;
+            padding:18px 20px;
+            margin:12px 0;
+            background:#fffdf8;
+            box-shadow:0 8px 24px rgba(0,0,0,0.06);
+        ">
+            <div style="font-size:15px;font-weight:800;color:#777;">{status['color']} {status['title']}</div>
+            <div style="font-size:30px;font-weight:900;line-height:1.15;margin-top:6px;">{status['cliente']}</div>
+            <div style="font-size:14px;color:#555;margin-top:4px;">{status['message']}</div>
+            <div style="display:flex;gap:24px;margin-top:14px;font-size:13px;color:#333;">
+                <div><b>Badge:</b> {badge_uid}</div>
+                <div><b>Ora:</b> {ora}</div>
+                <div><b>Data:</b> {data_txt}</div>
+                <div><b>Pacchetto:</b> {status.get('pacchetto') or '-'}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        if st.button("🧯 Annulla", key=f"{key_prefix}_annulla_{accesso_id}", use_container_width=True):
+            ok, msg = annulla_accesso_e_presenza(accesso_id, "Annullamento da Check-In Center")
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+    with c2:
+        if st.button("🔄 Sync badge", key=f"{key_prefix}_sync_{accesso_id}", use_container_width=True):
+            try:
+                n = sync_accessi_cliente_da_badge()
+                st.success(f"Accessi sincronizzati: {n}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore sync: {e}")
+
+    if note:
+        with st.expander("Nota tecnica"):
+            st.caption(note)
+
+
+def render_reception_accessi_smart_panel():
+    st.subheader("🚦 Check-In Center")
+    st.caption("Nuova logica: Accesso ≠ Presenza ≠ Consumo. Il tornello genera eventi; KREO interpreta e gestisce lezioni.")
+
+    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    if accessi.empty:
+        st.info("Nessun accesso letto al momento.")
         return
 
-    badge_uid = str(latest.get("badge_uid") or "").strip()
-    cliente = latest.get("cliente") or ""
-    stato = str(latest.get("stato_accesso") or "")
-    accesso_id = int(latest.get("id"))
+    accessi = kreo_accessi_con_cooldown(accessi, seconds=90)
+    clienti_map = kreo_cliente_summary_map()
 
-    c1, c2, c3, c4 = st.columns([1.1, 1.2, 1.2, 1.2])
-    with c1:
-        st.metric("Ultimo badge", badge_uid or "-")
-    with c2:
-        st.metric("Cliente", cliente if cliente else "Non associato")
-    with c3:
-        st.metric("Ora", str(latest.get("ora_accesso") or "-"))
-    with c4:
-        st.metric("Stato", stato or "-")
+    # Escludi annullati dalla vista principale
+    live = accessi.copy()
+    if "stato_accesso" in live.columns:
+        live = live[live["stato_accesso"].fillna("").astype(str).str.upper() != "ANNULLATO_DA_NON_RICALCOLARE"]
 
-    if not cliente:
-        st.warning("Badge non ancora associato a un cliente KREO.")
-    else:
-        st.success("Badge associato correttamente.")
+    if live.empty:
+        st.info("Nessun accesso attivo da mostrare.")
+        return
+
+    latest = live.sort_values("id", ascending=False).iloc[0].to_dict()
+
+    st.markdown("### Ultimo accesso")
+    render_checkin_event_card(latest, clienti_map, key_prefix="latest_checkin")
 
     st.markdown("---")
     st.markdown("### 🎟️ Associa ultimo badge letto")
+    badge_uid = str(latest.get("badge_uid") or "").strip()
+    current_cliente = latest.get("cliente") or ""
+
+    if current_cliente:
+        st.success(f"Ultimo badge già associato a: {current_cliente}")
+    else:
+        st.warning(f"Ultimo badge non associato: {badge_uid}")
 
     df_clienti = load_clienti()
     if not df_clienti.empty:
         labels = (df_clienti["id"].astype(str) + " - " + df_clienti["nome"].fillna("") + " " + df_clienti["cognome"].fillna("")).tolist()
-        selected_cliente = st.selectbox("Cliente da associare all’ultimo badge", labels, key="smart_associa_ultimo_badge_cliente")
+        selected_cliente = st.selectbox("Cliente da associare all’ultimo badge", labels, key="checkin_center_associa_cliente")
         cliente_id = int(selected_cliente.split(" - ")[0])
 
-        if st.button("🎟️ Associa ultimo badge letto al cliente selezionato", use_container_width=True, disabled=not bool(badge_uid), key="btn_associa_ultimo_badge"):
-            ok, msg = assegna_badge_cliente(cliente_id, badge_uid, f"Associazione rapida da ultimo accesso ID {accesso_id}")
+        if st.button("🎟️ Associa ultimo badge al cliente selezionato", use_container_width=True, disabled=not bool(badge_uid), key="checkin_center_associa_badge"):
+            ok, msg = assegna_badge_cliente(cliente_id, badge_uid, f"Associazione da Check-In Center - accesso ID {latest.get('id')}")
             if ok:
                 try:
                     n = sync_accessi_cliente_da_badge()
@@ -6785,35 +7030,20 @@ def render_reception_accessi_smart_panel():
                 st.rerun()
             else:
                 st.error(msg)
-    else:
-        st.info("Nessun cliente presente.")
 
     st.markdown("---")
-    st.markdown("### 🧯 Annulla ultimo accesso")
-    motivo = st.text_input("Motivo annullamento rapido", value="Test / accesso passato per errore", key="motivo_annulla_ultimo_accesso")
-    if st.button("🧯 Annulla ultimo accesso e presenza collegata", use_container_width=True, key="btn_annulla_ultimo_accesso"):
-        ok, msg = annulla_accesso_e_presenza(accesso_id, motivo)
-        if ok:
-            st.success(msg)
-            st.rerun()
-        else:
-            st.error(msg)
+    st.markdown("### Ultimi check-in")
+    recent = live.head(8).copy()
+    for _, r in recent.iterrows():
+        render_checkin_event_card(r.to_dict(), clienti_map, key_prefix=f"recent_{r.get('id')}")
 
-    st.markdown("---")
-    st.markdown("### Ultimi accessi")
-    accessi = enrich_accessi_with_cliente(load_accessi_tornello())
-    if not accessi.empty:
-        view = accessi.copy()
-        if "stato_accesso" in view.columns:
-            view = view[view["stato_accesso"].fillna("").astype(str).str.upper() != "ANNULLATO_DA_NON_RICALCOLARE"]
-        cols = ["id", "data_accesso_it", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "note"]
-        st.dataframe(view[[c for c in cols if c in view.columns]].head(10), use_container_width=True, hide_index=True)
-
-
+    with st.expander("Vista tecnica accessi"):
+        cols = ["id", "data_accesso_it", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "cooldown_duplicate", "note"]
+        st.dataframe(live[[c for c in cols if c in live.columns]].head(30), use_container_width=True, hide_index=True)
 
 def render_accessi_tornello_operativo_page():
-    st.header("Accessi tornello")
-    st.caption("Area reception semplificata: ultimo badge, associazione rapida, annullamento accessi e console.")
+    st.header("🚦 Check-In Center")
+    st.caption("Tornello, presenze e lezioni separati logicamente: evento → interpretazione → consumo.")
 
     if is_admin():
         c1, c2 = st.columns([1.2, 3])
@@ -6826,7 +7056,7 @@ def render_accessi_tornello_operativo_page():
             st.info("Il tornello/PerfectGym resta fonte evento. KREO decide cliente, alert e scarico lezioni.")
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "🛎️ Reception accessi",
+        "🚦 Check-In Center",
         "Registro accessi",
         "Badge clienti",
         "Console reception",
@@ -7546,7 +7776,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.18")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.19")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
