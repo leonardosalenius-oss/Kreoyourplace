@@ -7801,6 +7801,77 @@ def kreo_get_phone_from_row_safe(row):
     return ""
 
 
+
+def kreo_get_cliente_id_by_badge_uid_safe(badge_uid):
+    """
+    Risolve badge_uid -> cliente_id usando badge_clienti.
+    """
+    try:
+        if badge_uid in [None, "", "nan"]:
+            return None
+        badge = str(badge_uid).strip()
+
+        try:
+            res = supabase.table("badge_clienti").select("*").eq("badge_uid", badge).eq("attivo", True).limit(1).execute()
+            data = res.data or []
+            if data:
+                return data[0].get("cliente_id")
+        except Exception:
+            pass
+
+        res = supabase.table("badge_clienti").select("*").eq("badge_uid", badge).limit(1).execute()
+        data = res.data or []
+        if data:
+            return data[0].get("cliente_id")
+    except Exception:
+        pass
+    return None
+
+
+def kreo_resolve_access_client_row(row):
+    """
+    Risolve correttamente cliente da accesso tornello:
+    cliente_id -> badge_uid -> badge_clienti -> cliente.
+    Non usa id accesso come id cliente.
+    """
+    try:
+        out = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        out = {}
+
+    cid = out.get("cliente_id") or out.get("id_cliente")
+    if cid in [None, "", "nan"] or str(cid).lower() == "nan":
+        cid = kreo_get_cliente_id_by_badge_uid_safe(out.get("badge_uid"))
+
+    anag = {}
+    if cid not in [None, "", "nan"] and str(cid).lower() != "nan":
+        anag = kreo_get_cliente_by_id_safe(cid)
+
+    if cid not in [None, "", "nan"] and str(cid).lower() != "nan":
+        out["cliente_id"] = cid
+
+    for k, v in anag.items():
+        if k not in out or out.get(k) in [None, "", "nan"]:
+            out[k] = v
+
+    nome = str(out.get("nome") or "").strip()
+    cognome = str(out.get("cognome") or "").strip()
+    if nome or cognome:
+        out["cliente"] = (nome + " " + cognome).strip()
+
+    return out
+
+
+def render_accessi_tornello_inline_from_reception():
+    """
+    Vista tornello renderizzata direttamente dentro Reception.
+    """
+    if st.button("⬅️ Torna alla Reception", key="tornello_inline_back"):
+        st.session_state["reception_internal_view"] = None
+        st.rerun()
+    render_accessi_tornello_operativo_page()
+
+
 def render_kreo_alert_cards(label, df, alert_type="generico"):
     st.markdown(f"#### {label}")
 
@@ -7812,8 +7883,10 @@ def render_kreo_alert_cards(label, df, alert_type="generico"):
     st.caption(f"{len(df)} elementi trovati. Mostro i primi {max_cards}.")
 
     for idx, (_, r) in enumerate(df.head(max_cards).iterrows(), start=1):
-        full_r = kreo_get_full_client_row_safe(r)
+        full_r = kreo_resolve_access_client_row(r) if alert_type == "badge" else kreo_get_full_client_row_safe(r)
         cliente = kreo_client_display(full_r)
+        if alert_type == "badge" and not full_r.get("cliente_id"):
+            cliente = f"Badge non associato {full_r.get('badge_uid') or ''}".strip()
         telefono = kreo_get_phone_from_row_safe(full_r)
         pacchetto = full_r.get("pacchetto") or ""
         scadenza = full_r.get("scadenza_abbonamento") or full_r.get("scadenza") or full_r.get("data_accesso_it") or full_r.get("data_accesso") or ""
@@ -8007,6 +8080,11 @@ def kreo_alerts_dataframes():
 
         cols = [c for c in ["id", "data_accesso_it", "data_accesso", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "note"] if c in worka.columns]
         badge_df = worka[mask][cols].copy()
+        try:
+            if not badge_df.empty:
+                badge_df = pd.DataFrame([kreo_resolve_access_client_row(rr) for _, rr in badge_df.iterrows()])
+        except Exception:
+            pass
 
     return {
         "certificati": cert_df,
@@ -8215,6 +8293,10 @@ def render_reception_center():
         render_alert_center_page()
         return
 
+    if st.session_state.get("reception_internal_view") == "tornello":
+        render_accessi_tornello_inline_from_reception()
+        return
+
     st.header("🏠 Reception Center")
     st.caption("Operatività quotidiana: clienti, incassi, tornello, agenda e comunicazioni.")
 
@@ -8256,7 +8338,8 @@ def render_reception_center():
         c4, c5, c6 = st.columns(3)
         with c4:
             if st.button("🚦 Accesso tornello", use_container_width=True, key="rc_btn_tornello"):
-                kreo_open_tornello_direct()
+                st.session_state["reception_internal_view"] = "tornello"
+                st.rerun()
         with c5:
             if st.button("📅 Agenda / Calendario", use_container_width=True, key="rc_btn_agenda"):
                 kreo_go_to("✨ Agenda Luxury")
@@ -8542,7 +8625,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.28")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.29")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
