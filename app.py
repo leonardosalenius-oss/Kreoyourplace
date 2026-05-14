@@ -6758,12 +6758,12 @@ def kreo_cliente_summary_map():
             cognome = str(r.get("cognome") or "").strip()
             out[cid] = {
                 "cliente": (nome + " " + cognome).strip() or f"Cliente {cid}",
-                "pacchetto": str(r.get("pacchetto") or ""),
+                "pacchetto": str(full_r.get("pacchetto") or ""),
                 "lezioni_utilizzate": r.get("lezioni_utilizzate"),
                 "numero_lezioni": r.get("numero_lezioni") or r.get("numero_lezioni_totali"),
                 "lezioni_residue": r.get("lezioni_residue"),
                 "certificato": r.get("certificato_medico") or r.get("certificato") or r.get("certificato_scadenza"),
-                "residuo": r.get("residuo") or r.get("residuo_totale") or r.get("importo_residuo"),
+                "residuo": full_r.get("residuo") or full_r.get("residuo_totale") or full_r.get("importo_residuo"),
             }
         return out
     except Exception:
@@ -6799,7 +6799,7 @@ def kreo_accessi_con_cooldown(df, seconds=90):
         prev_dir = None
 
         for idx, r in out.iterrows():
-            badge = str(r.get("badge_uid") or "")
+            badge = str(full_r.get("badge_uid") or "")
             dtv = r.get("_dt_accesso")
             tornello = str(r.get("tornello") or "")
             direzione = str(r.get("direzione") or "")
@@ -7499,7 +7499,7 @@ def render_agenda_light_launch():
                 cliente = f"Cliente ID {r.get('cliente_id')}"
 
             stato = str(r.get("stato") or "")
-            pac = str(r.get("pacchetto") or "")
+            pac = str(full_r.get("pacchetto") or "")
             trainer = str(r.get("trainer") or "")
             ora_inizio = str(r.get("ora_inizio") or "")[:5]
             ora_fine = str(r.get("ora_fine") or "")[:5]
@@ -7600,10 +7600,10 @@ def render_kreo_welcome_banner():
             padding:14px 20px;
             margin:6px 0 20px 0;
             box-shadow:0 10px 26px rgba(0,0,0,.18);
-            color:#ffffff !important;
+            color:#ffffff !important; opacity:1 !important;
         ">
             <div style="font-size:12px;color:#d4af37;font-weight:900;letter-spacing:.04em;">KREO OPERATING SYSTEM</div>
-            <div style="font-size:24px;font-weight:950;line-height:1.25;color:#ffffff !important;">Benvenuto, {nome}</div>
+            <div style="font-size:24px;font-weight:950;line-height:1.25;color:#ffffff !important; opacity:1 !important;">Benvenuto, {nome}</div>
             <div style="font-size:12px;color:#eeeeee !important;">Area operativa attiva{role_txt}</div>
         </div>
         """,
@@ -7640,6 +7640,213 @@ def kreo_whatsapp_url(phone, message):
     return f"https://wa.me/?text={msg}"
 
 
+
+
+def kreo_row_get_ci(row, names, default=""):
+    try:
+        data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        data = {}
+    lower_map = {str(k).lower().strip(): k for k in data.keys()}
+    for name in names:
+        key = lower_map.get(str(name).lower().strip())
+        if key is not None:
+            val = data.get(key)
+            if val not in [None, "", "nan"] and str(val).strip():
+                return val
+    return default
+
+
+def kreo_phone_candidate_names():
+    return [
+        "cellulare", "telefono", "phone", "mobile", "whatsapp",
+        "numero", "numero_cellulare", "tel", "contatto",
+        "telefono_cliente", "cell", "recapito", "cellulare_cliente"
+    ]
+
+
+def kreo_get_cliente_by_id(cliente_id):
+    try:
+        if cliente_id in [None, "", "nan"]:
+            return {}
+        clienti = load_clienti()
+        if clienti.empty or "id" not in clienti.columns:
+            return {}
+        cid = int(float(cliente_id))
+        sub = clienti[pd.to_numeric(clienti["id"], errors="coerce") == cid]
+        if sub.empty:
+            return {}
+        return sub.iloc[0].to_dict()
+    except Exception:
+        return {}
+
+
+def kreo_find_cliente_by_name(nome=None, cognome=None, cliente=None):
+    try:
+        clienti = load_clienti()
+        if clienti.empty:
+            return {}
+
+        n = str(nome or "").strip().lower()
+        c = str(cognome or "").strip().lower()
+        full = str(cliente or "").strip().lower()
+
+        work = clienti.copy()
+        if "nome" not in work.columns:
+            work["nome"] = ""
+        if "cognome" not in work.columns:
+            work["cognome"] = ""
+
+        work["_full"] = (work["nome"].fillna("").astype(str) + " " + work["cognome"].fillna("").astype(str)).str.strip().str.lower()
+
+        if n or c:
+            mask = (work["nome"].fillna("").astype(str).str.lower().str.strip() == n) & (work["cognome"].fillna("").astype(str).str.lower().str.strip() == c)
+            sub = work[mask]
+            if not sub.empty:
+                return sub.iloc[0].to_dict()
+
+        if full:
+            sub = work[work["_full"] == full]
+            if not sub.empty:
+                return sub.iloc[0].to_dict()
+            sub = work[work["_full"].str.contains(re.escape(full), na=False)]
+            if not sub.empty:
+                return sub.iloc[0].to_dict()
+    except Exception:
+        pass
+    return {}
+
+
+def kreo_get_phone_from_row(row):
+    candidates = kreo_phone_candidate_names()
+
+    val = kreo_row_get_ci(row, candidates, "")
+    if val:
+        return str(val).strip()
+
+    cid = kreo_row_get_ci(row, ["cliente_id", "id_cliente"], "")
+    anag = kreo_get_cliente_by_id(cid)
+    val = kreo_row_get_ci(anag, candidates, "")
+    if val:
+        return str(val).strip()
+
+    cid2 = kreo_row_get_ci(row, ["id"], "")
+    anag = kreo_get_cliente_by_id(cid2)
+    val = kreo_row_get_ci(anag, candidates, "")
+    if val:
+        return str(val).strip()
+
+    nome = kreo_row_get_ci(row, ["nome"], "")
+    cognome = kreo_row_get_ci(row, ["cognome"], "")
+    cliente = kreo_row_get_ci(row, ["cliente"], "")
+    anag = kreo_find_cliente_by_name(nome=nome, cognome=cognome, cliente=cliente)
+    val = kreo_row_get_ci(anag, candidates, "")
+    if val:
+        return str(val).strip()
+
+    return ""
+
+
+def kreo_get_full_client_row(row):
+    try:
+        out = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        out = {}
+
+    cid = out.get("cliente_id") or out.get("id_cliente")
+    anag = kreo_get_cliente_by_id(cid)
+
+    if not anag:
+        anag = kreo_get_cliente_by_id(out.get("id"))
+
+    if not anag:
+        anag = kreo_find_cliente_by_name(
+            nome=out.get("nome"),
+            cognome=out.get("cognome"),
+            cliente=out.get("cliente")
+        )
+
+    for k, v in anag.items():
+        if k not in out or out.get(k) in [None, "", "nan"]:
+            out[k] = v
+    return out
+
+
+def kreo_load_company_config():
+    defaults = {
+        "ragione_sociale": "GENESIS SRLS",
+        "brand": "KREO Your Place",
+        "partita_iva": "",
+        "codice_fiscale": "",
+        "pec": "",
+        "email": "",
+        "telefono": "",
+        "whatsapp": "",
+        "sede_legale": "",
+        "sede_operativa": "",
+        "iban": "",
+        "codice_sdi": "",
+        "rea": "",
+        "note": "",
+    }
+    try:
+        res = supabase.table("azienda_config").select("*").limit(1).execute()
+        data = res.data or []
+        if not data:
+            return defaults
+        row = data[0] or {}
+        cfg = defaults.copy()
+        if "chiave" in row and "valore" in row:
+            try:
+                all_rows = supabase.table("azienda_config").select("*").execute().data or []
+                for rr in all_rows:
+                    k = rr.get("chiave")
+                    if k:
+                        cfg[str(k)] = rr.get("valore") or ""
+                return cfg
+            except Exception:
+                return cfg
+        for k in cfg.keys():
+            if k in row and row.get(k) is not None:
+                cfg[k] = row.get(k)
+        aliases = {
+            "ragione_sociale": ["ragione", "azienda", "societa", "nome_azienda"],
+            "brand": ["brand_nome", "insegna", "nome_commerciale"],
+            "partita_iva": ["piva", "iva", "partitaiva"],
+            "codice_fiscale": ["cf", "cod_fiscale"],
+            "sede_legale": ["indirizzo_legale", "legale"],
+            "sede_operativa": ["indirizzo_operativo", "operativa"],
+            "codice_sdi": ["sdi", "cod_sdi"],
+        }
+        for target, keys in aliases.items():
+            if not cfg.get(target):
+                for kk in keys:
+                    if row.get(kk):
+                        cfg[target] = row.get(kk)
+                        break
+        return cfg
+    except Exception:
+        return defaults
+
+
+def kreo_company_preview_text():
+    cfg = kreo_load_company_config()
+    parts = [
+        f"{cfg.get('ragione_sociale','')} | {cfg.get('brand','')}",
+        f"P.IVA {cfg.get('partita_iva','')}",
+        f"CF {cfg.get('codice_fiscale','')}",
+        f"Sede legale: {cfg.get('sede_legale','')}",
+        f"Sede operativa: {cfg.get('sede_operativa','')}",
+        f"Email: {cfg.get('email','')}",
+        f"PEC: {cfg.get('pec','')}",
+        f"Tel: {cfg.get('telefono','')}",
+        f"WhatsApp: {cfg.get('whatsapp','')}",
+        f"IBAN: {cfg.get('iban','')}",
+        f"SDI: {cfg.get('codice_sdi','')}",
+        f"REA: {cfg.get('rea','')}",
+    ]
+    return " | ".join([p for p in parts if p and not p.endswith(": ") and not p.endswith(" ")])
+
 def render_kreo_alert_cards(label, df, alert_type="generico"):
     st.markdown(f"#### {label}")
 
@@ -7651,13 +7858,14 @@ def render_kreo_alert_cards(label, df, alert_type="generico"):
     st.caption(f"{len(df)} elementi trovati. Mostro i primi {max_cards}.")
 
     for idx, (_, r) in enumerate(df.head(max_cards).iterrows(), start=1):
-        cliente = kreo_client_display(r)
-        telefono = r.get("cellulare") or r.get("telefono") or r.get("phone") or ""
-        pacchetto = r.get("pacchetto") or ""
-        scadenza = r.get("scadenza_abbonamento") or r.get("scadenza") or r.get("data_accesso_it") or r.get("data_accesso") or ""
-        badge = r.get("badge_uid") or ""
-        stato = r.get("stato_accesso") or ""
-        residuo = r.get("residuo") or r.get("residuo_totale") or r.get("importo_residuo") or r.get("saldo_aperto") or ""
+        full_r = kreo_get_full_client_row(r)
+        cliente = kreo_client_display(full_r)
+        telefono = kreo_get_phone_from_row(full_r)
+        pacchetto = full_r.get("pacchetto") or ""
+        scadenza = full_r.get("scadenza_abbonamento") or full_r.get("scadenza") or full_r.get("data_accesso_it") or full_r.get("data_accesso") or ""
+        badge = full_r.get("badge_uid") or ""
+        stato = full_r.get("stato_accesso") or ""
+        residuo = full_r.get("residuo") or full_r.get("residuo_totale") or full_r.get("importo_residuo") or full_r.get("saldo_aperto") or ""
 
         if alert_type == "certificati":
             msg = f"Ciao {cliente}, ti ricordiamo di consegnare o aggiornare il certificato medico per completare la tua posizione in KREO. Grazie."
@@ -7690,7 +7898,7 @@ def render_kreo_alert_cards(label, df, alert_type="generico"):
                 <div style="font-size:18px;font-weight:950;color:#111;">{idx}. {cliente}</div>
                 <div style="font-size:13px;color:#444;margin-top:4px;"><b>Motivo:</b> {motivo}</div>
                 <div style="font-size:12px;color:#666;margin-top:4px;">
-                    Pacchetto: {pacchetto or "-"} · Tel: {telefono or "non presente"} · Badge: {badge or "-"}
+                    Pacchetto: {pacchetto or "-"} · Tel: {telefono or "selezione manuale su WhatsApp"} · Badge: {badge or "-"}
                 </div>
             </div>
             """,
@@ -7699,7 +7907,7 @@ def render_kreo_alert_cards(label, df, alert_type="generico"):
 
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.link_button("💬 WhatsApp alert", wa, use_container_width=True, disabled=not bool(telefono))
+            st.link_button("💬 WhatsApp alert", wa, use_container_width=True)
         with c2:
             if st.button("✏️ Apri modifica cliente", key=f"alert_mod_cliente_{alert_type}_{idx}_{r.get('id', '')}", use_container_width=True):
                 if r.get("id") not in [None, ""]:
@@ -7731,7 +7939,7 @@ def render_messaggio_cliente_page():
     r = clienti[clienti["id"].astype(int) == cid].iloc[0]
 
     cliente = kreo_client_display(r)
-    telefono = r.get("cellulare") or ""
+    telefono = kreo_get_phone_from_row(r)
 
     tipo = st.selectbox(
         "Tipo messaggio",
@@ -7748,11 +7956,12 @@ def render_messaggio_cliente_page():
     }
 
     messaggio = st.text_area("Messaggio", value=templates.get(tipo, ""), height=140, key="msg_cliente_testo")
+    telefono = st.text_input("Numero WhatsApp", value=str(telefono or ""), key="msg_cliente_phone_override")
     wa_url = kreo_whatsapp_url(telefono, messaggio)
 
     st.markdown(f"**Cliente:** {cliente}")
     st.markdown(f"**Cellulare:** {telefono or 'non presente'}")
-    st.link_button("📲 Apri WhatsApp", wa_url, use_container_width=True, disabled=not bool(telefono))
+    st.link_button("📲 Apri WhatsApp", wa_url, use_container_width=True)
 
 
 def kreo_alerts_dataframes():
@@ -7778,7 +7987,9 @@ def kreo_alerts_dataframes():
 
     if not clienti.empty:
         work = clienti.copy()
-        name_cols = [c for c in ["id", "nome", "cognome", "cellulare", "pacchetto", "scadenza_abbonamento", "certificato_medico", "scadenza_certificato", "residuo", "residuo_totale", "importo_residuo", "saldo_aperto"] if c in work.columns]
+        base_cols = ["id", "nome", "cognome", "pacchetto", "scadenza_abbonamento", "certificato_medico", "scadenza_certificato", "residuo", "residuo_totale", "importo_residuo", "saldo_aperto"]
+        phone_cols = [c for c in work.columns if any(x in c.lower() for x in ["cell", "tel", "phone", "whatsapp", "mobile", "contatto", "recapito"])]
+        name_cols = [c for c in base_cols + phone_cols if c in work.columns]
 
         # Certificati mancanti/scaduti: prova colonne diverse.
         masks = []
@@ -8242,7 +8453,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.23")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.25")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
