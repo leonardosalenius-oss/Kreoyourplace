@@ -4709,6 +4709,7 @@ def render_v32_navigation():
 
     forced = st.session_state.get("kreo_force_menu")
     forced_macro_map = {
+        "🏠 Reception Center": "🛎️ Reception",
         "🛎️ Reception rapida": "🛎️ Reception",
         "🚪 Accessi tornello": "🛎️ Reception",
         "➕ Nuovo cliente": "👤 Clienti",
@@ -4731,7 +4732,7 @@ def render_v32_navigation():
     macro = st.sidebar.radio("Sezione", allowed_macros, key="v32_macro_nav")
 
     submenu_map = {
-        "🛎️ Reception": ["🛎️ Reception rapida", "🚪 Accessi tornello", "🚨 Alert clienti", "📲 Notifiche WhatsApp"],
+        "🛎️ Reception": ["🏠 Reception Center"],
         "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati", "👤 Area Cliente", "🕘 Cronologia"],
         "📅 Agenda": ["✨ Agenda Luxury", "🗓 Calendario unificato", "📅 Calendario lezioni"],
         "💳 Incassi": ["💳 Gestione incassi", "🧾 Stampa ricevuta"],
@@ -4742,7 +4743,7 @@ def render_v32_navigation():
     items = submenu_map.get(macro, ["🛎️ Reception rapida"])
 
     if is_reception_limited_user():
-        allowed_items = {"🛎️ Reception rapida", "🚪 Accessi tornello", "🚨 Alert clienti", "📲 Notifiche WhatsApp", "✨ Agenda Luxury", "🗓 Calendario unificato", "📅 Calendario lezioni"}
+        allowed_items = {"🏠 Reception Center", "✨ Agenda Luxury", "🗓 Calendario unificato", "📅 Calendario lezioni"}
         items = [x for x in items if x in allowed_items]
 
     if not is_admin() and not is_rosario_user():
@@ -4750,7 +4751,7 @@ def render_v32_navigation():
         items = [x for x in items if x not in hidden]
 
     if not items:
-        items = ["🛎️ Reception rapida"]
+        items = ["🏠 Reception Center"]
 
     forced = st.session_state.pop("kreo_force_menu", None)
     index = 0
@@ -7543,6 +7544,197 @@ def render_agenda_light_launch():
             st.session_state["kreo_force_menu"] = "🗓 Calendario unificato"
             st.rerun()
 
+
+def kreo_go_to(menu_name):
+    st.session_state["kreo_force_menu"] = menu_name
+    st.rerun()
+
+
+def render_reception_alert_side_panel():
+    st.markdown("### 🚨 Alert live")
+
+    try:
+        clienti = load_clienti()
+    except Exception:
+        clienti = pd.DataFrame()
+
+    try:
+        accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    except Exception:
+        accessi = pd.DataFrame()
+
+    alert_cert = 0
+    alert_scadenze = 0
+    alert_residui = 0
+    alert_badge = 0
+
+    if not clienti.empty:
+        today = date.today()
+
+        cert_cols = [c for c in clienti.columns if "cert" in c.lower()]
+        for c in cert_cols:
+            try:
+                vals = pd.to_datetime(clienti[c], errors="coerce").dt.date
+                alert_cert = max(alert_cert, int((vals < today).sum()))
+            except Exception:
+                pass
+
+        for c in ["scadenza_abbonamento", "data_scadenza_abbonamento", "scadenza"]:
+            if c in clienti.columns:
+                try:
+                    vals = pd.to_datetime(clienti[c], errors="coerce").dt.date
+                    alert_scadenze = int(((vals >= today) & (vals <= today + timedelta(days=15))).sum())
+                    break
+                except Exception:
+                    pass
+
+        for c in ["residuo", "residuo_totale", "importo_residuo", "saldo_aperto"]:
+            if c in clienti.columns:
+                try:
+                    nums = pd.to_numeric(clienti[c], errors="coerce").fillna(0)
+                    alert_residui = int((nums > 0).sum())
+                    break
+                except Exception:
+                    pass
+
+    if not accessi.empty:
+        if "cliente_id" in accessi.columns:
+            try:
+                alert_badge = int(accessi["cliente_id"].isna().sum())
+            except Exception:
+                pass
+        if "stato_accesso" in accessi.columns:
+            try:
+                stato = accessi["stato_accesso"].fillna("").astype(str).str.upper()
+                alert_badge = max(alert_badge, int(stato.str.contains("VERIFICARE|NEGATO|NON_ASSOCIATO", regex=True).sum()))
+            except Exception:
+                pass
+
+    cards = [
+        ("🔴", "Certificati", alert_cert),
+        ("🟡", "Scadenze 15 gg", alert_scadenze),
+        ("💳", "Residui aperti", alert_residui),
+        ("🚦", "Badge/accessi", alert_badge),
+    ]
+
+    for icon, label, value in cards:
+        border = "#e74c3c" if value else "#d4af37"
+        bg = "#fff7f7" if value else "#fffdf5"
+        st.markdown(
+            f"""
+            <div style="
+                border:1.5px solid {border};
+                border-radius:14px;
+                background:{bg};
+                padding:12px 14px;
+                margin-bottom:10px;
+                box-shadow:0 4px 14px rgba(0,0,0,0.04);
+            ">
+                <div style="font-size:13px;color:#555;font-weight:700;">{icon} {label}</div>
+                <div style="font-size:28px;font-weight:900;line-height:1.1;">{value}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.caption("Pannello compatto: priorità operative.")
+
+
+def render_reception_center():
+    st.header("🏠 Reception Center")
+    st.caption("Operatività quotidiana: clienti, incassi, tornello, agenda e comunicazioni.")
+
+    left, right = st.columns([3.6, 1.15], gap="large")
+
+    with left:
+        st.markdown("""
+        <style>
+        .kreo-reception-note {
+            background: #fff9e8;
+            border: 1px solid rgba(212,175,55,.55);
+            border-radius: 14px;
+            padding: 12px 14px;
+            margin-bottom: 18px;
+            color: #111;
+            font-weight: 650;
+        }
+        div[data-testid="stButton"] button {
+            border-radius: 14px !important;
+            min-height: 54px !important;
+            font-weight: 900 !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        st.markdown('<div class="kreo-reception-note">Scegli direttamente l’azione. Nessun sotto-menu: la Reception deve essere rapida e impossibile da sbagliare.</div>', unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("➕ Nuovo cliente", use_container_width=True, key="rc_btn_nuovo_cliente"):
+                kreo_go_to("➕ Nuovo cliente")
+        with c2:
+            if st.button("✏️ Modifica cliente", use_container_width=True, key="rc_btn_modifica_cliente"):
+                kreo_go_to("✏️ Modifica cliente")
+        with c3:
+            if st.button("💳 Registra incasso", use_container_width=True, key="rc_btn_incasso"):
+                kreo_go_to("💳 Gestione incassi")
+
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            if st.button("🚦 Accesso tornello", use_container_width=True, key="rc_btn_tornello"):
+                kreo_go_to("🚪 Accessi tornello")
+        with c5:
+            if st.button("📅 Agenda / Calendario", use_container_width=True, key="rc_btn_agenda"):
+                kreo_go_to("✨ Agenda Luxury")
+        with c6:
+            if st.button("🧾 Stampa ricevuta", use_container_width=True, key="rc_btn_ricevuta"):
+                kreo_go_to("🧾 Stampa ricevuta")
+
+        c7, c8, c9 = st.columns(3)
+        with c7:
+            if st.button("💬 Messaggio cliente", use_container_width=True, key="rc_btn_messaggio"):
+                kreo_go_to("📲 Notifiche WhatsApp")
+        with c8:
+            st.empty()
+        with c9:
+            st.empty()
+
+        st.markdown("---")
+        st.markdown("### Attività rapide")
+
+        try:
+            accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+        except Exception:
+            accessi = pd.DataFrame()
+
+        if not accessi.empty:
+            try:
+                accessi["id_num"] = pd.to_numeric(accessi["id"], errors="coerce").fillna(0).astype(int)
+                ultimo = accessi.sort_values("id_num", ascending=False).iloc[0]
+                cliente = ultimo.get("cliente") or "Badge da associare"
+                ora = ultimo.get("ora_accesso") or "-"
+                stato = ultimo.get("stato_accesso") or "-"
+                st.info(f"🚦 Ultimo check-in: **{cliente}** — {ora} — {stato}")
+            except Exception:
+                pass
+
+        try:
+            lez = load_lezioni()
+            if not lez.empty and "data_lezione" in lez.columns:
+                oggi_str = str(date.today())
+                today_lessons = lez[lez["data_lezione"].astype(str) == oggi_str].copy()
+                st.markdown("#### Agenda oggi")
+                if today_lessons.empty:
+                    st.caption("Nessuna lezione prevista oggi.")
+                else:
+                    cols = [c for c in ["ora_inizio", "ora_fine", "cliente_id", "trainer", "stato"] if c in today_lessons.columns]
+                    st.dataframe(today_lessons[cols].head(8), use_container_width=True, hide_index=True)
+        except Exception:
+            pass
+
+    with right:
+        render_reception_alert_side_panel()
+
 def render_reception_rapida():
     st.header("🛎️ Reception rapida")
     st.caption("Pannello operativo immediato: pochi pulsanti, azioni chiare, zero complessità.")
@@ -7776,7 +7968,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.19")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.20")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
