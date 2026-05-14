@@ -7121,77 +7121,161 @@ def kreo_go_to(menu_name):
     st.session_state["kreo_force_menu"] = menu_name
     st.rerun()
 
+
 def render_agenda_light_launch():
     """
     Agenda veloce per lancio:
-    niente calendario JS pesante, solo timeline operativa.
+    - default 3 giorni;
+    - vista timeline semplice;
+    - niente calendario JS pesante;
+    - robusta anche se alcune colonne mancano.
     """
     st.header("✨ Agenda Luxury")
-    st.caption("Vista veloce per reception e staff. Il calendario completo resta disponibile come vista avanzata.")
+    st.caption("Vista veloce per reception e staff. Default: ultimi/prossimi 3 giorni. Il calendario completo resta in vista avanzata.")
 
     oggi = date.today()
-    c1, c2, c3 = st.columns([1, 1, 2])
-    with c1:
-        giorni = st.selectbox("Periodo", [1, 3, 7, 14], index=2, key="agenda_light_giorni")
-    with c2:
-        solo_oggi = st.checkbox("Solo oggi", value=False, key="agenda_light_solo_oggi")
-    with c3:
-        filtro_testo = st.text_input("Cerca cliente/trainer", placeholder="es. Rossi, Vincenzo...", key="agenda_light_search")
 
-    giorni_effettivi = 1 if solo_oggi else int(giorni)
-    data_fine = oggi + timedelta(days=giorni_effettivi - 1)
+    c1, c2, c3 = st.columns([1.2, 1.2, 2])
+    with c1:
+        periodo = st.selectbox(
+            "Periodo",
+            ["Ultimi 3 giorni", "Oggi", "Prossimi 3 giorni", "Prossimi 7 giorni", "Prossimi 14 giorni"],
+            index=0,
+            key="agenda_light_periodo_v2"
+        )
+    with c2:
+        stato_filtro = st.selectbox(
+            "Stato",
+            ["Tutti", "Prenotati/Richieste", "Presenti", "Non presenti"],
+            index=0,
+            key="agenda_light_stato_v2"
+        )
+    with c3:
+        filtro_testo = st.text_input(
+            "Cerca cliente/trainer",
+            placeholder="es. Rossi, Vincenzo...",
+            key="agenda_light_search_v2"
+        )
+
+    if periodo == "Ultimi 3 giorni":
+        data_inizio = oggi - timedelta(days=2)
+        data_fine = oggi
+    elif periodo == "Oggi":
+        data_inizio = oggi
+        data_fine = oggi
+    elif periodo == "Prossimi 3 giorni":
+        data_inizio = oggi
+        data_fine = oggi + timedelta(days=2)
+    elif periodo == "Prossimi 7 giorni":
+        data_inizio = oggi
+        data_fine = oggi + timedelta(days=6)
+    else:
+        data_inizio = oggi
+        data_fine = oggi + timedelta(days=13)
 
     try:
         lez = load_lezioni()
-    except Exception:
-        lez = pd.DataFrame()
+    except Exception as e:
+        st.error(f"Errore caricamento lezioni: {e}")
+        return
 
     if lez.empty:
         st.info("Nessuna lezione presente.")
         return
 
     view = lez.copy()
-    view["data_dt"] = pd.to_datetime(view["data_lezione"], errors="coerce").dt.date
-    view = view[(view["data_dt"] >= oggi) & (view["data_dt"] <= data_fine)]
 
+    # Colonne minime sicure
+    for col in ["id", "cliente_id", "data_lezione", "ora_inizio", "ora_fine", "trainer", "stato", "note"]:
+        if col not in view.columns:
+            view[col] = ""
+
+    view["data_dt"] = pd.to_datetime(view["data_lezione"], errors="coerce").dt.date
+    view = view[(view["data_dt"] >= data_inizio) & (view["data_dt"] <= data_fine)]
+
+    # Merge clienti leggero e robusto
     try:
         clienti = load_clienti()
         if not clienti.empty:
-            cols = [c for c in ["id", "nome", "cognome", "pacchetto", "lezioni_utilizzate", "numero_lezioni"] if c in clienti.columns]
-            cm = clienti[cols].copy()
-            cm["cliente"] = cm.get("nome", "").fillna("") + " " + cm.get("cognome", "").fillna("")
+            for col in ["id", "nome", "cognome", "pacchetto", "lezioni_utilizzate", "numero_lezioni"]:
+                if col not in clienti.columns:
+                    clienti[col] = "" if col not in ["id", "lezioni_utilizzate", "numero_lezioni"] else 0
+
+            cm = clienti[["id", "nome", "cognome", "pacchetto", "lezioni_utilizzate", "numero_lezioni"]].copy()
+            cm["cliente"] = cm["nome"].fillna("").astype(str) + " " + cm["cognome"].fillna("").astype(str)
             view["cliente_id"] = pd.to_numeric(view["cliente_id"], errors="coerce").astype("Int64")
             cm["id"] = pd.to_numeric(cm["id"], errors="coerce").astype("Int64")
-            merge_cols = [c for c in ["id", "cliente", "pacchetto", "lezioni_utilizzate", "numero_lezioni"] if c in cm.columns]
-            view = view.merge(cm[merge_cols], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
-    except Exception:
-        if "cliente" not in view.columns:
+            view = view.merge(
+                cm[["id", "cliente", "pacchetto", "lezioni_utilizzate", "numero_lezioni"]],
+                left_on="cliente_id",
+                right_on="id",
+                how="left",
+                suffixes=("", "_cliente")
+            )
+        else:
             view["cliente"] = ""
+            view["pacchetto"] = ""
+    except Exception:
+        view["cliente"] = ""
+        view["pacchetto"] = ""
 
+    if "cliente" not in view.columns:
+        view["cliente"] = ""
+    if "pacchetto" not in view.columns:
+        view["pacchetto"] = ""
+
+    # Filtro stato
+    stato_upper = view["stato"].fillna("").astype(str).str.upper()
+    if stato_filtro == "Prenotati/Richieste":
+        view = view[stato_upper.str.contains("PRENOT|RICHIESTA|CONFERM", regex=True, na=False)]
+    elif stato_filtro == "Presenti":
+        view = view[stato_upper == "PRESENTE"]
+    elif stato_filtro == "Non presenti":
+        view = view[stato_upper != "PRESENTE"]
+
+    # Filtro testo
     if filtro_testo:
         f = filtro_testo.strip().lower()
-        cliente_series = view["cliente"].fillna("").astype(str) if "cliente" in view.columns else pd.Series([""] * len(view))
-        trainer_series = view["trainer"].fillna("").astype(str) if "trainer" in view.columns else pd.Series([""] * len(view))
-        view = view[cliente_series.str.lower().str.contains(f, na=False) | trainer_series.str.lower().str.contains(f, na=False)]
+        cliente_series = view["cliente"].fillna("").astype(str)
+        trainer_series = view["trainer"].fillna("").astype(str)
+        view = view[
+            cliente_series.str.lower().str.contains(f, na=False) |
+            trainer_series.str.lower().str.contains(f, na=False)
+        ]
 
     if view.empty:
         st.info("Nessuna lezione trovata nel periodo selezionato.")
+        with st.expander("Vista avanzata calendario"):
+            if st.button("Apri calendario completo", key="open_full_calendar_from_light_empty"):
+                st.session_state["kreo_force_menu"] = "🗓 Calendario unificato"
+                st.rerun()
         return
 
     view = view.sort_values(["data_lezione", "ora_inizio"]).copy()
-    st.markdown("### Timeline operativa")
+
+    st.markdown(
+        f"### Timeline operativa — {format_date_it(data_inizio)} / {format_date_it(data_fine)}"
+    )
 
     for data_val, group in view.groupby("data_lezione"):
         st.markdown(f"#### {format_date_it(data_val)}")
+
         for _, r in group.iterrows():
-            cliente = r.get("cliente") or f"Cliente ID {r.get('cliente_id')}"
+            cliente = (r.get("cliente") or "").strip() if isinstance(r.get("cliente"), str) else str(r.get("cliente") or "")
+            if not cliente:
+                cliente = f"Cliente ID {r.get('cliente_id')}"
+
             stato = str(r.get("stato") or "")
             pac = str(r.get("pacchetto") or "")
             trainer = str(r.get("trainer") or "")
-            ora = f"{str(r.get('ora_inizio') or '')[:5]} - {str(r.get('ora_fine') or '')[:5]}"
+            ora_inizio = str(r.get("ora_inizio") or "")[:5]
+            ora_fine = str(r.get("ora_fine") or "")[:5]
+            ora = f"{ora_inizio} - {ora_fine}".strip(" -")
             note = str(r.get("note") or "")
 
-            badge = "🟢" if stato.upper() == "PRESENTE" else ("🟡" if "RICHIESTA" in stato.upper() else "⚪")
+            stato_norm = stato.upper()
+            badge = "🟢" if stato_norm == "PRESENTE" else ("🟡" if ("RICHIESTA" in stato_norm or "PRENOT" in stato_norm or "CONFERM" in stato_norm) else "⚪")
+
             with st.container(border=True):
                 c1, c2, c3, c4 = st.columns([1.1, 2.4, 1.6, 1.4])
                 with c1:
@@ -7202,29 +7286,32 @@ def render_agenda_light_launch():
                         st.caption(pac)
                 with c3:
                     st.markdown(trainer or "Trainer non indicato")
-                    st.caption(stato)
+                    st.caption(stato or "Stato non indicato")
                 with c4:
-                    if st.button("✅ Presente", key=f"agenda_light_pres_{r.get('id')}", use_container_width=True):
-                        try:
-                            sb = get_supabase()
-                            sb.table("lezioni").update({
-                                "stato": "PRESENTE",
-                                "updated_at": now_iso(),
-                                "note": (note + " | Confermata da Agenda Luxury").strip(" |")
-                            }).eq("id", int(r.get("id"))).execute()
-                            aggiorna_contatori_dopo_presenza_lezione(int(r.get("cliente_id")))
-                            st.success("Presenza confermata.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Errore conferma presenza: {e}")
+                    if stato_norm != "PRESENTE":
+                        if st.button("✅ Presente", key=f"agenda_light_pres_v2_{r.get('id')}", use_container_width=True):
+                            try:
+                                sb = get_supabase()
+                                sb.table("lezioni").update({
+                                    "stato": "PRESENTE",
+                                    "updated_at": now_iso(),
+                                    "note": (note + " | Confermata da Agenda Luxury").strip(" |")
+                                }).eq("id", int(r.get("id"))).execute()
+                                if r.get("cliente_id") not in [None, "", "nan"]:
+                                    aggiorna_contatori_dopo_presenza_lezione(int(r.get("cliente_id")))
+                                st.success("Presenza confermata.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Errore conferma presenza: {e}")
+                    else:
+                        st.success("Presente")
 
     st.markdown("---")
     with st.expander("Vista avanzata calendario"):
         st.warning("La vista calendario completa è più pesante. Usala solo se serve una vista grafica completa.")
-        if st.button("Apri calendario completo", key="open_full_calendar_from_light"):
+        if st.button("Apri calendario completo", key="open_full_calendar_from_light_v2"):
             st.session_state["kreo_force_menu"] = "🗓 Calendario unificato"
             st.rerun()
-
 
 def render_reception_rapida():
     st.header("🛎️ Reception rapida")
@@ -7459,7 +7546,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.17")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.18")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
