@@ -2,6 +2,7 @@ from pathlib import Path
 
 from datetime import datetime, date, timedelta
 import urllib.parse
+import re
 try:
     from streamlit_calendar import calendar as st_calendar
 except Exception:
@@ -7552,59 +7553,206 @@ def kreo_go_to(menu_name):
 
 
 
+
 def kreo_current_user_display_name():
     """
-    Nome utente robusto per banner di benvenuto.
+    Nome e cognome puliti dell'utente loggato.
+    Evita di stampare dizionari/session_state grezzi.
     """
-    for key in ["user_name", "nome_utente", "logged_user_name", "auth_name", "username", "user"]:
+    for key in ["nome_cognome", "display_name", "full_name", "user_full_name"]:
         val = st.session_state.get(key)
-        if val:
-            return str(val)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
 
-    try:
-        user = st.session_state.get("current_user") or st.session_state.get("utente")
-        if isinstance(user, dict):
-            for k in ["nome", "name", "username", "email"]:
-                if user.get(k):
-                    return str(user.get(k))
-    except Exception:
-        pass
+    for key in ["current_user", "utente", "auth_user", "logged_user", "user"]:
+        obj = st.session_state.get(key)
+        if isinstance(obj, dict):
+            nome = str(obj.get("nome") or obj.get("first_name") or "").strip()
+            cognome = str(obj.get("cognome") or obj.get("last_name") or "").strip()
+            if nome or cognome:
+                return (nome + " " + cognome).strip()
+            for k in ["name", "username", "email"]:
+                v = obj.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
 
-    try:
-        if "auth_user" in st.session_state and isinstance(st.session_state["auth_user"], dict):
-            return str(st.session_state["auth_user"].get("nome") or st.session_state["auth_user"].get("email") or "utente")
-    except Exception:
-        pass
+    for key in ["nome", "username", "login_username", "auth_name"]:
+        val = st.session_state.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
 
     return "utente"
 
 
 def render_kreo_welcome_banner():
-    """
-    Banner visibile in ogni vista, coerente con la grafica KREO.
-    """
     nome = kreo_current_user_display_name()
     role = st.session_state.get("role") or st.session_state.get("user_role") or st.session_state.get("ruolo") or ""
+    if isinstance(role, dict):
+        role = role.get("ruolo") or role.get("role") or ""
     role_txt = f" · {role}" if role else ""
 
     st.markdown(
         f"""
         <div style="
-            background: linear-gradient(90deg, #0b0b0b 0%, #181818 62%, #2a230b 100%);
-            border: 1px solid rgba(212,175,55,.75);
-            border-radius: 18px;
-            padding: 12px 18px;
-            margin: 4px 0 18px 0;
-            box-shadow: 0 8px 22px rgba(0,0,0,.10);
-            color: #ffffff;
+            background:#050505;
+            border:1.5px solid #d4af37;
+            border-radius:18px;
+            padding:14px 20px;
+            margin:6px 0 20px 0;
+            box-shadow:0 10px 26px rgba(0,0,0,.18);
+            color:#ffffff !important;
         ">
-            <div style="font-size: 14px; color: #d4af37; font-weight: 800;">KREO OPERATING SYSTEM</div>
-            <div style="font-size: 22px; font-weight: 950; line-height:1.2;">Benvenuto, {nome}</div>
-            <div style="font-size: 12px; color: rgba(255,255,255,.72);">Area operativa attiva{role_txt}</div>
+            <div style="font-size:12px;color:#d4af37;font-weight:900;letter-spacing:.04em;">KREO OPERATING SYSTEM</div>
+            <div style="font-size:24px;font-weight:950;line-height:1.25;color:#ffffff !important;">Benvenuto, {nome}</div>
+            <div style="font-size:12px;color:#eeeeee !important;">Area operativa attiva{role_txt}</div>
         </div>
         """,
         unsafe_allow_html=True
     )
+
+
+def kreo_safe_phone(raw):
+    if raw is None:
+        return ""
+    s = str(raw)
+    s = re.sub(r"[^0-9+]", "", s)
+    if s.startswith("+"):
+        return s[1:]
+    if len(s) == 10 and s.startswith("3"):
+        return "39" + s
+    return s
+
+
+def kreo_client_display(row):
+    nome = str(row.get("nome") or "").strip()
+    cognome = str(row.get("cognome") or "").strip()
+    cliente = str(row.get("cliente") or "").strip()
+    if nome or cognome:
+        return (nome + " " + cognome).strip()
+    return cliente or f"Cliente ID {row.get('id', '')}"
+
+
+def kreo_whatsapp_url(phone, message):
+    phone = kreo_safe_phone(phone)
+    msg = urllib.parse.quote(str(message or ""))
+    if phone:
+        return f"https://wa.me/{phone}?text={msg}"
+    return f"https://wa.me/?text={msg}"
+
+
+def render_kreo_alert_cards(label, df, alert_type="generico"):
+    st.markdown(f"#### {label}")
+
+    if df is None or df.empty:
+        st.success("Nessun elemento critico.")
+        return
+
+    max_cards = min(len(df), 12)
+    st.caption(f"{len(df)} elementi trovati. Mostro i primi {max_cards}.")
+
+    for idx, (_, r) in enumerate(df.head(max_cards).iterrows(), start=1):
+        cliente = kreo_client_display(r)
+        telefono = r.get("cellulare") or r.get("telefono") or r.get("phone") or ""
+        pacchetto = r.get("pacchetto") or ""
+        scadenza = r.get("scadenza_abbonamento") or r.get("scadenza") or r.get("data_accesso_it") or r.get("data_accesso") or ""
+        badge = r.get("badge_uid") or ""
+        stato = r.get("stato_accesso") or ""
+        residuo = r.get("residuo") or r.get("residuo_totale") or r.get("importo_residuo") or r.get("saldo_aperto") or ""
+
+        if alert_type == "certificati":
+            msg = f"Ciao {cliente}, ti ricordiamo di consegnare o aggiornare il certificato medico per completare la tua posizione in KREO. Grazie."
+            motivo = "Certificato medico mancante/scaduto"
+        elif alert_type == "scadenze":
+            msg = f"Ciao {cliente}, ti ricordiamo che il tuo abbonamento KREO è in scadenza. Passa in reception per il rinnovo o per ricevere supporto."
+            motivo = f"Scadenza abbonamento: {scadenza}"
+        elif alert_type == "residui":
+            msg = f"Ciao {cliente}, ti ricordiamo che risulta un saldo aperto presso KREO. Puoi passare in reception per regolarizzare. Grazie."
+            motivo = f"Residuo aperto: {residuo}"
+        elif alert_type == "badge":
+            msg = f"Ciao {cliente}, ti chiediamo di passare in reception per una verifica del badge/accesso KREO. Grazie."
+            motivo = f"Badge/accesso da verificare: {stato}"
+        else:
+            msg = f"Ciao {cliente}, ti contattiamo da KREO."
+            motivo = "Alert cliente"
+
+        wa = kreo_whatsapp_url(telefono, msg)
+
+        st.markdown(
+            f"""
+            <div style="
+                border:1.5px solid rgba(212,175,55,.70);
+                border-radius:16px;
+                padding:14px 16px;
+                margin:10px 0;
+                background:#fffdf7;
+                box-shadow:0 6px 18px rgba(0,0,0,.05);
+            ">
+                <div style="font-size:18px;font-weight:950;color:#111;">{idx}. {cliente}</div>
+                <div style="font-size:13px;color:#444;margin-top:4px;"><b>Motivo:</b> {motivo}</div>
+                <div style="font-size:12px;color:#666;margin-top:4px;">
+                    Pacchetto: {pacchetto or "-"} · Tel: {telefono or "non presente"} · Badge: {badge or "-"}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.link_button("💬 WhatsApp alert", wa, use_container_width=True, disabled=not bool(telefono))
+        with c2:
+            if st.button("✏️ Apri modifica cliente", key=f"alert_mod_cliente_{alert_type}_{idx}_{r.get('id', '')}", use_container_width=True):
+                if r.get("id") not in [None, ""]:
+                    st.session_state["cliente_preselezionato_id"] = r.get("id")
+                st.session_state["kreo_force_menu"] = "✏️ Modifica cliente"
+                st.rerun()
+
+    with st.expander("Vista tecnica dati"):
+        st.dataframe(df.head(50), use_container_width=True, hide_index=True)
+
+
+def render_messaggio_cliente_page():
+    st.header("💬 Messaggio cliente")
+    st.caption("Invia rapidamente un messaggio WhatsApp al cliente: alert certificato, scadenza, residuo o testo personalizzato.")
+
+    clienti = load_clienti()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    for col in ["id", "nome", "cognome", "cellulare", "pacchetto"]:
+        if col not in clienti.columns:
+            clienti[col] = ""
+
+    clienti = clienti.copy()
+    clienti["label"] = clienti["id"].astype(str) + " - " + clienti["nome"].fillna("").astype(str) + " " + clienti["cognome"].fillna("").astype(str)
+    selected = st.selectbox("Cliente", clienti["label"].tolist(), key="msg_cliente_select")
+    cid = int(str(selected).split(" - ")[0])
+    r = clienti[clienti["id"].astype(int) == cid].iloc[0]
+
+    cliente = kreo_client_display(r)
+    telefono = r.get("cellulare") or ""
+
+    tipo = st.selectbox(
+        "Tipo messaggio",
+        ["Personalizzato", "Certificato medico", "Abbonamento in scadenza", "Residuo aperto", "Verifica badge/accesso"],
+        key="msg_cliente_tipo"
+    )
+
+    templates = {
+        "Certificato medico": f"Ciao {cliente}, ti ricordiamo di consegnare o aggiornare il certificato medico per completare la tua posizione in KREO. Grazie.",
+        "Abbonamento in scadenza": f"Ciao {cliente}, ti ricordiamo che il tuo abbonamento KREO è in scadenza. Passa in reception per il rinnovo o per ricevere supporto.",
+        "Residuo aperto": f"Ciao {cliente}, ti ricordiamo che risulta un saldo aperto presso KREO. Puoi passare in reception per regolarizzare. Grazie.",
+        "Verifica badge/accesso": f"Ciao {cliente}, ti chiediamo di passare in reception per una verifica del badge/accesso KREO. Grazie.",
+        "Personalizzato": f"Ciao {cliente}, "
+    }
+
+    messaggio = st.text_area("Messaggio", value=templates.get(tipo, ""), height=140, key="msg_cliente_testo")
+    wa_url = kreo_whatsapp_url(telefono, messaggio)
+
+    st.markdown(f"**Cliente:** {cliente}")
+    st.markdown(f"**Cellulare:** {telefono or 'non presente'}")
+    st.link_button("📲 Apri WhatsApp", wa_url, use_container_width=True, disabled=not bool(telefono))
 
 
 def kreo_alerts_dataframes():
@@ -7750,7 +7898,7 @@ def render_reception_alert_side_panel():
             "residui": "💳 Clienti con residuo aperto",
             "badge": "🚦 Badge/accessi da verificare",
         }
-        render_alert_detail(labels.get(focus, "Dettaglio alert"), alerts.get(focus, pd.DataFrame()))
+        render_kreo_alert_cards(labels.get(focus, "Dettaglio alert"), alerts.get(focus, pd.DataFrame()), focus)
         if st.button("Chiudi dettaglio", use_container_width=True, key="alert_close_detail"):
             st.session_state["reception_alert_focus"] = None
             st.rerun()
@@ -7758,7 +7906,7 @@ def render_reception_alert_side_panel():
         st.caption("Clicca un alert per vedere il dettaglio.")
 
 
-def kreo_go_messaggio_cliente():
+def kreo_go_messaggio_cliente_disabled():
     """
     Apre la migliore sezione comunicazioni disponibile.
     """
@@ -7819,7 +7967,7 @@ def render_reception_center():
         c7, c8, c9 = st.columns(3)
         with c7:
             if st.button("💬 Messaggio cliente", use_container_width=True, key="rc_btn_messaggio"):
-                kreo_go_messaggio_cliente()
+                kreo_go_to("💬 Messaggio cliente")
         with c8:
             st.empty()
         with c9:
@@ -7906,7 +8054,7 @@ def render_reception_rapida():
             kreo_go_to("🧾 Stampa ricevuta")
     with c5:
         if st.button("📩 Messaggio cliente", use_container_width=True, key="rec_btn_message"):
-            kreo_go_messaggio_cliente()
+            kreo_go_to("💬 Messaggio cliente")
     with c6:
         if st.button("🖥️ Console accessi premium", use_container_width=True, key="rec_btn_console"):
             kreo_go_to("🖥️ Console accessi")
@@ -8094,7 +8242,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.22")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.23")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -8627,6 +8775,8 @@ def main():
 
 
 
+    elif menu == "💬 Messaggio cliente":
+        render_messaggio_cliente_page()
     elif menu == "🏠 Reception Center":
         render_reception_center()
     elif menu == "🚪 Accessi tornello":
@@ -8672,8 +8822,6 @@ def main():
             c3.metric("Scadenza", format_date_it(cliente.get("scadenza_abbonamento")))
 
 
-    elif menu == "💬 Messaggio cliente":
-        render_notifiche_whatsapp()
     elif menu == "📲 Notifiche WhatsApp":
         st.header("Notifiche WhatsApp")
 
