@@ -4710,6 +4710,8 @@ def render_v32_navigation():
 
     forced = st.session_state.get("kreo_force_menu")
     forced_macro_map = {
+        "🚨 Alert Center": "🛎️ Reception",
+        "🚦 Check-In Center": "🛎️ Reception",
         "🏠 Reception Center": "🛎️ Reception",
         "🛎️ Reception rapida": "🛎️ Reception",
         "🚪 Accessi tornello": "🛎️ Reception",
@@ -7355,6 +7357,38 @@ def kreo_go_to(menu_name):
     st.rerun()
 
 
+
+def kreo_lesson_progress_text(row):
+    """
+    Testo tipo 'Lezione 2 di 3' per agenda.
+    Usa colonne disponibili senza rompere.
+    """
+    try:
+        # Se già presenti colonne esplicite
+        for used_col in ["lezioni_usate", "lezioni_utilizzate", "lezioni_fatte"]:
+            for total_col in ["lezioni_totali", "numero_lezioni", "lezioni_settimanali", "totale_settimana"]:
+                if used_col in row and total_col in row:
+                    used = row.get(used_col)
+                    total = row.get(total_col)
+                    if used not in [None, "", "nan"] and total not in [None, "", "nan"]:
+                        return f"Lezione {int(float(used)) + 1} di {int(float(total))}"
+
+        cid = row.get("cliente_id") or row.get("id_cliente")
+        if cid not in [None, "", "nan"]:
+            cliente = kreo_get_cliente_by_id_safe(cid) if "kreo_get_cliente_by_id_safe" in globals() else {}
+            if cliente:
+                used = cliente.get("lezioni_utilizzate") or cliente.get("lezioni_usate") or cliente.get("lezioni_fatte")
+                total = cliente.get("numero_lezioni") or cliente.get("lezioni_totali") or cliente.get("lezioni_settimanali")
+                if used not in [None, "", "nan"] and total not in [None, "", "nan"]:
+                    return f"Lezione {int(float(used)) + 1} di {int(float(total))}"
+                residue = cliente.get("lezioni_residue")
+                if residue not in [None, "", "nan"] and total not in [None, "", "nan"]:
+                    done = int(float(total)) - int(float(residue)) + 1
+                    return f"Lezione {max(done, 1)} di {int(float(total))}"
+    except Exception:
+        pass
+    return ""
+
 def render_agenda_light_launch():
     """
     Agenda veloce per lancio:
@@ -7500,6 +7534,7 @@ def render_agenda_light_launch():
 
             stato = str(r.get("stato") or "")
             pac = str(r.get("pacchetto") or "")
+            progress_txt = kreo_lesson_progress_text(r)
             trainer = str(r.get("trainer") or "")
             ora_inizio = str(r.get("ora_inizio") or "")[:5]
             ora_fine = str(r.get("ora_fine") or "")[:5]
@@ -7585,6 +7620,9 @@ def kreo_current_user_display_name():
 
 
 def render_kreo_welcome_banner():
+    """
+    Banner visibile in ogni vista: sfondo nero, bordo oro, font oro.
+    """
     nome = kreo_current_user_display_name()
     role = st.session_state.get("role") or st.session_state.get("user_role") or st.session_state.get("ruolo") or ""
     if isinstance(role, dict):
@@ -7594,17 +7632,23 @@ def render_kreo_welcome_banner():
     st.markdown(
         f"""
         <div style="
-            background:#050505;
-            border:1.5px solid #d4af37;
+            background:#050505 !important;
+            border:2px solid #d4af37 !important;
             border-radius:18px;
-            padding:14px 20px;
-            margin:6px 0 20px 0;
-            box-shadow:0 10px 26px rgba(0,0,0,.18);
-            color:#ffffff !important;
+            padding:16px 22px;
+            margin:8px 0 22px 0;
+            box-shadow:0 10px 28px rgba(0,0,0,.20);
+            opacity:1 !important;
         ">
-            <div style="font-size:12px;color:#d4af37;font-weight:900;letter-spacing:.04em;">KREO OPERATING SYSTEM</div>
-            <div style="font-size:24px;font-weight:950;line-height:1.25;color:#ffffff !important;">Benvenuto, {nome}</div>
-            <div style="font-size:12px;color:#eeeeee !important;">Area operativa attiva{role_txt}</div>
+            <div style="font-size:12px;color:#d4af37 !important;font-weight:900;letter-spacing:.05em;opacity:1 !important;">
+                KREO OPERATING SYSTEM
+            </div>
+            <div style="font-size:25px;font-weight:950;line-height:1.25;color:#d4af37 !important;opacity:1 !important;">
+                Benvenuto, {nome}
+            </div>
+            <div style="font-size:12px;color:#f5e7b2 !important;opacity:1 !important;">
+                Area operativa attiva{role_txt}
+            </div>
         </div>
         """,
         unsafe_allow_html=True
@@ -7981,57 +8025,99 @@ def render_alert_detail(label, df):
 
 
 
+
+def kreo_alert_category_style(key):
+    """
+    Semaforo alert:
+    - Rata/residuo in scadenza/aperto = rosso
+    - Certificato scaduto/mancante = rosso
+    - Certificato in scadenza = giallo
+    - Badge/accessi = blu/giallo operativo
+    """
+    styles = {
+        "certificati": ("🔴", "#e74c3c", "Certificati scaduti/mancanti"),
+        "certificati_scadenza": ("🟡", "#f1c40f", "Certificati in scadenza"),
+        "scadenze": ("🟡", "#f1c40f", "Abbonamenti in scadenza"),
+        "residui": ("🔴", "#e74c3c", "Rate/residui aperti"),
+        "badge": ("🔵", "#3498db", "Badge/accessi da verificare"),
+    }
+    return styles.get(key, ("⚪", "#d4af37", "Alert"))
+
+
+def render_alert_center_page():
+    """
+    Vista dedicata per approfondire alert, con WhatsApp per cliente.
+    """
+    focus = st.session_state.get("reception_alert_focus") or "certificati"
+    alerts = kreo_alerts_dataframes()
+
+    icon, color, title = kreo_alert_category_style(focus)
+
+    st.header(f"{icon} {title}")
+    st.caption("Vista operativa dedicata: controlla i clienti coinvolti e invia messaggi WhatsApp già pronti.")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        if st.button("🔴 Certificati", use_container_width=True):
+            st.session_state["reception_alert_focus"] = "certificati"
+            st.rerun()
+    with c2:
+        if st.button("🟡 Scadenze", use_container_width=True):
+            st.session_state["reception_alert_focus"] = "scadenze"
+            st.rerun()
+    with c3:
+        if st.button("🔴 Residui/rate", use_container_width=True):
+            st.session_state["reception_alert_focus"] = "residui"
+            st.rerun()
+    with c4:
+        if st.button("🔵 Badge/accessi", use_container_width=True):
+            st.session_state["reception_alert_focus"] = "badge"
+            st.rerun()
+
+    st.markdown("---")
+    df = alerts.get(focus, pd.DataFrame())
+    render_kreo_alert_cards(title, df, focus)
+
+
 def render_reception_alert_side_panel():
     """
-    Alert live trasformati in pulsanti operativi.
-    Click = dettaglio clienti/accessi.
+    Alert live come pulsanti: click apre vista dedicata.
     """
     st.markdown("### 🚨 Alert live")
 
     alerts = kreo_alerts_dataframes()
 
-    alert_cert = 0 if alerts["certificati"].empty else len(alerts["certificati"])
-    alert_scadenze = 0 if alerts["scadenze"].empty else len(alerts["scadenze"])
-    alert_residui = 0 if alerts["residui"].empty else len(alerts["residui"])
-    alert_badge = 0 if alerts["badge"].empty else len(alerts["badge"])
+    counts = {
+        "certificati": 0 if alerts.get("certificati", pd.DataFrame()).empty else len(alerts.get("certificati")),
+        "scadenze": 0 if alerts.get("scadenze", pd.DataFrame()).empty else len(alerts.get("scadenze")),
+        "residui": 0 if alerts.get("residui", pd.DataFrame()).empty else len(alerts.get("residui")),
+        "badge": 0 if alerts.get("badge", pd.DataFrame()).empty else len(alerts.get("badge")),
+    }
 
-    if "reception_alert_focus" not in st.session_state:
-        st.session_state["reception_alert_focus"] = None
-
-    buttons = [
-        ("🔴 Certificati", alert_cert, "certificati"),
-        ("🟡 Scadenze", alert_scadenze, "scadenze"),
-        ("💳 Residui", alert_residui, "residui"),
-        ("🚦 Badge/accessi", alert_badge, "badge"),
-    ]
-
-    for label, value, key in buttons:
-        btn_label = f"{label}: {value}"
-        if st.button(btn_label, use_container_width=True, key=f"alert_btn_{key}"):
+    for key in ["certificati", "scadenze", "residui", "badge"]:
+        icon, color, title = kreo_alert_category_style(key)
+        label = f"{icon} {title}: {counts[key]}"
+        if st.button(label, use_container_width=True, key=f"alert_btn_{key}"):
             st.session_state["reception_alert_focus"] = key
-
-    focus = st.session_state.get("reception_alert_focus")
-    if focus:
-        st.markdown("---")
-        labels = {
-            "certificati": "🔴 Clienti con certificato mancante/scaduto",
-            "scadenze": "🟡 Abbonamenti in scadenza entro 15 giorni",
-            "residui": "💳 Clienti con residuo aperto",
-            "badge": "🚦 Badge/accessi da verificare",
-        }
-        render_kreo_alert_cards(labels.get(focus, "Dettaglio alert"), alerts.get(focus, pd.DataFrame()), focus)
-        if st.button("Chiudi dettaglio", use_container_width=True, key="alert_close_detail"):
-            st.session_state["reception_alert_focus"] = None
+            st.session_state["kreo_force_menu"] = "🚨 Alert Center"
             st.rerun()
-    else:
-        st.caption("Clicca un alert per vedere il dettaglio.")
 
+    st.caption("Clicca un alert per aprire la vista dedicata.")
 
 def kreo_go_messaggio_cliente_disabled():
     """
     Apre la migliore sezione comunicazioni disponibile.
     """
     for target in ["💬 Messaggio cliente", "📲 Notifiche WhatsApp", "📨 Comunicazioni", "📲 Comunicazioni WhatsApp"]:
+        st.session_state["kreo_force_menu"] = target
+        st.rerun()
+
+
+def kreo_go_accesso_tornello():
+    """
+    Apre la vista tornello disponibile, con fallback robusto.
+    """
+    for target in ["🚦 Check-In Center", "🚪 Accessi tornello", "Accessi tornello"]:
         st.session_state["kreo_force_menu"] = target
         st.rerun()
 
@@ -8077,7 +8163,7 @@ def render_reception_center():
         c4, c5, c6 = st.columns(3)
         with c4:
             if st.button("🚦 Accesso tornello", use_container_width=True, key="rc_btn_tornello"):
-                kreo_go_to("🚪 Accessi tornello")
+                kreo_go_accesso_tornello()
         with c5:
             if st.button("📅 Agenda / Calendario", use_container_width=True, key="rc_btn_agenda"):
                 kreo_go_to("✨ Agenda Luxury")
@@ -8153,19 +8239,19 @@ def render_reception_rapida():
         if st.button("🚨 Alert clienti", use_container_width=True, key="rec_btn_alert"):
             kreo_go_to("🚨 Alert clienti")
         if st.button("♻️ Ricalcolo lezioni", use_container_width=True, key="rec_btn_recalc"):
-            kreo_go_to("🚪 Accessi tornello")
+            kreo_go_accesso_tornello()
     with c2:
         if st.button("✏️ Modifica cliente", use_container_width=True, key="rec_btn_edit_client"):
             kreo_go_to("✏️ Modifica cliente")
         if st.button("🎟️ Associa badge", use_container_width=True, key="rec_btn_badge"):
-            kreo_go_to("🚪 Accessi tornello")
+            kreo_go_accesso_tornello()
         if st.button("📅 Agenda / calendario", use_container_width=True, key="rec_btn_calendar"):
             kreo_go_to("✨ Agenda Luxury")
     with c3:
         if st.button("💰 Registra incasso", use_container_width=True, key="rec_btn_payment"):
             kreo_go_to("💳 Gestione incassi")
         if st.button("🔄 Sync accessi / badge", use_container_width=True, key="rec_btn_sync_badge"):
-            kreo_go_to("🚪 Accessi tornello")
+            kreo_go_accesso_tornello()
         if st.button("✅ Check-in cliente", use_container_width=True, key="rec_btn_checkin"):
             kreo_go_to("🖥️ Console accessi")
 
@@ -8363,7 +8449,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.26")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.27")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -8898,6 +8984,10 @@ def main():
 
     elif menu == "💬 Messaggio cliente":
         render_messaggio_cliente_page()
+    elif menu == "🚦 Check-In Center":
+        render_accessi_tornello_operativo_page()
+    elif menu == "🚨 Alert Center":
+        render_alert_center_page()
     elif menu == "🏠 Reception Center":
         render_reception_center()
     elif menu == "🚪 Accessi tornello":
