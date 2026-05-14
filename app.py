@@ -4661,19 +4661,15 @@ def login_gate():
 
 
 
+
 def render_v32_navigation():
     st.sidebar.markdown("""
     <style>
-    section[data-testid="stSidebar"] {
-        background: #0f0f0f !important;
-    }
-
+    section[data-testid="stSidebar"] { background: #0f0f0f !important; }
     section[data-testid="stSidebar"] label,
     section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] span,
-    section[data-testid="stSidebar"] div {
-        color: #ffffff !important;
-    }
+    section[data-testid="stSidebar"] div { color: #ffffff !important; }
 
     section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
         background-color: #050505 !important;
@@ -4683,18 +4679,6 @@ def render_v32_navigation():
         color: #f4d675 !important;
         font-weight: 800 !important;
         box-shadow: 0 0 0 2px rgba(212,175,55,0.15) !important;
-    }
-
-    section[data-testid="stSidebar"] div[data-baseweb="select"] span {
-        color: #f4d675 !important;
-        font-weight: 800 !important;
-        font-size: 15px !important;
-    }
-
-    section[data-testid="stSidebar"] input {
-        color: #f4d675 !important;
-        font-weight: 800 !important;
-        background-color: #050505 !important;
     }
 
     .kreo-nav-help {
@@ -4711,96 +4695,63 @@ def render_v32_navigation():
     """, unsafe_allow_html=True)
 
     st.sidebar.markdown("## KREO Gestionale")
-    st.sidebar.caption("Navigazione semplificata V35.16 - Agenda Luxury")
-    st.sidebar.markdown('<div class="kreo-nav-help">Scegli prima l’area, poi la funzione operativa dal menu nero qui sotto.</div>', unsafe_allow_html=True)
+    st.sidebar.caption("Launch Stable — interfaccia alleggerita")
+    st.sidebar.markdown('<div class="kreo-nav-help">Reception e Agenda sono le aree principali. Le funzioni tecniche sono in Admin.</div>', unsafe_allow_html=True)
 
-    all_macros = ["🏠 Dashboard", "🛎️ Reception", "👤 Clienti", "🗓 Calendario", "💳 Incassi", "📩 Comunicazioni", "👥 Staff", "🏢 Azienda", "📊 Analytics"]
+    all_macros = ["🛎️ Reception", "👤 Clienti", "📅 Agenda", "💳 Incassi", "📊 Direzione", "⚙️ Admin"]
 
     if is_reception_limited_user():
-        allowed_macros = ["🛎️ Reception", "🗓 Calendario"]
-    else:
+        allowed_macros = ["🛎️ Reception", "📅 Agenda"]
+    elif is_admin() or is_rosario_user():
         allowed_macros = all_macros
+    else:
+        allowed_macros = ["🛎️ Reception", "👤 Clienti", "📅 Agenda", "💳 Incassi"]
 
-    # Se un pulsante Reception richiede una funzione, posiziono anche la macro corretta
-    # PRIMA di creare i widget Streamlit. Così i pulsanti funzionano anche per staff limitati.
     forced = st.session_state.get("kreo_force_menu")
     forced_macro_map = {
         "🛎️ Reception rapida": "🛎️ Reception",
-        "🖥️ Console accessi": "🛎️ Reception",
-        "➕ Nuovo cliente": "🛎️ Reception",
-        "✏️ Modifica cliente": "🛎️ Reception",
-        "💳 Gestione incassi": "🛎️ Reception",
-        "🧾 Stampa ricevuta": "🛎️ Reception",
+        "🚪 Accessi tornello": "🛎️ Reception",
+        "➕ Nuovo cliente": "👤 Clienti",
+        "✏️ Modifica cliente": "👤 Clienti",
+        "📋 Database clienti": "👤 Clienti",
+        "📄 Documenti / Certificati": "👤 Clienti",
+        "💳 Gestione incassi": "💳 Incassi",
+        "🧾 Stampa ricevuta": "💳 Incassi",
         "📲 Notifiche WhatsApp": "🛎️ Reception",
         "🚨 Alert clienti": "🛎️ Reception",
-        "🚪 Accessi tornello": "🛎️ Reception",
-        "✨ Agenda Luxury": "🗓 Calendario",
-        "🗓 Calendario unificato": "🗓 Calendario",
-        "📅 Calendario lezioni": "🗓 Calendario",
+        "✨ Agenda Luxury": "📅 Agenda",
+        "🗓 Calendario unificato": "📅 Agenda",
+        "📅 Calendario lezioni": "📅 Agenda",
+        "📊 Dashboard": "📊 Direzione",
+        "📈 Analytics direzionali": "📊 Direzione",
     }
     if forced in forced_macro_map and forced_macro_map[forced] in allowed_macros:
         st.session_state["v32_macro_nav"] = forced_macro_map[forced]
 
-    macro = st.sidebar.radio(
-        "Sezione",
-        allowed_macros,
-        key="v32_macro_nav"
-    )
+    macro = st.sidebar.radio("Sezione", allowed_macros, key="v32_macro_nav")
 
     submenu_map = {
-        "🏠 Dashboard": ["📊 Dashboard", "🚨 Alert clienti"],
-        "🛎️ Reception": [
-            "🛎️ Reception rapida",
-            "🖥️ Console accessi",
-            "➕ Nuovo cliente",
-            "✏️ Modifica cliente",
-            "💳 Gestione incassi",
-            "🧾 Stampa ricevuta",
-            "📲 Notifiche WhatsApp",
-            "🚨 Alert clienti",
-            "🚪 Accessi tornello",
-            "🗓 Calendario unificato",
-        ],
-        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati",
-        "🚪 Accessi tornello", "👤 Area Cliente", "🕘 Cronologia"],
-        "🗓 Calendario": ["✨ Agenda Luxury", "🗓 Calendario unificato", "🗓 Premium Calendar", "📅 Calendario lezioni", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
-        "💳 Incassi": ["💳 Gestione incassi", "🧾 Stampa ricevuta", "⬇️ Export Excel"],
-        "📩 Comunicazioni": ["📲 Notifiche WhatsApp", "🚨 Alert clienti"],
-        "👥 Staff": ["👥 Gestione utenti"],
-        "🏢 Azienda": ["🏢 Anagrafica azienda", "⚙️ Settaggi KREO"],
-        "📊 Analytics": ["📈 Analytics direzionali", "🚨 Alert clienti"],
+        "🛎️ Reception": ["🛎️ Reception rapida", "🚪 Accessi tornello", "🚨 Alert clienti", "📲 Notifiche WhatsApp"],
+        "👤 Clienti": ["➕ Nuovo cliente", "✏️ Modifica cliente", "📋 Database clienti", "📄 Documenti / Certificati", "👤 Area Cliente", "🕘 Cronologia"],
+        "📅 Agenda": ["✨ Agenda Luxury", "🗓 Calendario unificato", "📅 Calendario lezioni"],
+        "💳 Incassi": ["💳 Gestione incassi", "🧾 Stampa ricevuta"],
+        "📊 Direzione": ["📊 Dashboard", "📈 Analytics direzionali", "⬇️ Export Excel"],
+        "⚙️ Admin": ["👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati", "🗓 Premium Calendar", "🗓 Planner Slot", "⚙️ Disponibilità calendario"],
     }
 
-    items = submenu_map.get(macro, ["📊 Dashboard"])
+    items = submenu_map.get(macro, ["🛎️ Reception rapida"])
 
-    # Protezione permessi: Enzo/Vincenzo/Federica solo Reception e Calendario.
     if is_reception_limited_user():
-        allowed_items = {
-            "🛎️ Reception rapida",
-            "🖥️ Console accessi",
-            "➕ Nuovo cliente",
-            "✏️ Modifica cliente",
-            "💳 Gestione incassi",
-            "🧾 Stampa ricevuta",
-            "📲 Notifiche WhatsApp",
-            "🚨 Alert clienti",
-            "🚪 Accessi tornello",
-            "🗓 Calendario unificato",
-            "✨ Agenda Luxury",
-            "📅 Calendario lezioni",
-        }
+        allowed_items = {"🛎️ Reception rapida", "🚪 Accessi tornello", "🚨 Alert clienti", "📲 Notifiche WhatsApp", "✨ Agenda Luxury", "🗓 Calendario unificato", "📅 Calendario lezioni"}
         items = [x for x in items if x in allowed_items]
 
     if not is_admin() and not is_rosario_user():
-        hidden = {"⬇️ Export Excel", "👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati"}
+        hidden = {"⬇️ Export Excel", "👥 Gestione utenti", "🏢 Anagrafica azienda", "⚙️ Settaggi KREO", "🧹 Pulizia duplicati", "🗓 Premium Calendar", "🗓 Planner Slot", "⚙️ Disponibilità calendario"}
         items = [x for x in items if x not in hidden]
 
     if not items:
         items = ["🛎️ Reception rapida"]
 
-    # Gestione pulsanti rapidi: forza la voce al rerun senza modificare il widget dopo la sua creazione.
-    # Impostare la session_state PRIMA della selectbox evita che Streamlit ignori l'index
-    # quando il widget ha già una chiave valorizzata.
     forced = st.session_state.pop("kreo_force_menu", None)
     index = 0
     if forced in items:
@@ -4809,7 +4760,7 @@ def render_v32_navigation():
     elif st.session_state.get("v32_sub_nav") not in items:
         st.session_state["v32_sub_nav"] = items[index]
 
-    selected = st.sidebar.selectbox("👇 Scegli la funzione operativa", items, index=index, key="v32_sub_nav")
+    selected = st.sidebar.selectbox("Funzione", items, index=index, key="v32_sub_nav")
 
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"**Area:** {macro}")
@@ -7170,6 +7121,111 @@ def kreo_go_to(menu_name):
     st.session_state["kreo_force_menu"] = menu_name
     st.rerun()
 
+def render_agenda_light_launch():
+    """
+    Agenda veloce per lancio:
+    niente calendario JS pesante, solo timeline operativa.
+    """
+    st.header("✨ Agenda Luxury")
+    st.caption("Vista veloce per reception e staff. Il calendario completo resta disponibile come vista avanzata.")
+
+    oggi = date.today()
+    c1, c2, c3 = st.columns([1, 1, 2])
+    with c1:
+        giorni = st.selectbox("Periodo", [1, 3, 7, 14], index=2, key="agenda_light_giorni")
+    with c2:
+        solo_oggi = st.checkbox("Solo oggi", value=False, key="agenda_light_solo_oggi")
+    with c3:
+        filtro_testo = st.text_input("Cerca cliente/trainer", placeholder="es. Rossi, Vincenzo...", key="agenda_light_search")
+
+    giorni_effettivi = 1 if solo_oggi else int(giorni)
+    data_fine = oggi + timedelta(days=giorni_effettivi - 1)
+
+    try:
+        lez = load_lezioni()
+    except Exception:
+        lez = pd.DataFrame()
+
+    if lez.empty:
+        st.info("Nessuna lezione presente.")
+        return
+
+    view = lez.copy()
+    view["data_dt"] = pd.to_datetime(view["data_lezione"], errors="coerce").dt.date
+    view = view[(view["data_dt"] >= oggi) & (view["data_dt"] <= data_fine)]
+
+    try:
+        clienti = load_clienti()
+        if not clienti.empty:
+            cols = [c for c in ["id", "nome", "cognome", "pacchetto", "lezioni_utilizzate", "numero_lezioni"] if c in clienti.columns]
+            cm = clienti[cols].copy()
+            cm["cliente"] = cm.get("nome", "").fillna("") + " " + cm.get("cognome", "").fillna("")
+            view["cliente_id"] = pd.to_numeric(view["cliente_id"], errors="coerce").astype("Int64")
+            cm["id"] = pd.to_numeric(cm["id"], errors="coerce").astype("Int64")
+            merge_cols = [c for c in ["id", "cliente", "pacchetto", "lezioni_utilizzate", "numero_lezioni"] if c in cm.columns]
+            view = view.merge(cm[merge_cols], left_on="cliente_id", right_on="id", how="left", suffixes=("", "_cliente"))
+    except Exception:
+        if "cliente" not in view.columns:
+            view["cliente"] = ""
+
+    if filtro_testo:
+        f = filtro_testo.strip().lower()
+        cliente_series = view["cliente"].fillna("").astype(str) if "cliente" in view.columns else pd.Series([""] * len(view))
+        trainer_series = view["trainer"].fillna("").astype(str) if "trainer" in view.columns else pd.Series([""] * len(view))
+        view = view[cliente_series.str.lower().str.contains(f, na=False) | trainer_series.str.lower().str.contains(f, na=False)]
+
+    if view.empty:
+        st.info("Nessuna lezione trovata nel periodo selezionato.")
+        return
+
+    view = view.sort_values(["data_lezione", "ora_inizio"]).copy()
+    st.markdown("### Timeline operativa")
+
+    for data_val, group in view.groupby("data_lezione"):
+        st.markdown(f"#### {format_date_it(data_val)}")
+        for _, r in group.iterrows():
+            cliente = r.get("cliente") or f"Cliente ID {r.get('cliente_id')}"
+            stato = str(r.get("stato") or "")
+            pac = str(r.get("pacchetto") or "")
+            trainer = str(r.get("trainer") or "")
+            ora = f"{str(r.get('ora_inizio') or '')[:5]} - {str(r.get('ora_fine') or '')[:5]}"
+            note = str(r.get("note") or "")
+
+            badge = "🟢" if stato.upper() == "PRESENTE" else ("🟡" if "RICHIESTA" in stato.upper() else "⚪")
+            with st.container(border=True):
+                c1, c2, c3, c4 = st.columns([1.1, 2.4, 1.6, 1.4])
+                with c1:
+                    st.markdown(f"**{badge} {ora}**")
+                with c2:
+                    st.markdown(f"**{cliente}**")
+                    if pac:
+                        st.caption(pac)
+                with c3:
+                    st.markdown(trainer or "Trainer non indicato")
+                    st.caption(stato)
+                with c4:
+                    if st.button("✅ Presente", key=f"agenda_light_pres_{r.get('id')}", use_container_width=True):
+                        try:
+                            sb = get_supabase()
+                            sb.table("lezioni").update({
+                                "stato": "PRESENTE",
+                                "updated_at": now_iso(),
+                                "note": (note + " | Confermata da Agenda Luxury").strip(" |")
+                            }).eq("id", int(r.get("id"))).execute()
+                            aggiorna_contatori_dopo_presenza_lezione(int(r.get("cliente_id")))
+                            st.success("Presenza confermata.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Errore conferma presenza: {e}")
+
+    st.markdown("---")
+    with st.expander("Vista avanzata calendario"):
+        st.warning("La vista calendario completa è più pesante. Usala solo se serve una vista grafica completa.")
+        if st.button("Apri calendario completo", key="open_full_calendar_from_light"):
+            st.session_state["kreo_force_menu"] = "🗓 Calendario unificato"
+            st.rerun()
+
+
 def render_reception_rapida():
     st.header("🛎️ Reception rapida")
     st.caption("Pannello operativo immediato: pochi pulsanti, azioni chiare, zero complessità.")
@@ -7403,7 +7459,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | UI V32.1")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.17")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -7435,11 +7491,7 @@ def main():
         render_stampa_ricevuta_rapida()
 
     elif menu == "✨ Agenda Luxury":
-        try:
-            render_agenda_luxury()
-        except NameError:
-            st.info("Agenda Luxury non disponibile in questa versione. Apro il calendario unificato.")
-            render_calendario_unificato_staff()
+        render_agenda_light_launch()
 
     elif menu == "➕ Nuovo cliente":
         st.header("Nuova iscrizione / aggiornamento cliente")
