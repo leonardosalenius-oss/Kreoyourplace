@@ -4718,6 +4718,7 @@ def render_v32_navigation():
         "📄 Documenti / Certificati": "👤 Clienti",
         "💳 Gestione incassi": "💳 Incassi",
         "🧾 Stampa ricevuta": "💳 Incassi",
+        "💬 Messaggio cliente": "🛎️ Reception",
         "📲 Notifiche WhatsApp": "🛎️ Reception",
         "🚨 Alert clienti": "🛎️ Reception",
         "✨ Agenda Luxury": "📅 Agenda",
@@ -7550,9 +7551,66 @@ def kreo_go_to(menu_name):
     st.rerun()
 
 
-def render_reception_alert_side_panel():
-    st.markdown("### 🚨 Alert live")
 
+def kreo_current_user_display_name():
+    """
+    Nome utente robusto per banner di benvenuto.
+    """
+    for key in ["user_name", "nome_utente", "logged_user_name", "auth_name", "username", "user"]:
+        val = st.session_state.get(key)
+        if val:
+            return str(val)
+
+    try:
+        user = st.session_state.get("current_user") or st.session_state.get("utente")
+        if isinstance(user, dict):
+            for k in ["nome", "name", "username", "email"]:
+                if user.get(k):
+                    return str(user.get(k))
+    except Exception:
+        pass
+
+    try:
+        if "auth_user" in st.session_state and isinstance(st.session_state["auth_user"], dict):
+            return str(st.session_state["auth_user"].get("nome") or st.session_state["auth_user"].get("email") or "utente")
+    except Exception:
+        pass
+
+    return "utente"
+
+
+def render_kreo_welcome_banner():
+    """
+    Banner visibile in ogni vista, coerente con la grafica KREO.
+    """
+    nome = kreo_current_user_display_name()
+    role = st.session_state.get("role") or st.session_state.get("user_role") or st.session_state.get("ruolo") or ""
+    role_txt = f" · {role}" if role else ""
+
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(90deg, #0b0b0b 0%, #181818 62%, #2a230b 100%);
+            border: 1px solid rgba(212,175,55,.75);
+            border-radius: 18px;
+            padding: 12px 18px;
+            margin: 4px 0 18px 0;
+            box-shadow: 0 8px 22px rgba(0,0,0,.10);
+            color: #ffffff;
+        ">
+            <div style="font-size: 14px; color: #d4af37; font-weight: 800;">KREO OPERATING SYSTEM</div>
+            <div style="font-size: 22px; font-weight: 950; line-height:1.2;">Benvenuto, {nome}</div>
+            <div style="font-size: 12px; color: rgba(255,255,255,.72);">Area operativa attiva{role_txt}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def kreo_alerts_dataframes():
+    """
+    Costruisce i dataframe degli alert in modo difensivo.
+    """
     try:
         clienti = load_clienti()
     except Exception:
@@ -7563,82 +7621,150 @@ def render_reception_alert_side_panel():
     except Exception:
         accessi = pd.DataFrame()
 
-    alert_cert = 0
-    alert_scadenze = 0
-    alert_residui = 0
-    alert_badge = 0
+    today = date.today()
+
+    cert_df = pd.DataFrame()
+    scad_df = pd.DataFrame()
+    residui_df = pd.DataFrame()
+    badge_df = pd.DataFrame()
 
     if not clienti.empty:
-        today = date.today()
+        work = clienti.copy()
+        name_cols = [c for c in ["id", "nome", "cognome", "cellulare", "pacchetto", "scadenza_abbonamento", "certificato_medico", "scadenza_certificato", "residuo", "residuo_totale", "importo_residuo", "saldo_aperto"] if c in work.columns]
 
-        cert_cols = [c for c in clienti.columns if "cert" in c.lower()]
-        for c in cert_cols:
-            try:
-                vals = pd.to_datetime(clienti[c], errors="coerce").dt.date
-                alert_cert = max(alert_cert, int((vals < today).sum()))
-            except Exception:
-                pass
-
-        for c in ["scadenza_abbonamento", "data_scadenza_abbonamento", "scadenza"]:
-            if c in clienti.columns:
+        # Certificati mancanti/scaduti: prova colonne diverse.
+        masks = []
+        for c in work.columns:
+            cl = c.lower()
+            if "cert" in cl:
                 try:
-                    vals = pd.to_datetime(clienti[c], errors="coerce").dt.date
-                    alert_scadenze = int(((vals >= today) & (vals <= today + timedelta(days=15))).sum())
+                    if work[c].dtype == object:
+                        missing = work[c].isna() | (work[c].astype(str).str.strip() == "") | (work[c].astype(str).str.upper().isin(["NO", "MANCANTE", "NON CONSEGNATO", "SCADUTO"]))
+                        masks.append(missing)
+                    vals = pd.to_datetime(work[c], errors="coerce").dt.date
+                    masks.append(vals < today)
+                except Exception:
+                    pass
+
+        if masks:
+            mask = masks[0]
+            for m in masks[1:]:
+                mask = mask | m
+            cert_df = work[mask][name_cols].copy()
+        else:
+            cert_df = pd.DataFrame(columns=name_cols)
+
+        # Scadenze abbonamento entro 15 giorni
+        for c in ["scadenza_abbonamento", "data_scadenza_abbonamento", "scadenza"]:
+            if c in work.columns:
+                try:
+                    vals = pd.to_datetime(work[c], errors="coerce").dt.date
+                    mask = (vals >= today) & (vals <= today + timedelta(days=15))
+                    scad_df = work[mask][name_cols].copy()
                     break
                 except Exception:
                     pass
 
+        # Residui aperti
         for c in ["residuo", "residuo_totale", "importo_residuo", "saldo_aperto"]:
-            if c in clienti.columns:
+            if c in work.columns:
                 try:
-                    nums = pd.to_numeric(clienti[c], errors="coerce").fillna(0)
-                    alert_residui = int((nums > 0).sum())
+                    nums = pd.to_numeric(work[c], errors="coerce").fillna(0)
+                    residui_df = work[nums > 0][name_cols].copy()
                     break
                 except Exception:
                     pass
 
     if not accessi.empty:
-        if "cliente_id" in accessi.columns:
+        worka = accessi.copy()
+        mask = pd.Series([False] * len(worka), index=worka.index)
+
+        if "cliente_id" in worka.columns:
             try:
-                alert_badge = int(accessi["cliente_id"].isna().sum())
-            except Exception:
-                pass
-        if "stato_accesso" in accessi.columns:
-            try:
-                stato = accessi["stato_accesso"].fillna("").astype(str).str.upper()
-                alert_badge = max(alert_badge, int(stato.str.contains("VERIFICARE|NEGATO|NON_ASSOCIATO", regex=True).sum()))
+                mask = mask | worka["cliente_id"].isna()
             except Exception:
                 pass
 
-    cards = [
-        ("🔴", "Certificati", alert_cert),
-        ("🟡", "Scadenze 15 gg", alert_scadenze),
-        ("💳", "Residui aperti", alert_residui),
-        ("🚦", "Badge/accessi", alert_badge),
+        if "stato_accesso" in worka.columns:
+            try:
+                stato = worka["stato_accesso"].fillna("").astype(str).str.upper()
+                mask = mask | stato.str.contains("VERIFICARE|NEGATO|NON_ASSOCIATO", regex=True, na=False)
+            except Exception:
+                pass
+
+        cols = [c for c in ["id", "data_accesso_it", "data_accesso", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "note"] if c in worka.columns]
+        badge_df = worka[mask][cols].copy()
+
+    return {
+        "certificati": cert_df,
+        "scadenze": scad_df,
+        "residui": residui_df,
+        "badge": badge_df,
+    }
+
+
+def render_alert_detail(label, df):
+    st.markdown(f"#### {label}")
+    if df is None or df.empty:
+        st.success("Nessun elemento critico.")
+        return
+    st.dataframe(df.head(50), use_container_width=True, hide_index=True)
+
+
+
+def render_reception_alert_side_panel():
+    """
+    Alert live trasformati in pulsanti operativi.
+    Click = dettaglio clienti/accessi.
+    """
+    st.markdown("### 🚨 Alert live")
+
+    alerts = kreo_alerts_dataframes()
+
+    alert_cert = 0 if alerts["certificati"].empty else len(alerts["certificati"])
+    alert_scadenze = 0 if alerts["scadenze"].empty else len(alerts["scadenze"])
+    alert_residui = 0 if alerts["residui"].empty else len(alerts["residui"])
+    alert_badge = 0 if alerts["badge"].empty else len(alerts["badge"])
+
+    if "reception_alert_focus" not in st.session_state:
+        st.session_state["reception_alert_focus"] = None
+
+    buttons = [
+        ("🔴 Certificati", alert_cert, "certificati"),
+        ("🟡 Scadenze", alert_scadenze, "scadenze"),
+        ("💳 Residui", alert_residui, "residui"),
+        ("🚦 Badge/accessi", alert_badge, "badge"),
     ]
 
-    for icon, label, value in cards:
-        border = "#e74c3c" if value else "#d4af37"
-        bg = "#fff7f7" if value else "#fffdf5"
-        st.markdown(
-            f"""
-            <div style="
-                border:1.5px solid {border};
-                border-radius:14px;
-                background:{bg};
-                padding:12px 14px;
-                margin-bottom:10px;
-                box-shadow:0 4px 14px rgba(0,0,0,0.04);
-            ">
-                <div style="font-size:13px;color:#555;font-weight:700;">{icon} {label}</div>
-                <div style="font-size:28px;font-weight:900;line-height:1.1;">{value}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    for label, value, key in buttons:
+        btn_label = f"{label}: {value}"
+        if st.button(btn_label, use_container_width=True, key=f"alert_btn_{key}"):
+            st.session_state["reception_alert_focus"] = key
 
-    st.caption("Pannello compatto: priorità operative.")
+    focus = st.session_state.get("reception_alert_focus")
+    if focus:
+        st.markdown("---")
+        labels = {
+            "certificati": "🔴 Clienti con certificato mancante/scaduto",
+            "scadenze": "🟡 Abbonamenti in scadenza entro 15 giorni",
+            "residui": "💳 Clienti con residuo aperto",
+            "badge": "🚦 Badge/accessi da verificare",
+        }
+        render_alert_detail(labels.get(focus, "Dettaglio alert"), alerts.get(focus, pd.DataFrame()))
+        if st.button("Chiudi dettaglio", use_container_width=True, key="alert_close_detail"):
+            st.session_state["reception_alert_focus"] = None
+            st.rerun()
+    else:
+        st.caption("Clicca un alert per vedere il dettaglio.")
 
+
+def kreo_go_messaggio_cliente():
+    """
+    Apre la migliore sezione comunicazioni disponibile.
+    """
+    for target in ["💬 Messaggio cliente", "📲 Notifiche WhatsApp", "📨 Comunicazioni", "📲 Comunicazioni WhatsApp"]:
+        st.session_state["kreo_force_menu"] = target
+        st.rerun()
 
 def render_reception_center():
     st.header("🏠 Reception Center")
@@ -7693,7 +7819,7 @@ def render_reception_center():
         c7, c8, c9 = st.columns(3)
         with c7:
             if st.button("💬 Messaggio cliente", use_container_width=True, key="rc_btn_messaggio"):
-                kreo_go_to("📲 Notifiche WhatsApp")
+                kreo_go_messaggio_cliente()
         with c8:
             st.empty()
         with c9:
@@ -7780,7 +7906,7 @@ def render_reception_rapida():
             kreo_go_to("🧾 Stampa ricevuta")
     with c5:
         if st.button("📩 Messaggio cliente", use_container_width=True, key="rec_btn_message"):
-            kreo_go_to("📲 Notifiche WhatsApp")
+            kreo_go_messaggio_cliente()
     with c6:
         if st.button("🖥️ Console accessi premium", use_container_width=True, key="rec_btn_console"):
             kreo_go_to("🖥️ Console accessi")
@@ -7968,7 +8094,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.21")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.22")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -7978,6 +8104,9 @@ def main():
         st.rerun()
 
     menu = render_v32_navigation()
+
+
+    render_kreo_welcome_banner()
 
     if menu != "🛎️ Reception rapida":
         st.markdown('<div class="kreo-top-return-spacer"></div>', unsafe_allow_html=True)
@@ -8543,6 +8672,8 @@ def main():
             c3.metric("Scadenza", format_date_it(cliente.get("scadenza_abbonamento")))
 
 
+    elif menu == "💬 Messaggio cliente":
+        render_notifiche_whatsapp()
     elif menu == "📲 Notifiche WhatsApp":
         st.header("Notifiche WhatsApp")
 
