@@ -7842,7 +7842,7 @@ def render_kreo_alert_cards(label, df, alert_type="generico"):
         st.markdown(
             f"""
             <div style="
-                border:1.5px solid rgba(212,175,55,.70);
+                border:1.5px solid {kreo_alert_category_style(alert_type)[1]};
                 border-radius:16px;
                 padding:14px 16px;
                 margin:10px 0;
@@ -8026,16 +8026,18 @@ def render_alert_detail(label, df):
 
 
 
+
 def kreo_alert_category_style(key):
     """
     Semaforo alert:
-    - Rata/residuo in scadenza/aperto = rosso
-    - Certificato scaduto/mancante = rosso
-    - Certificato in scadenza = giallo
-    - Badge/accessi = blu/giallo operativo
+    - Certificati mancanti/scaduti = rosso
+    - Certificati in scadenza = giallo
+    - Rate/residui = rosso
+    - Scadenze abbonamento = giallo
+    - Badge/accessi = blu
     """
     styles = {
-        "certificati": ("🔴", "#e74c3c", "Certificati scaduti/mancanti"),
+        "certificati": ("🔴", "#e74c3c", "Certificati mancanti/scaduti"),
         "certificati_scadenza": ("🟡", "#f1c40f", "Certificati in scadenza"),
         "scadenze": ("🟡", "#f1c40f", "Abbonamenti in scadenza"),
         "residui": ("🔴", "#e74c3c", "Rate/residui aperti"),
@@ -8044,33 +8046,52 @@ def kreo_alert_category_style(key):
     return styles.get(key, ("⚪", "#d4af37", "Alert"))
 
 
+
 def render_alert_center_page():
     """
-    Vista dedicata per approfondire alert, con WhatsApp per cliente.
+    Vista dedicata alert dentro Reception.
     """
     focus = st.session_state.get("reception_alert_focus") or "certificati"
     alerts = kreo_alerts_dataframes()
-
     icon, color, title = kreo_alert_category_style(focus)
 
-    st.header(f"{icon} {title}")
-    st.caption("Vista operativa dedicata: controlla i clienti coinvolti e invia messaggi WhatsApp già pronti.")
+    if st.button("⬅️ Torna alla Reception", key="alert_center_back_to_reception"):
+        st.session_state["reception_internal_view"] = None
+        st.rerun()
+
+    st.markdown(
+        f"""
+        <div style="
+            border:2px solid {color};
+            border-radius:18px;
+            padding:16px 20px;
+            margin:10px 0 18px 0;
+            background:#fffdf7;
+            box-shadow:0 8px 22px rgba(0,0,0,.06);
+        ">
+            <div style="font-size:14px;font-weight:900;color:{color};">ALERT CENTER</div>
+            <div style="font-size:30px;font-weight:950;color:#111;">{icon} {title}</div>
+            <div style="font-size:13px;color:#555;">Vista dedicata: controlla i clienti e invia messaggi WhatsApp già pronti.</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        if st.button("🔴 Certificati", use_container_width=True):
+        if st.button("🔴 Certificati", use_container_width=True, key="alert_center_cert"):
             st.session_state["reception_alert_focus"] = "certificati"
             st.rerun()
     with c2:
-        if st.button("🟡 Scadenze", use_container_width=True):
+        if st.button("🟡 Scadenze", use_container_width=True, key="alert_center_scad"):
             st.session_state["reception_alert_focus"] = "scadenze"
             st.rerun()
     with c3:
-        if st.button("🔴 Residui/rate", use_container_width=True):
+        if st.button("🔴 Residui/rate", use_container_width=True, key="alert_center_res"):
             st.session_state["reception_alert_focus"] = "residui"
             st.rerun()
     with c4:
-        if st.button("🔵 Badge/accessi", use_container_width=True):
+        if st.button("🔵 Badge/accessi", use_container_width=True, key="alert_center_badge"):
             st.session_state["reception_alert_focus"] = "badge"
             st.rerun()
 
@@ -8081,7 +8102,7 @@ def render_alert_center_page():
 
 def render_reception_alert_side_panel():
     """
-    Alert live come pulsanti: click apre vista dedicata.
+    Alert live laterali: colori reali + click apre vista dedicata interna.
     """
     st.markdown("### 🚨 Alert live")
 
@@ -8096,13 +8117,29 @@ def render_reception_alert_side_panel():
 
     for key in ["certificati", "scadenze", "residui", "badge"]:
         icon, color, title = kreo_alert_category_style(key)
-        label = f"{icon} {title}: {counts[key]}"
-        if st.button(label, use_container_width=True, key=f"alert_btn_{key}"):
-            st.session_state["reception_alert_focus"] = key
-            st.session_state["kreo_force_menu"] = "🚨 Alert Center"
-            st.rerun()
 
-    st.caption("Clicca un alert per aprire la vista dedicata.")
+        st.markdown(
+            f"""
+            <div style="
+                border:2px solid {color};
+                border-radius:16px;
+                padding:10px 12px;
+                margin:10px 0 6px 0;
+                background:#fffdf7;
+                box-shadow:0 5px 16px rgba(0,0,0,.05);
+            ">
+                <div style="font-size:13px;font-weight:900;color:{color};">{icon} {title}</div>
+                <div style="font-size:26px;font-weight:950;color:#111;">{counts[key]}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        if st.button(f"Apri {title}", use_container_width=True, key=f"alert_open_btn_{key}"):
+            kreo_open_alert_center_direct(key)
+
+    st.caption("Clicca Apri per entrare nel dettaglio operativo.")
+
 
 def kreo_go_messaggio_cliente_disabled():
     """
@@ -8113,7 +8150,7 @@ def kreo_go_messaggio_cliente_disabled():
         st.rerun()
 
 
-def kreo_go_accesso_tornello():
+def kreo_open_tornello_direct():
     """
     Apre la vista tornello disponibile, con fallback robusto.
     """
@@ -8121,7 +8158,63 @@ def kreo_go_accesso_tornello():
         st.session_state["kreo_force_menu"] = target
         st.rerun()
 
+
+def kreo_set_nav_direct(area, funzione):
+    """
+    Navigazione robusta per il menu laterale KREO.
+    Usa sia kreo_force_menu sia chiavi comuni di session_state.
+    """
+    st.session_state["kreo_force_area"] = area
+    st.session_state["kreo_force_menu"] = funzione
+    st.session_state["kreo_area"] = area
+    st.session_state["kreo_menu"] = funzione
+    st.session_state["area"] = area
+    st.session_state["menu"] = funzione
+    st.session_state["selected_area"] = area
+    st.session_state["selected_menu"] = funzione
+    st.rerun()
+
+
+def kreo_open_tornello_direct():
+    """
+    Apre direttamente la vista tornello/check-in.
+    """
+    st.session_state["reception_internal_view"] = None
+    kreo_set_nav_direct("👥 Clienti", "🚪 Accessi tornello")
+
+
+def kreo_open_alert_center_direct(alert_key):
+    """
+    Apre Alert Center dentro Reception, senza passare da dispatcher esterno.
+    """
+    st.session_state["reception_alert_focus"] = alert_key
+    st.session_state["reception_internal_view"] = "alert_center"
+    st.rerun()
+
+
+def kreo_alert_button(label, value, key, color, icon):
+    """
+    Bottone alert colorato, visibile, cliccabile.
+    """
+    st.markdown(
+        f"""
+        <style>
+        div[data-testid="stButton"] button[kind="secondary"] {{
+            border-radius: 14px !important;
+            font-weight: 850 !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    return st.button(f"{icon} {label}: {value}", use_container_width=True, key=f"alert_open_{key}")
+
+
 def render_reception_center():
+    if st.session_state.get("reception_internal_view") == "alert_center":
+        render_alert_center_page()
+        return
+
     st.header("🏠 Reception Center")
     st.caption("Operatività quotidiana: clienti, incassi, tornello, agenda e comunicazioni.")
 
@@ -8163,7 +8256,7 @@ def render_reception_center():
         c4, c5, c6 = st.columns(3)
         with c4:
             if st.button("🚦 Accesso tornello", use_container_width=True, key="rc_btn_tornello"):
-                kreo_go_accesso_tornello()
+                kreo_open_tornello_direct()
         with c5:
             if st.button("📅 Agenda / Calendario", use_container_width=True, key="rc_btn_agenda"):
                 kreo_go_to("✨ Agenda Luxury")
@@ -8239,19 +8332,19 @@ def render_reception_rapida():
         if st.button("🚨 Alert clienti", use_container_width=True, key="rec_btn_alert"):
             kreo_go_to("🚨 Alert clienti")
         if st.button("♻️ Ricalcolo lezioni", use_container_width=True, key="rec_btn_recalc"):
-            kreo_go_accesso_tornello()
+            kreo_open_tornello_direct()
     with c2:
         if st.button("✏️ Modifica cliente", use_container_width=True, key="rec_btn_edit_client"):
             kreo_go_to("✏️ Modifica cliente")
         if st.button("🎟️ Associa badge", use_container_width=True, key="rec_btn_badge"):
-            kreo_go_accesso_tornello()
+            kreo_open_tornello_direct()
         if st.button("📅 Agenda / calendario", use_container_width=True, key="rec_btn_calendar"):
             kreo_go_to("✨ Agenda Luxury")
     with c3:
         if st.button("💰 Registra incasso", use_container_width=True, key="rec_btn_payment"):
             kreo_go_to("💳 Gestione incassi")
         if st.button("🔄 Sync accessi / badge", use_container_width=True, key="rec_btn_sync_badge"):
-            kreo_go_accesso_tornello()
+            kreo_open_tornello_direct()
         if st.button("✅ Check-in cliente", use_container_width=True, key="rec_btn_checkin"):
             kreo_go_to("🖥️ Console accessi")
 
@@ -8449,7 +8542,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.27")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.28")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
