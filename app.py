@@ -5951,17 +5951,45 @@ def kreo_render_kpi_cliente_360(cliente):
 
 
 
+
 def kreo_open_cliente_360(cliente_id=None):
     """
-    Apre Cliente 360 in modo robusto.
+    Apre Cliente 360 come vista interna stabile.
+    Non dipende dal menu laterale né dal dispatcher principale.
     """
     if cliente_id not in [None, "", "nan"]:
         st.session_state["cliente_preselezionato_id"] = cliente_id
-    st.session_state["kreo_force_menu"] = "👤 Cliente 360"
+
+    st.session_state["kreo_internal_view"] = "cliente_360"
     st.session_state["kreo_force_area"] = "👥 Clienti"
+    st.session_state["kreo_force_menu"] = "👤 Cliente 360"
     st.session_state["kreo_area"] = "👥 Clienti"
     st.session_state["kreo_menu"] = "👤 Cliente 360"
     st.rerun()
+
+
+def kreo_close_internal_view():
+    st.session_state["kreo_internal_view"] = None
+    st.session_state["kreo_force_menu"] = None
+    st.rerun()
+
+
+def kreo_render_internal_view_if_any():
+    """
+    Router interno globale.
+    Va chiamato subito dopo il banner/header e prima del dispatcher normale.
+    """
+    if st.session_state.get("kreo_internal_view") == "cliente_360":
+        if st.button("⬅️ Torna a Database clienti", key="cliente360_back_database"):
+            st.session_state["kreo_internal_view"] = None
+            st.session_state["kreo_force_area"] = "👥 Clienti"
+            st.session_state["kreo_force_menu"] = "📋 Database clienti"
+            st.rerun()
+        render_cliente_360_page()
+        return True
+    return False
+
+
 
 def render_cliente_360_page():
     st.header("👤 Cliente 360")
@@ -6194,6 +6222,13 @@ def kreo_render_clienti_cards(df, max_rows=20):
         )
 
 
+        try:
+            cid_card = r.get("id")
+            if st.button("👤 Apri Cliente 360", key=f"card_open_cliente360_{cid_card}", use_container_width=True):
+                kreo_open_cliente_360(cid_card)
+        except Exception:
+            pass
+
 def kreo_render_dataframe_tabs(df, title="Dati", card_view=True, table_view=True, max_rows=12):
     """
     Mostra card operative + tabella completa.
@@ -6390,7 +6425,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.36
+    NUOVA LOGICA KREO V35.37
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9851,7 +9886,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.36")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.37")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
