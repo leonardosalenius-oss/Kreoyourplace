@@ -6678,7 +6678,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.43
+    NUOVA LOGICA KREO V35.44
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9872,6 +9872,216 @@ def render_nuovo_cliente():
             st.error(f"Errore creazione cliente: {e}")
 
 
+
+def kreo_staff_load_clienti():
+    try:
+        return load_clienti()
+    except Exception:
+        try:
+            res = get_supabase().table("clienti").select("*").order("cognome").execute()
+            return pd.DataFrame(res.data or [])
+        except Exception:
+            return pd.DataFrame()
+
+
+def kreo_staff_cliente_select(label="Cliente", key="staff_cliente_select"):
+    clienti = kreo_staff_load_clienti()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return None, {}
+
+    clienti = clienti.copy()
+    clienti["label_staff"] = clienti.apply(lambda r: f"{r.get('id','')} - {str(r.get('nome','')).strip()} {str(r.get('cognome','')).strip()}".strip(), axis=1)
+    selected = st.selectbox(label, clienti["label_staff"].tolist(), key=key)
+    try:
+        cid = int(str(selected).split(" - ")[0])
+        row = clienti[pd.to_numeric(clienti["id"], errors="coerce") == cid].iloc[0].to_dict()
+        return cid, row
+    except Exception:
+        return None, {}
+
+
+def render_staff_modifica_cliente():
+    st.header("✏️ Modifica cliente rapida")
+    cid, cliente = kreo_staff_cliente_select("Seleziona cliente da modificare", "staff_modifica_cliente_select")
+    if not cid:
+        return
+
+    with st.form("staff_modifica_cliente_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            nome = st.text_input("Nome", value=str(cliente.get("nome") or ""))
+            cellulare = st.text_input("Cellulare", value=str(cliente.get("cellulare") or cliente.get("telefono") or ""))
+            pacchetto = st.text_input("Pacchetto", value=str(cliente.get("pacchetto") or ""))
+        with c2:
+            cognome = st.text_input("Cognome", value=str(cliente.get("cognome") or ""))
+            email = st.text_input("Email", value=str(cliente.get("email") or ""))
+            note = st.text_area("Note", value=str(cliente.get("note") or ""), height=90)
+
+        salva = st.form_submit_button("Salva modifiche")
+
+    if salva:
+        try:
+            get_supabase().table("clienti").update({
+                "nome": nome.strip(),
+                "cognome": cognome.strip(),
+                "cellulare": cellulare.strip(),
+                "email": email.strip(),
+                "pacchetto": pacchetto.strip(),
+                "note": note,
+            }).eq("id", cid).execute()
+            try: st.cache_data.clear()
+            except Exception: pass
+            st.success("Cliente aggiornato.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Errore modifica cliente: {e}")
+
+
+def render_staff_incasso():
+    st.header("💰 Registra incasso")
+    st.caption("Vista staff semplificata: registra pagamento e aggiorna dati cliente dove possibile.")
+
+    cid, cliente = kreo_staff_cliente_select("Cliente", "staff_incasso_cliente")
+    if not cid:
+        return
+
+    with st.form("staff_incasso_form"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            importo = st.number_input("Importo incassato", min_value=0.0, value=0.0, step=10.0)
+        with c2:
+            metodo = st.selectbox("Metodo", ["Contanti", "Carta", "Bonifico", "Altro"])
+        with c3:
+            data_pag = st.date_input("Data pagamento", value=date.today())
+        note = st.text_area("Note", value="")
+        salva = st.form_submit_button("Registra incasso")
+
+    if salva:
+        if importo <= 0:
+            st.error("Inserisci un importo maggiore di zero.")
+            return
+        try:
+            payload = {
+                "cliente_id": cid,
+                "data_pagamento": str(data_pag),
+                "importo": float(importo),
+                "metodo_pagamento": metodo,
+                "note": note,
+                "created_at": datetime.now().isoformat(),
+            }
+            get_supabase().table("pagamenti").insert(payload).execute()
+
+            # aggiorna importo_pagato/residuo se colonne esistono
+            try:
+                imp_pag = float(cliente.get("importo_pagato") or 0) + float(importo)
+                imp_tot = float(cliente.get("importo") or 0)
+                upd = {"importo_pagato": imp_pag}
+                if imp_tot:
+                    upd["residuo"] = max(imp_tot - imp_pag, 0)
+                    upd["stato_pagamento"] = "SALDATO" if upd["residuo"] <= 0 else "PARZIALE"
+                get_supabase().table("clienti").update(upd).eq("id", cid).execute()
+            except Exception:
+                pass
+
+            try: st.cache_data.clear()
+            except Exception: pass
+            st.success("Incasso registrato.")
+        except Exception as e:
+            st.error(f"Errore registrazione incasso: {e}")
+
+
+def render_staff_ricevuta():
+    st.header("🧾 Stampa ricevuta")
+    st.caption("Ricevuta rapida per staff. Seleziona cliente, importo e causale.")
+
+    cid, cliente = kreo_staff_cliente_select("Cliente", "staff_ricevuta_cliente")
+    if not cid:
+        return
+
+    c1, c2 = st.columns(2)
+    with c1:
+        importo = st.number_input("Importo ricevuta", min_value=0.0, value=0.0, step=10.0)
+        data_doc = st.date_input("Data", value=date.today(), key="staff_ricevuta_data")
+    with c2:
+        causale = st.text_input("Causale", value="Pagamento abbonamento / lezioni KREO")
+        metodo = st.selectbox("Metodo pagamento", ["Contanti", "Carta", "Bonifico", "Altro"], key="staff_ricevuta_metodo")
+
+    nome = f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip()
+    st.markdown(
+        f"""
+        <div style="border:1.5px solid rgba(212,175,55,.7);border-radius:18px;background:#fffdf7;padding:18px;margin:14px 0;">
+            <h3>Ricevuta pagamento</h3>
+            <p><b>Cliente:</b> {nome}</p>
+            <p><b>Data:</b> {data_doc}</p>
+            <p><b>Importo:</b> € {importo:.2f}</p>
+            <p><b>Metodo:</b> {metodo}</p>
+            <p><b>Causale:</b> {causale}</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.info("Per ora questa vista genera l'anteprima ricevuta. La stampa PDF può essere collegata nel prossimo step.")
+
+
+def render_staff_messaggio_cliente():
+    st.header("💬 Messaggio cliente")
+    cid, cliente = kreo_staff_cliente_select("Cliente", "staff_msg_cliente")
+    if not cid:
+        return
+
+    nome = f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip()
+    phone = cliente.get("cellulare") or cliente.get("telefono") or ""
+    template = st.selectbox("Template", [
+        "Messaggio personalizzato",
+        "Promemoria certificato medico",
+        "Promemoria pagamento/rata",
+        "Promemoria appuntamento",
+    ])
+
+    default = f"Ciao {nome}, ti contattiamo da KREO."
+    if template == "Promemoria certificato medico":
+        default = f"Ciao {nome}, ti ricordiamo di aggiornare il certificato medico per continuare ad allenarti da KREO."
+    elif template == "Promemoria pagamento/rata":
+        default = f"Ciao {nome}, ti ricordiamo che risulta una rata/pagamento da verificare presso KREO."
+    elif template == "Promemoria appuntamento":
+        default = f"Ciao {nome}, ti ricordiamo il tuo prossimo appuntamento da KREO."
+
+    msg = st.text_area("Messaggio WhatsApp", value=default, height=120)
+    try:
+        wa = kreo_whatsapp_url(phone, msg)
+        st.link_button("📲 Apri WhatsApp", wa, use_container_width=True)
+    except Exception:
+        st.warning("Numero WhatsApp non disponibile o funzione WhatsApp non trovata.")
+
+
+def render_staff_reception_home():
+    st.header("🏠 Reception Staff")
+    st.caption("Vista semplificata per operatività quotidiana.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("➕ Nuovo cliente", use_container_width=True, key="staff_home_new"):
+            kreo_open_reception_internal("nuovo_cliente")
+        if st.button("💰 Registra incasso", use_container_width=True, key="staff_home_incasso"):
+            kreo_open_reception_internal("incasso")
+    with c2:
+        if st.button("✏️ Modifica cliente", use_container_width=True, key="staff_home_mod"):
+            kreo_open_reception_internal("modifica_cliente")
+        if st.button("🧾 Stampa ricevuta", use_container_width=True, key="staff_home_ricevuta"):
+            kreo_open_reception_internal("ricevuta")
+    with c3:
+        if st.button("🚦 Accesso tornello", use_container_width=True, key="staff_home_tornello"):
+            kreo_open_reception_internal("tornello")
+        if st.button("💬 Messaggio cliente", use_container_width=True, key="staff_home_msg"):
+            kreo_open_reception_internal("messaggio")
+
+    st.markdown("---")
+    if st.button("📅 Agenda oggi", use_container_width=True, key="staff_home_agenda"):
+        kreo_open_reception_internal("agenda")
+
+
 def kreo_call_first_available(function_names, friendly_name):
     """
     Chiama la prima funzione esistente tra più nomi possibili.
@@ -9916,29 +10126,11 @@ def kreo_render_reception_internal_view_if_any():
         return True
 
     if view == "modifica_cliente":
-        kreo_call_first_available(
-            [
-                "render_modifica_cliente",
-                "render_modifica_cliente_page",
-                "render_clienti_page",
-                "render_database_clienti",
-                "render_cliente_360_page",
-            ],
-            "Modifica cliente"
-        )
+        render_staff_modifica_cliente()
         return True
 
     if view == "incasso":
-        kreo_call_first_available(
-            [
-                "render_gestione_incassi",
-                "render_incassi",
-                "render_registra_incasso",
-                "render_registra_incasso_page",
-                "render_pagamenti",
-            ],
-            "Registra incasso"
-        )
+        render_staff_incasso()
         return True
 
     if view == "tornello":
@@ -9966,27 +10158,11 @@ def kreo_render_reception_internal_view_if_any():
         return True
 
     if view == "ricevuta":
-        kreo_call_first_available(
-            [
-                "render_stampa_ricevuta",
-                "render_ricevute",
-                "render_ricevuta",
-                "render_pdf_ricevuta",
-            ],
-            "Stampa ricevuta"
-        )
+        render_staff_ricevuta()
         return True
 
     if view == "messaggio":
-        kreo_call_first_available(
-            [
-                "render_messaggio_cliente_page",
-                "render_messaggio_cliente",
-                "render_notifiche_whatsapp",
-                "render_whatsapp_cliente",
-            ],
-            "Messaggio cliente"
-        )
+        render_staff_messaggio_cliente()
         return True
 
     if view == "cliente_360":
@@ -10024,6 +10200,14 @@ def render_reception_center():
         return
 
     if kreo_render_reception_internal_view_if_any():
+        return
+
+    try:
+        role_now = str(st.session_state.get("role") or st.session_state.get("ruolo") or "").lower()
+    except Exception:
+        role_now = ""
+    if role_now == "staff":
+        render_staff_reception_home()
         return
 
     st.header("🏠 Reception Center")
@@ -10354,7 +10538,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.43")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.44")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
