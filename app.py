@@ -5639,6 +5639,184 @@ def safe_update_cliente_contatori(cliente_id, totale, usate, residue):
 
 
 
+
+def kreo_humanize_column_name(col):
+    """
+    Rende leggibili le intestazioni tecniche.
+    """
+    mapping = {
+        "id": "ID",
+        "nome": "Nome",
+        "cognome": "Cognome",
+        "cellulare": "Cellulare",
+        "telefono": "Telefono",
+        "email": "Email",
+        "pacchetto": "Pacchetto",
+        "tipologia_pagamento": "Pagamento",
+        "numero_lezioni": "Lezioni totali",
+        "lezioni_utilizzate": "Usate",
+        "lezioni_residue": "Residue",
+        "importo": "Importo",
+        "cliente": "Cliente",
+        "cliente_id": "Cliente ID",
+        "badge_uid": "Badge",
+        "data_accesso_it": "Data",
+        "data_accesso": "Data",
+        "ora_accesso": "Ora",
+        "stato_accesso": "Stato accesso",
+        "note": "Note",
+        "data_lezione": "Data",
+        "ora_inizio": "Inizio",
+        "ora_fine": "Fine",
+        "trainer": "Trainer",
+        "stato": "Stato",
+    }
+    return mapping.get(str(col), str(col).replace("_", " ").title())
+
+
+def kreo_prepare_display_df(df, max_rows=None):
+    """
+    Prepara dataframe per visualizzazione operativa.
+    """
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame()
+
+    work = df.copy()
+
+    # Elimina colonne tecniche troppo rumorose se presenti
+    technical_cols = [
+        "id_num", "_full", "created_at", "updated_at", "updated_by",
+        "source_system", "source_record_id", "raw_payload", "embedding"
+    ]
+    work = work[[c for c in work.columns if c not in technical_cols]]
+
+    # Formattazioni semplici
+    for c in work.columns:
+        cl = str(c).lower()
+        if "importo" in cl or "prezzo" in cl or "saldo" in cl or "residuo" in cl:
+            try:
+                work[c] = pd.to_numeric(work[c], errors="ignore")
+            except Exception:
+                pass
+
+    if max_rows:
+        work = work.head(max_rows)
+
+    work = work.rename(columns={c: kreo_humanize_column_name(c) for c in work.columns})
+    return work
+
+
+def kreo_render_table(df, title=None, subtitle=None, max_rows=None, height=None, key=None):
+    """
+    Tabella KREO più leggibile: titolo, card, colonne rinominate, meno tecnica.
+    """
+    display_df = kreo_prepare_display_df(df, max_rows=max_rows)
+
+    if title:
+        st.markdown(
+            f"""
+            <div style="
+                border:1.5px solid rgba(212,175,55,.70);
+                border-radius:18px;
+                background:#fffdf7;
+                padding:14px 18px;
+                margin:12px 0 8px 0;
+                box-shadow:0 6px 18px rgba(0,0,0,.05);
+            ">
+                <div style="font-size:20px;font-weight:950;color:#111;">{title}</div>
+                <div style="font-size:12px;color:#666;">{subtitle or ''}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    if display_df.empty:
+        st.info("Nessun dato disponibile.")
+        return
+
+    try:
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            height=height,
+            key=key
+        )
+    except TypeError:
+        st.dataframe(display_df, use_container_width=True, height=height)
+
+
+def kreo_render_clienti_cards(df, max_rows=12):
+    """
+    Vista clienti meno tecnica: card compatte.
+    """
+    if df is None or df.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    work = df.copy().head(max_rows)
+    st.markdown("### 👥 Clienti principali")
+    for _, r in work.iterrows():
+        nome = f"{r.get('nome','')} {r.get('cognome','')}".strip() or str(r.get("cliente", "Cliente"))
+        pac = r.get("pacchetto", "-")
+        cell = r.get("cellulare") or r.get("telefono") or "-"
+        try:
+            residue = int(float(r.get("lezioni_residue") or 0))
+        except Exception:
+            residue = r.get("lezioni_residue") or "-"
+        try:
+            usate = int(float(r.get("lezioni_utilizzate") or 0))
+        except Exception:
+            usate = r.get("lezioni_utilizzate") or "-"
+        importo = r.get("importo", "")
+
+        st.markdown(
+            f"""
+            <div style="
+                border:1.5px solid rgba(212,175,55,.70);
+                border-radius:16px;
+                background:#fffdf7;
+                padding:13px 16px;
+                margin:8px 0;
+                box-shadow:0 5px 15px rgba(0,0,0,.045);
+            ">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
+                    <div>
+                        <div style="font-size:18px;font-weight:950;color:#111;">{nome}</div>
+                        <div style="font-size:12px;color:#555;">{pac} · Tel: {cell}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:22px;font-weight:950;color:#111;">{residue}</div>
+                        <div style="font-size:11px;color:#777;">lezioni residue</div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#666;margin-top:6px;">Usate: {usate} · Importo: {importo}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+def kreo_render_dataframe_tabs(df, title="Dati", card_view=True, table_view=True, max_rows=12):
+    """
+    Mostra card operative + tabella completa.
+    """
+    if df is None or df.empty:
+        st.info("Nessun dato disponibile.")
+        return
+
+    if card_view and table_view:
+        t1, t2 = st.tabs(["Vista semplice", "Tabella completa"])
+        with t1:
+            kreo_render_clienti_cards(df, max_rows=max_rows)
+        with t2:
+            kreo_render_table(df, title=f"📋 {title}", subtitle="Vista completa dati, con intestazioni leggibili.", height=420)
+    elif card_view:
+        kreo_render_clienti_cards(df, max_rows=max_rows)
+    else:
+        kreo_render_table(df, title=f"📋 {title}", subtitle="Vista completa dati, con intestazioni leggibili.", height=420)
+
+
 def kreo_is_pacchetto_personalizzato_strict(pacchetto):
     """
     Pacchetto personalizzato = gestione manuale.
@@ -5815,7 +5993,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.32
+    NUOVA LOGICA KREO V35.33
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -8593,7 +8771,7 @@ def render_kreo_alert_cards(label, df, alert_type="generico"):
                 st.rerun()
 
     with st.expander("Vista tecnica dati"):
-        st.dataframe(df.head(50), use_container_width=True, hide_index=True)
+        kreo_render_table(df.head(50), title="Vista tecnica dati", subtitle="Dettaglio completo dell’alert.", height=360)
 
 
 def render_messaggio_cliente_page():
@@ -8749,7 +8927,7 @@ def render_alert_detail(label, df):
     if df is None or df.empty:
         st.success("Nessun elemento critico.")
         return
-    st.dataframe(df.head(50), use_container_width=True, hide_index=True)
+    kreo_render_table(df.head(50), title="Vista tecnica dati", subtitle="Dettaglio completo dell’alert.", height=360)
 
 
 
@@ -9275,7 +9453,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.32")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.33")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
