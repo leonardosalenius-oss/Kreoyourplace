@@ -6678,7 +6678,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.40
+    NUOVA LOGICA KREO V35.41
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9727,7 +9727,7 @@ def render_reception_alert_side_panel():
         )
 
         if st.button(f"Apri {title}", use_container_width=True, key=f"alert_open_btn_{key}"):
-            kreo_open_alert_center_direct(key)
+            kreo_open_reception_internal("alert_center")
 
     st.caption("Clicca Apri per entrare nel dettaglio operativo.")
 
@@ -9801,6 +9801,107 @@ def kreo_alert_button(label, value, key, color, icon):
     return st.button(f"{icon} {label}: {value}", use_container_width=True, key=f"alert_open_{key}")
 
 
+
+def kreo_open_reception_internal(view_name, cliente_id=None):
+    """
+    Apre una funzione Reception anche per utenze staff/reception.
+    Non dipende dal menu laterale né dai permessi admin del menu.
+    """
+    if cliente_id not in [None, "", "nan"]:
+        st.session_state["cliente_preselezionato_id"] = cliente_id
+
+    st.session_state["reception_internal_view"] = view_name
+    st.session_state["kreo_force_area"] = "🏠 Reception"
+    st.session_state["kreo_force_menu"] = "🏠 Reception Center"
+    st.session_state["kreo_area"] = "🏠 Reception"
+    st.session_state["kreo_menu"] = "🏠 Reception Center"
+    st.rerun()
+
+
+def kreo_render_reception_internal_view_if_any():
+    """
+    Router interno Reception.
+    Permette allo staff di usare i pulsanti senza uscire dalla Reception.
+    """
+    view = st.session_state.get("reception_internal_view")
+    if not view:
+        return False
+
+    if st.button("⬅️ Torna alla Reception", key=f"reception_internal_back_{view}"):
+        st.session_state["reception_internal_view"] = None
+        st.rerun()
+
+    if view == "nuovo_cliente":
+        render_nuovo_cliente()
+        return True
+
+    if view == "modifica_cliente":
+        render_modifica_cliente()
+        return True
+
+    if view == "incasso":
+        if "render_gestione_incassi" in globals():
+            render_gestione_incassi()
+        elif "render_incassi" in globals():
+            render_incassi()
+        elif "render_registra_incasso" in globals():
+            render_registra_incasso()
+        else:
+            st.error("Modulo incassi non trovato.")
+        return True
+
+    if view == "tornello":
+        if "render_accessi_tornello_operativo_page" in globals():
+            render_accessi_tornello_operativo_page()
+        else:
+            st.error("Modulo tornello non trovato.")
+        return True
+
+    if view == "agenda":
+        if "render_agenda_light_launch" in globals():
+            render_agenda_light_launch()
+        elif "render_agenda_luxury" in globals():
+            render_agenda_luxury()
+        else:
+            st.error("Modulo agenda non trovato.")
+        return True
+
+    if view == "ricevuta":
+        if "render_stampa_ricevuta" in globals():
+            render_stampa_ricevuta()
+        elif "render_ricevute" in globals():
+            render_ricevute()
+        else:
+            st.error("Modulo ricevute non trovato.")
+        return True
+
+    if view == "messaggio":
+        if "render_messaggio_cliente_page" in globals():
+            render_messaggio_cliente_page()
+        elif "render_notifiche_whatsapp" in globals():
+            render_notifiche_whatsapp()
+        else:
+            st.error("Modulo messaggi cliente non trovato.")
+        return True
+
+    if view == "cliente_360":
+        if "render_cliente_360_page" in globals():
+            render_cliente_360_page()
+        else:
+            st.error("Modulo Cliente 360 non trovato.")
+        return True
+
+    if view == "alert_center":
+        if "render_alert_center_page" in globals():
+            render_alert_center_page()
+        else:
+            st.error("Modulo Alert Center non trovato.")
+        return True
+
+    st.error(f"Vista Reception non riconosciuta: {view}")
+    return True
+
+
 def render_reception_center():
     if st.session_state.get("reception_internal_view") == "alert_center":
         render_alert_center_page()
@@ -9808,6 +9909,9 @@ def render_reception_center():
 
     if st.session_state.get("reception_internal_view") == "tornello":
         render_accessi_tornello_inline_from_reception()
+        return
+
+    if kreo_render_reception_internal_view_if_any():
         return
 
     st.header("🏠 Reception Center")
@@ -9840,33 +9944,32 @@ def render_reception_center():
         c1, c2, c3 = st.columns(3)
         with c1:
             if st.button("➕ Nuovo cliente", use_container_width=True, key="rc_btn_nuovo_cliente"):
-                kreo_go_to("➕ Nuovo cliente")
+               kreo_open_reception_internal("nuovo_cliente")
         with c2:
             if st.button("✏️ Modifica cliente", use_container_width=True, key="rc_btn_modifica_cliente"):
-                kreo_go_to("✏️ Modifica cliente")
+               kreo_open_reception_internal("modifica_cliente")
         with c3:
             if st.button("💳 Registra incasso", use_container_width=True, key="rc_btn_incasso"):
-                kreo_go_to("💳 Gestione incassi")
+               kreo_open_reception_internal("incasso")
 
         c4, c5, c6 = st.columns(3)
         with c4:
             if st.button("🚦 Accesso tornello", use_container_width=True, key="rc_btn_tornello"):
-                st.session_state["reception_internal_view"] = "tornello"
-                st.rerun()
+               kreo_open_reception_internal("tornello")
         with c5:
             if st.button("📅 Agenda / Calendario", use_container_width=True, key="rc_btn_agenda"):
-                kreo_go_to("✨ Agenda Luxury")
+               kreo_open_reception_internal("agenda")
         with c6:
             if st.button("🧾 Stampa ricevuta", use_container_width=True, key="rc_btn_ricevuta"):
-                kreo_go_to("🧾 Stampa ricevuta")
+               kreo_open_reception_internal("ricevuta")
 
         c7, c8, c9 = st.columns(3)
         with c7:
             if st.button("💬 Messaggio cliente", use_container_width=True, key="rc_btn_messaggio"):
-                kreo_go_to("💬 Messaggio cliente")
+               kreo_open_reception_internal("messaggio")
         with c8:
             if st.button("👤 Cliente 360", use_container_width=True, key="rc_btn_cliente_360"):
-                kreo_open_cliente_360()
+               kreo_open_reception_internal("cliente_360")
         with c9:
             st.empty()
 
@@ -10139,7 +10242,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.40")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.41")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
