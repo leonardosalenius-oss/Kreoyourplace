@@ -2745,6 +2745,43 @@ def build_staff_dashboard(df_clienti):
 
 
 DOCUMENTI_BUCKET_PRIVATO = "documenti_privati"
+
+def kreo_document_bucket_status():
+    """
+    Verifica se il bucket documenti esiste.
+    Bucket standard: documenti-clienti.
+    """
+    sb = get_supabase()
+    preferred = globals().get("DOCUMENTI_BUCKET_PRIVATO", "documenti-clienti")
+    candidates = [preferred, "documenti-clienti", "documenti_cliente", "documenti-clienti-kreo"]
+
+    try:
+        buckets = sb.storage.list_buckets()
+        names = []
+        for b in buckets:
+            if isinstance(b, dict):
+                names.append(b.get("name"))
+            else:
+                names.append(getattr(b, "name", None))
+        names = [n for n in names if n]
+    except Exception:
+        names = []
+
+    for c in candidates:
+        if c in names:
+            return c, True, names
+
+    return preferred or "documenti-clienti", False, names
+
+
+def kreo_bucket_missing_text(bucket_name, existing):
+    existing_txt = ", ".join(existing) if existing else "nessun bucket rilevato"
+    return (
+        "Bucket Supabase Storage non trovato. "
+        f"Crea un bucket privato chiamato '{bucket_name}' in Supabase > Storage > New bucket. "
+        f"Bucket rilevati: {existing_txt}."
+    )
+
 ASSETS_BUCKET_PUBBLICO = "assets_pubblici"
 
 
@@ -2908,17 +2945,24 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
 
     sb = get_supabase()
 
+    bucket_name, bucket_ok, existing_buckets = kreo_document_bucket_status()
+    if not bucket_ok:
+        return False, kreo_bucket_missing_text(bucket_name, existing_buckets)
+
     safe_name = file.name.replace(" ", "_").replace("/", "_").replace("\\", "_")
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     path = f"cliente_{cliente_id}/{tipo_documento.lower().replace(' ', '_')}_{timestamp}_{safe_name}"
 
     try:
-        sb.storage.from_(DOCUMENTI_BUCKET_PRIVATO).upload(
+        sb.storage.from_(bucket_name).upload(
             path,
             file.getvalue(),
             {"content-type": "application/pdf", "x-upsert": "true"}
         )
     except Exception as e:
+        err = str(e)
+        if "Bucket not found" in err or "bucket" in err.lower():
+            return False, kreo_bucket_missing_text(bucket_name, existing_buckets)
         return False, f"Errore upload documento: {e}"
 
     public_url = ""  # documento privato: link generato temporaneamente
@@ -2949,7 +2993,6 @@ def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""
     )
 
     return True, "Documento caricato correttamente."
-
 
 
 def delete_documento(documento_id):
@@ -6678,7 +6721,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.44
+    NUOVA LOGICA KREO V35.46
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -10056,6 +10099,61 @@ def render_staff_messaggio_cliente():
         st.warning("Numero WhatsApp non disponibile o funzione WhatsApp non trovata.")
 
 
+
+def kreo_current_role_safe():
+    """
+    Recupera il ruolo reale dell'utente da tutte le varianti usate nel codice storico.
+    """
+    candidates = []
+
+    for k in ["role", "ruolo", "user_role", "current_role"]:
+        try:
+            candidates.append(st.session_state.get(k))
+        except Exception:
+            pass
+
+    for k in ["user", "auth_user", "current_user", "utente", "login_user"]:
+        try:
+            u = st.session_state.get(k)
+            if isinstance(u, dict):
+                candidates.extend([
+                    u.get("role"),
+                    u.get("ruolo"),
+                    u.get("tipo"),
+                    u.get("profilo"),
+                    u.get("username"),
+                    u.get("email"),
+                    u.get("nome"),
+                ])
+            else:
+                candidates.append(u)
+        except Exception:
+            pass
+
+    txt = " ".join([str(x).lower() for x in candidates if x not in [None, "", "nan"]])
+
+    if "admin" in txt or "pentti" in txt:
+        return "admin"
+    if "staff" in txt or "v.crinisio" in txt or "vincenzo" in txt or "crinisio" in txt:
+        return "staff"
+    if "cliente" in txt:
+        return "cliente"
+
+    # fallback: se vede solo Reception/Agenda e non Admin, trattalo come staff operativo
+    try:
+        visible_area = str(st.session_state.get("kreo_area") or st.session_state.get("area") or "").lower()
+        if "reception" in visible_area:
+            return "staff"
+    except Exception:
+        pass
+
+    return txt or ""
+
+
+def kreo_is_staff_user():
+    return kreo_current_role_safe() == "staff"
+
+
 def render_staff_reception_home():
     st.header("🏠 Reception Staff")
     st.caption("Vista semplificata per operatività quotidiana.")
@@ -10202,11 +10300,7 @@ def render_reception_center():
     if kreo_render_reception_internal_view_if_any():
         return
 
-    try:
-        role_now = str(st.session_state.get("role") or st.session_state.get("ruolo") or "").lower()
-    except Exception:
-        role_now = ""
-    if role_now == "staff":
+    if kreo_is_staff_user():
         render_staff_reception_home()
         return
 
@@ -10538,7 +10632,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.44")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.46")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
