@@ -7007,6 +7007,9 @@ def render_reception_accessi_smart_panel():
     st.markdown("### Ultimo accesso")
     render_checkin_event_card(latest, clienti_map, key_prefix="latest_checkin")
 
+    with st.expander("✅ Autorizza presenza extra", expanded=False):
+        kreo_autorizza_presenza_extra(latest)
+
     st.markdown("---")
     st.markdown("### 🎟️ Associa ultimo badge letto")
     badge_uid = str(latest.get("badge_uid") or "").strip()
@@ -7862,6 +7865,183 @@ def kreo_resolve_access_client_row(row):
     return out
 
 
+
+def kreo_cliente_nome_by_id_safe(cliente_id):
+    try:
+        anag = kreo_get_cliente_by_id_safe(cliente_id)
+        if not anag:
+            return ""
+        nome = str(anag.get("nome") or "").strip()
+        cognome = str(anag.get("cognome") or "").strip()
+        full = (nome + " " + cognome).strip()
+        return full or str(anag.get("cliente") or "")
+    except Exception:
+        return ""
+
+
+def kreo_accesso_label_umano(row):
+    try:
+        r = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        r = {}
+
+    try:
+        rr = kreo_resolve_access_client_row(r)
+    except Exception:
+        rr = r
+
+    cliente = str(rr.get("cliente") or "").strip()
+    if not cliente:
+        cliente = kreo_cliente_nome_by_id_safe(rr.get("cliente_id"))
+    if not cliente:
+        badge_uid = rr.get("badge_uid") or "-"
+        cliente = f"Badge non associato {badge_uid}"
+
+    accesso_id = rr.get("id") or "-"
+    data_txt = rr.get("data_accesso_it") or rr.get("data_accesso") or "-"
+    ora = rr.get("ora_accesso") or "-"
+    badge = rr.get("badge_uid") or "-"
+    stato = rr.get("stato_accesso") or ""
+    return f"{accesso_id} | {data_txt} {ora} | {cliente} | badge {badge} | {stato}"
+
+
+def kreo_render_annulla_accesso_select(accessi_df):
+    if accessi_df is None or accessi_df.empty:
+        st.info("Nessun accesso da annullare.")
+        return None
+
+    df = accessi_df.copy()
+    try:
+        df["id_num"] = pd.to_numeric(df["id"], errors="coerce").fillna(0).astype(int)
+        df = df.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+
+    labels = []
+    id_by_label = {}
+    for _, r in df.iterrows():
+        label = kreo_accesso_label_umano(r)
+        labels.append(label)
+        try:
+            id_by_label[label] = int(r.get("id"))
+        except Exception:
+            id_by_label[label] = r.get("id")
+
+    st.markdown(
+        """
+        <div style="
+            border:1.5px solid rgba(212,175,55,.75);
+            background:#fffdf6;
+            border-radius:16px;
+            padding:14px 16px;
+            margin:12px 0;
+            box-shadow:0 6px 18px rgba(0,0,0,.05);
+        ">
+            <div style="font-size:18px;font-weight:950;color:#111;">🧯 Annulla accesso selezionato</div>
+            <div style="font-size:12px;color:#555;">Scegli per nome cliente, ora e badge. L’accesso annullato non verrà ricalcolato.</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    selected = st.selectbox("Accesso da annullare", labels, key="annulla_accesso_label_umano")
+    return id_by_label.get(selected)
+
+
+def kreo_autorizza_presenza_extra(accesso_row=None):
+    st.markdown("### ✅ Autorizza presenza extra")
+    st.caption("Quando il cliente può entrare anche se il sistema segnala anomalia o fuori pacchetto.")
+
+    try:
+        accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    except Exception:
+        accessi = pd.DataFrame()
+
+    if accessi.empty:
+        st.info("Nessun accesso disponibile.")
+        return
+
+    try:
+        accessi["id_num"] = pd.to_numeric(accessi["id"], errors="coerce").fillna(0).astype(int)
+        accessi = accessi.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+
+    labels = []
+    row_by_label = {}
+    for _, r in accessi.head(20).iterrows():
+        label = kreo_accesso_label_umano(r)
+        labels.append(label)
+        row_by_label[label] = r.to_dict()
+
+    selected = st.selectbox("Accesso/badge da autorizzare", labels, key="extra_accesso_select")
+    row = row_by_label.get(selected, {})
+    resolved = kreo_resolve_access_client_row(row)
+
+    cliente = resolved.get("cliente") or kreo_cliente_nome_by_id_safe(resolved.get("cliente_id")) or "Cliente non associato"
+    badge = resolved.get("badge_uid") or "-"
+    accesso_id = resolved.get("id")
+
+    motivi = [
+        "Recupero lezione autorizzato",
+        "Prova / ingresso omaggio autorizzato",
+        "Errore lettura badge / PerfectGym",
+        "Cliente autorizzato dalla direzione",
+        "Altro"
+    ]
+    motivo = st.selectbox("Motivazione", motivi, key="extra_motivo_select")
+    nota = st.text_area("Nota interna", value=f"Presenza extra autorizzata per {cliente} - badge {badge}. Motivo: {motivo}", key="extra_nota_text")
+
+    st.markdown(
+        f"""
+        <div style="
+            border:1.5px solid #2ecc71;
+            background:#f3fff7;
+            border-radius:16px;
+            padding:14px 16px;
+            margin:10px 0;
+        ">
+            <div style="font-size:18px;font-weight:950;">{cliente}</div>
+            <div style="font-size:12px;color:#444;">Badge: {badge} · Accesso ID: {accesso_id}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if st.button("✅ Autorizza presenza extra", use_container_width=True, key="btn_autorizza_presenza_extra"):
+        try:
+            payload = {
+                "cliente_id": resolved.get("cliente_id"),
+                "data_presenza": str(date.today()),
+                "ora_presenza": datetime.now().strftime("%H:%M:%S"),
+                "tipo": "PRESENZA_EXTRA",
+                "note": nota,
+            }
+            try:
+                supabase.table("presenze_clienti").insert(payload).execute()
+            except Exception:
+                supabase.table("cronologia").insert({
+                    "azione": "PRESENZA_EXTRA_AUTORIZZATA",
+                    "dettaglio": nota,
+                    "created_at": datetime.now().isoformat()
+                }).execute()
+
+            try:
+                old_note = str(resolved.get("note") or "")
+                new_note = (old_note + " | " if old_note else "") + f"PRESENZA EXTRA AUTORIZZATA: {motivo}"
+                supabase.table("accessi_tornello").update({
+                    "note": new_note,
+                    "stato_accesso": "PRESENZA_EXTRA_AUTORIZZATA"
+                }).eq("id", accesso_id).execute()
+            except Exception:
+                pass
+
+            st.success("Presenza extra autorizzata e registrata.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Errore autorizzazione presenza extra: {e}")
+
+
 def render_accessi_tornello_inline_from_reception():
     """
     Vista tornello renderizzata direttamente dentro Reception.
@@ -8625,7 +8805,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.29")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.30")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
