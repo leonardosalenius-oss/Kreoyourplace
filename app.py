@@ -6721,7 +6721,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.46
+    NUOVA LOGICA KREO V35.49
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -8212,6 +8212,72 @@ def render_checkin_event_card(row, clienti_map=None, key_prefix="checkin"):
             st.caption(note)
 
 
+
+def kreo_extra_should_scale_lesson(motivo_autorizzazione):
+    """
+    Decide se l'autorizzazione extra deve consumare una lezione.
+    Regola:
+    - presenza valida / recupero autorizzato / normale ingresso autorizzato => scala
+    - extra omaggio / prova / errore tornello / ingresso tecnico => non scala
+    """
+    m = str(motivo_autorizzazione or "").upper()
+    no_scale_keywords = ["OMAGGIO", "PROVA", "ERRORE TORNELLO", "NON SCALARE", "INGRESSO TECNICO", "VISITA"]
+    if any(k in m for k in no_scale_keywords):
+        return False
+    scale_keywords = ["RECUPERO", "PRESENZA VALIDA", "SCALA", "INGRESSO AUTORIZZATO", "LEZIONE AUTORIZZATA"]
+    if any(k in m for k in scale_keywords):
+        return True
+    # Default prudente: non scalare se non è chiarissimo
+    return False
+
+
+def kreo_registra_presenza_extra_autorizzata(cliente_id, accesso_id=None, motivo="", nota="", scala_lezione=False):
+    """
+    Centralizza la decisione:
+    - registra movimento lezione coerente
+    - aggiorna contatori se serve
+    - lascia traccia in cronologia
+    """
+    qty = 1 if scala_lezione else 0
+    tipo = "EXTRA_AUTORIZZATA_SCALA" if scala_lezione else "EXTRA_AUTORIZZATA_NO_SCALA"
+
+    try:
+        if "registra_movimento_lezione" in globals():
+            registra_movimento_lezione(
+                cliente_id,
+                "SCALA" if scala_lezione else "EXTRA_AUTORIZZATA",
+                qty,
+                motivo or "Presenza extra autorizzata",
+                accesso_id=accesso_id,
+                note=nota or ""
+            )
+    except Exception:
+        pass
+
+    try:
+        insert_history(
+            cliente_id,
+            tipo,
+            "",
+            motivo or "",
+            nota or f"Presenza extra autorizzata. Scala lezione: {scala_lezione}"
+        )
+    except Exception:
+        pass
+
+    if scala_lezione:
+        try:
+            aggiorna_contatori_dopo_presenza_lezione(cliente_id)
+        except Exception:
+            try:
+                totale, usate, residue, extra = contatori_cumulativi_cliente(cliente_id)
+                safe_update_cliente_contatori(cliente_id, totale, usate, residue)
+            except Exception:
+                pass
+
+    return True
+
+
 def render_reception_accessi_smart_panel():
     st.subheader("🚦 Check-In Center")
     st.caption("Nuova logica: Accesso ≠ Presenza ≠ Consumo. Il tornello genera eventi; KREO interpreta e gestisce lezioni.")
@@ -8238,6 +8304,21 @@ def render_reception_accessi_smart_panel():
     st.markdown("### Ultimo accesso")
     render_checkin_event_card(latest, clienti_map, key_prefix="latest_checkin")
 
+    tipo_autorizzazione_extra = st.selectbox(
+        "Tipo autorizzazione",
+        [
+            "Recupero lezione autorizzato - scala 1 lezione",
+            "Presenza valida autorizzata - scala 1 lezione",
+            "Extra omaggio / prova - non scala lezione",
+            "Errore tornello / verifica manuale - non scala lezione",
+        ],
+        key="tipo_autorizzazione_extra_scala"
+    )
+    scala_lezione_extra = kreo_extra_should_scale_lesson(tipo_autorizzazione_extra)
+    if scala_lezione_extra:
+        st.warning("Questa autorizzazione scalerà 1 lezione dal cliente.")
+    else:
+        st.info("Questa autorizzazione NON scalerà lezioni. Verrà solo tracciata.")
     with st.expander("✅ Autorizza presenza extra", expanded=False):
         kreo_autorizza_presenza_extra(latest)
 
@@ -8247,6 +8328,20 @@ def render_reception_accessi_smart_panel():
     current_cliente = latest.get("cliente") or ""
 
     if current_cliente:
+        try:
+            registra_movimento_lezione(cliente_id, "SCALA" if scala_lezione_extra else "EXTRA_AUTORIZZATA", 1 if scala_lezione_extra else 0, motivo if "motivo" in locals() else "Presenza extra autorizzata", accesso_id=accesso_id if "accesso_id" in locals() else None)
+        except Exception:
+            pass
+        try:
+            kreo_registra_presenza_extra_autorizzata(
+                cliente_id,
+                accesso_id=accesso_id if "accesso_id" in locals() else None,
+                motivo=tipo_autorizzazione_extra if "tipo_autorizzazione_extra" in locals() else (motivo if "motivo" in locals() else "Presenza extra autorizzata"),
+                nota=nota if "nota" in locals() else (nota_interna if "nota_interna" in locals() else ""),
+                scala_lezione=scala_lezione_extra if "scala_lezione_extra" in locals() else False
+            )
+        except Exception:
+            pass
         st.success(f"Ultimo badge già associato a: {current_cliente}")
     else:
         st.warning(f"Ultimo badge non associato: {badge_uid}")
@@ -8279,6 +8374,211 @@ def render_reception_accessi_smart_panel():
     with st.expander("Vista tecnica accessi"):
         cols = ["id", "data_accesso_it", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "cooldown_duplicate", "note"]
         st.dataframe(live[[c for c in cols if c in live.columns]].head(30), use_container_width=True, hide_index=True)
+
+def kreo_clienti_lookup_by_badge_safe():
+    """
+    Crea lookup badge -> cliente leggibile.
+    """
+    lookup = {}
+    try:
+        clienti = load_clienti()
+        if clienti is not None and not clienti.empty:
+            for _, r in clienti.iterrows():
+                nome = f"{r.get('nome','')} {r.get('cognome','')}".strip()
+                if not nome:
+                    nome = str(r.get("cliente") or "").strip()
+                cid = r.get("id")
+                for col in ["badge_uid", "badge", "codice_badge", "id_badge", "tessera", "codice_tessera"]:
+                    if col in clienti.columns:
+                        val = str(r.get(col) or "").strip()
+                        if val:
+                            lookup[val] = {"cliente_id": cid, "cliente": nome}
+    except Exception:
+        pass
+
+    for table in ["badge_clienti", "clienti_badge", "badge"]:
+        try:
+            res = get_supabase().table(table).select("*").execute()
+            for b in (res.data or []):
+                badge = str(b.get("badge_uid") or b.get("badge") or b.get("codice_badge") or b.get("uid") or "").strip()
+                cid = b.get("cliente_id") or b.get("id_cliente")
+                nome = ""
+                if cid:
+                    try:
+                        c = kreo_get_cliente_by_id_safe(cid) if "kreo_get_cliente_by_id_safe" in globals() else get_cliente(cid)
+                        nome = f"{c.get('nome','')} {c.get('cognome','')}".strip() if c else ""
+                    except Exception:
+                        nome = ""
+                if badge:
+                    lookup[badge] = {"cliente_id": cid, "cliente": nome or f"Cliente ID {cid}"}
+        except Exception:
+            pass
+    return lookup
+
+
+def kreo_resolve_accessi_names(df):
+    """
+    Aggiunge cliente_nome al registro accessi.
+    """
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame()
+
+    work = df.copy()
+    badge_lookup = kreo_clienti_lookup_by_badge_safe()
+
+    clienti_by_id = {}
+    try:
+        clienti = load_clienti()
+        if clienti is not None and not clienti.empty:
+            for _, r in clienti.iterrows():
+                try:
+                    cid = str(int(float(r.get("id"))))
+                except Exception:
+                    cid = str(r.get("id"))
+                clienti_by_id[cid] = f"{r.get('nome','')} {r.get('cognome','')}".strip()
+    except Exception:
+        pass
+
+    clienti_out = []
+    for _, r in work.iterrows():
+        nome = str(r.get("cliente") or r.get("nome_cliente") or "").strip()
+        cid = r.get("cliente_id") or r.get("id_cliente")
+        badge = str(r.get("badge_uid") or r.get("badge") or "").strip()
+
+        if not nome and cid not in [None, "", "nan"]:
+            try:
+                cid_key = str(int(float(cid)))
+            except Exception:
+                cid_key = str(cid)
+            nome = clienti_by_id.get(cid_key, "")
+
+        if not nome and badge:
+            found = badge_lookup.get(badge)
+            if found:
+                nome = found.get("cliente") or ""
+
+        if not nome:
+            nome = "Badge non associato"
+
+        clienti_out.append(nome)
+
+    work["cliente_nome"] = clienti_out
+
+    preferred = ["id", "data_accesso_it", "ora_accesso", "cliente_nome", "badge_uid", "stato_accesso", "note"]
+    cols = [c for c in preferred if c in work.columns] + [c for c in work.columns if c not in preferred and c not in ["cliente_id_num", "id_num"]]
+    return work[cols]
+
+
+def kreo_accesso_label_umano(row):
+    try:
+        r = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        r = {}
+    try:
+        rr = kreo_resolve_accessi_names(pd.DataFrame([r])).iloc[0].to_dict()
+    except Exception:
+        rr = r
+
+    accesso_id = rr.get("id") or "-"
+    data = rr.get("data_accesso_it") or rr.get("data_accesso") or "-"
+    ora = rr.get("ora_accesso") or "-"
+    cliente = rr.get("cliente_nome") or rr.get("cliente") or "Badge non associato"
+    badge = rr.get("badge_uid") or rr.get("badge") or "-"
+    stato = rr.get("stato_accesso") or ""
+    return f"{accesso_id} | {data} {ora} | {cliente} | badge {badge} | {stato}"
+
+
+def kreo_render_accessi_cards(df, max_rows=30):
+    accessi = kreo_resolve_accessi_names(df)
+    if accessi is None or accessi.empty:
+        st.info("Nessun accesso disponibile.")
+        return
+
+    st.markdown("### 🚦 Registro accessi")
+    for _, r in accessi.head(max_rows).iterrows():
+        cliente = r.get("cliente_nome") or "Badge non associato"
+        data = r.get("data_accesso_it") or r.get("data_accesso") or "-"
+        ora = r.get("ora_accesso") or "-"
+        badge = r.get("badge_uid") or "-"
+        stato = str(r.get("stato_accesso") or "").upper()
+        note = r.get("note") or ""
+
+        if "NEGATO" in stato or "VERIFICARE" in stato:
+            color = "#e74c3c"
+            label = "Da verificare"
+        elif "ANNULL" in stato:
+            color = "#777"
+            label = "Annullato"
+        elif "REGISTRATO" in stato or "ASSOCIATO" in stato:
+            color = "#2ecc71"
+            label = "Associato"
+        else:
+            color = "#f1c40f"
+            label = stato.title() if stato else "Accesso"
+
+        st.markdown(
+            f"""
+            <div style="
+                border:2px solid {color};
+                border-radius:18px;
+                background:#fffdf7;
+                padding:14px 18px;
+                margin:10px 0;
+                box-shadow:0 6px 18px rgba(0,0,0,.045);
+            ">
+                <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
+                    <div>
+                        <div style="font-size:20px;font-weight:950;color:#111;">{cliente}</div>
+                        <div style="font-size:12px;color:#555;margin-top:4px;">{data} · {ora} · Badge {badge}</div>
+                    </div>
+                    <div style="background:{color};color:white;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:900;">
+                        {label}
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#666;margin-top:8px;">{note}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+def kreo_render_annulla_accesso_select(accessi_df):
+    accessi = kreo_resolve_accessi_names(accessi_df)
+    if accessi is None or accessi.empty:
+        st.info("Nessun accesso da annullare.")
+        return None
+
+    try:
+        accessi["id_sort"] = pd.to_numeric(accessi["id"], errors="coerce").fillna(0).astype(int)
+        accessi = accessi.sort_values("id_sort", ascending=False)
+    except Exception:
+        pass
+
+    labels = []
+    id_by_label = {}
+    for _, r in accessi.iterrows():
+        label = kreo_accesso_label_umano(r)
+        labels.append(label)
+        id_by_label[label] = r.get("id")
+
+    selected = st.selectbox("Accesso da annullare", labels, key="annulla_accesso_nome_cliente")
+    return id_by_label.get(selected)
+
+
+
+def kreo_get_supabase_safe():
+    """
+    Ritorna sempre il client Supabase corretto.
+    Evita errori name 'supabase' is not defined nelle funzioni operative.
+    """
+    try:
+        return get_supabase()
+    except Exception:
+        try:
+            return supabase
+        except Exception as e:
+            raise RuntimeError(f"Client Supabase non disponibile: {e}")
+
 
 def render_accessi_tornello_operativo_page():
     st.header("🚦 Check-In Center")
@@ -10632,7 +10932,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.46")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.49")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
