@@ -6678,7 +6678,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.42
+    NUOVA LOGICA KREO V35.43
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9818,10 +9818,80 @@ def kreo_open_reception_internal(view_name, cliente_id=None):
     st.rerun()
 
 
+
+def render_nuovo_cliente():
+    """
+    Fallback operativo per staff: creazione cliente essenziale.
+    """
+    st.header("➕ Nuovo cliente")
+    st.caption("Inserimento rapido da Reception.")
+
+    with st.form("fallback_nuovo_cliente_staff"):
+        c1, c2 = st.columns(2)
+        with c1:
+            nome = st.text_input("Nome")
+            cellulare = st.text_input("Cellulare")
+            pacchetto = st.selectbox("Pacchetto", ["PACCHETTO LUXURY", "PACCHETTO GOLD", "PACCHETTO VIP", "PACCHETTO COACHING IN SEDE", "PACCHETTO PERSONALIZZATO"])
+        with c2:
+            cognome = st.text_input("Cognome")
+            email = st.text_input("Email")
+            numero_lezioni = st.number_input("Numero lezioni iniziali", min_value=0, max_value=200, value=3)
+
+        note = st.text_area("Note")
+        submitted = st.form_submit_button("Salva cliente")
+
+    if submitted:
+        if not nome or not cognome:
+            st.error("Nome e cognome sono obbligatori.")
+            return
+        try:
+            payload = {
+                "nome": nome.strip(),
+                "cognome": cognome.strip(),
+                "cellulare": cellulare.strip(),
+                "email": email.strip(),
+                "pacchetto": pacchetto,
+                "numero_lezioni": int(numero_lezioni),
+                "lezioni_residue": int(numero_lezioni),
+                "lezioni_utilizzate": 0,
+                "note": note,
+            }
+            try:
+                payload["created_at"] = datetime.now().isoformat()
+            except Exception:
+                pass
+            get_supabase().table("clienti").insert(payload).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.success("Cliente creato correttamente.")
+            st.session_state["reception_internal_view"] = None
+            st.rerun()
+        except Exception as e:
+            st.error(f"Errore creazione cliente: {e}")
+
+
+def kreo_call_first_available(function_names, friendly_name):
+    """
+    Chiama la prima funzione esistente tra più nomi possibili.
+    Evita NameError tra admin/staff e versioni storiche del codice.
+    """
+    for fn_name in function_names:
+        fn = globals().get(fn_name)
+        if callable(fn):
+            fn()
+            return True
+
+    st.warning(f"Modulo '{friendly_name}' non disponibile in questa build.")
+    st.caption("La vista non è stata aperta perché la funzione tecnica collegata non è presente con il nome atteso.")
+    return False
+
+
 def kreo_render_reception_internal_view_if_any():
     """
-    Router interno Reception.
-    Permette allo staff di usare i pulsanti senza uscire dalla Reception.
+    Router interno Reception ultra-difensivo.
+    Permette allo staff di usare i pulsanti senza mandare in crash l'app.
     """
     view = st.session_state.get("reception_internal_view")
     if not view:
@@ -9832,80 +9902,115 @@ def kreo_render_reception_internal_view_if_any():
         st.rerun()
 
     if view == "nuovo_cliente":
-        render_nuovo_cliente()
+        kreo_call_first_available(
+            [
+                "render_nuovo_cliente",
+                "render_nuovo_cliente_page",
+                "render_crea_cliente",
+                "render_creazione_cliente",
+                "render_clienti_page",
+                "render_database_clienti",
+            ],
+            "Nuovo cliente"
+        )
         return True
 
     if view == "modifica_cliente":
-        if "render_modifica_cliente" in globals():
-            render_modifica_cliente()
-        elif "render_clienti_page" in globals():
-            render_clienti_page()
-        elif "render_database_clienti" in globals():
-            render_database_clienti()
-        else:
-            st.warning("Modulo modifica cliente non disponibile per utenza staff.")
+        kreo_call_first_available(
+            [
+                "render_modifica_cliente",
+                "render_modifica_cliente_page",
+                "render_clienti_page",
+                "render_database_clienti",
+                "render_cliente_360_page",
+            ],
+            "Modifica cliente"
+        )
         return True
 
     if view == "incasso":
-        if "render_gestione_incassi" in globals():
-            render_gestione_incassi()
-        elif "render_incassi" in globals():
-            render_incassi()
-        elif "render_registra_incasso" in globals():
-            render_registra_incasso()
-        else:
-            st.error("Modulo incassi non trovato.")
+        kreo_call_first_available(
+            [
+                "render_gestione_incassi",
+                "render_incassi",
+                "render_registra_incasso",
+                "render_registra_incasso_page",
+                "render_pagamenti",
+            ],
+            "Registra incasso"
+        )
         return True
 
     if view == "tornello":
-        if "render_accessi_tornello_operativo_page" in globals():
-            render_accessi_tornello_operativo_page()
-        else:
-            st.error("Modulo tornello non trovato.")
+        kreo_call_first_available(
+            [
+                "render_accessi_tornello_operativo_page",
+                "render_checkin_center",
+                "render_tornello",
+                "render_accessi_tornello",
+            ],
+            "Accesso tornello"
+        )
         return True
 
     if view == "agenda":
-        if "render_agenda_light_launch" in globals():
-            render_agenda_light_launch()
-        elif "render_agenda_luxury" in globals():
-            render_agenda_luxury()
-        else:
-            st.error("Modulo agenda non trovato.")
+        kreo_call_first_available(
+            [
+                "render_agenda_light_launch",
+                "render_agenda_luxury",
+                "render_agenda",
+                "render_calendario_unificato_staff",
+            ],
+            "Agenda"
+        )
         return True
 
     if view == "ricevuta":
-        if "render_stampa_ricevuta" in globals():
-            render_stampa_ricevuta()
-        elif "render_ricevute" in globals():
-            render_ricevute()
-        else:
-            st.error("Modulo ricevute non trovato.")
+        kreo_call_first_available(
+            [
+                "render_stampa_ricevuta",
+                "render_ricevute",
+                "render_ricevuta",
+                "render_pdf_ricevuta",
+            ],
+            "Stampa ricevuta"
+        )
         return True
 
     if view == "messaggio":
-        if "render_messaggio_cliente_page" in globals():
-            render_messaggio_cliente_page()
-        elif "render_notifiche_whatsapp" in globals():
-            render_notifiche_whatsapp()
-        else:
-            st.error("Modulo messaggi cliente non trovato.")
+        kreo_call_first_available(
+            [
+                "render_messaggio_cliente_page",
+                "render_messaggio_cliente",
+                "render_notifiche_whatsapp",
+                "render_whatsapp_cliente",
+            ],
+            "Messaggio cliente"
+        )
         return True
 
     if view == "cliente_360":
-        if "render_cliente_360_page" in globals():
-            render_cliente_360_page()
-        else:
-            st.error("Modulo Cliente 360 non trovato.")
+        kreo_call_first_available(
+            [
+                "render_cliente_360_page",
+                "render_clienti_page",
+                "render_database_clienti",
+            ],
+            "Cliente 360"
+        )
         return True
 
     if view == "alert_center":
-        if "render_alert_center_page" in globals():
-            render_alert_center_page()
-        else:
-            st.error("Modulo Alert Center non trovato.")
+        kreo_call_first_available(
+            [
+                "render_alert_center_page",
+                "render_reception_alert_side_panel",
+            ],
+            "Alert Center"
+        )
         return True
 
-    st.error(f"Vista Reception non riconosciuta: {view}")
+    st.warning(f"Vista Reception non riconosciuta: {view}")
     return True
 
 
@@ -10249,7 +10354,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.42")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.43")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
