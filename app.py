@@ -5597,7 +5597,7 @@ def ricalcola_contatori_settimanali_clienti(data_ref=None):
 
 def render_recalcolo_settimanale_widget():
     st.markdown("### Ricalcolo lezioni settimanali")
-    st.caption("Aggiorna i contatori del Database clienti in base alle lezioni PRESENTE della settimana. Per Luxury/Gold/VIP/Coaching riparte sempre da 3 ogni lunedì.")
+    st.caption("Aggiorna i contatori cumulativi: Luxury/Gold/VIP/Coaching maturano 3 lezioni ogni settimana e mantengono il residuo. I personalizzati sono esclusi.")
 
     data_ref = st.date_input("Settimana di riferimento", value=date.today(), format="DD/MM/YYYY", key="ricalcolo_week_ref")
 
@@ -5636,6 +5636,331 @@ def safe_update_cliente_contatori(cliente_id, totale, usate, residue):
             continue
 
     return False, f"Non sono riuscito ad aggiornare i contatori. Ultimo errore: {last_error}"
+
+
+
+def kreo_is_pacchetto_personalizzato_strict(pacchetto):
+    """
+    Pacchetto personalizzato = gestione manuale.
+    Non deve subire ricalcoli automatici settimanali/cumulativi.
+    """
+    return "PERSONALIZZATO" in str(pacchetto or "").upper()
+
+
+def kreo_is_pacchetto_standard_cumulativo(pacchetto):
+    """
+    Pacchetti che maturano automaticamente 3 lezioni ogni settimana.
+    Personalizzato sempre escluso.
+    """
+    p = str(pacchetto or "").upper()
+    if "PERSONALIZZATO" in p:
+        return False
+    return any(x in p for x in ["LUXURY", "GOLD", "VIP", "COACHING"])
+
+
+def kreo_data_inizio_contatori_cliente(cliente):
+    """
+    Data da cui iniziare il conteggio cumulativo.
+    Priorità:
+    1. data_inizio_pacchetto
+    2. data_iscrizione
+    3. created_at
+    4. oggi
+    """
+    for k in ["data_inizio_pacchetto", "data_iscrizione", "created_at"]:
+        v = cliente.get(k) if isinstance(cliente, dict) else None
+        if v not in [None, "", "nan"]:
+            try:
+                return parse_date(v, date.today())
+            except Exception:
+                pass
+    return date.today()
+
+
+def kreo_settimane_maturate_da_inizio(data_inizio, data_ref=None):
+    data_ref = parse_date(data_ref or date.today(), date.today())
+    start = parse_date(data_inizio, date.today())
+    start_monday = start - timedelta(days=start.weekday())
+    ref_monday = data_ref - timedelta(days=data_ref.weekday())
+    weeks = ((ref_monday - start_monday).days // 7) + 1
+    return max(int(weeks), 1)
+
+
+def kreo_lezioni_presenti_cliente(cliente_id, data_da=None, data_a=None):
+    """
+    Conta lezioni PRESENTE valide.
+    Esclude righe annullate e stati tecnici.
+    Fonte primaria per il consumo.
+    """
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return 0
+
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp["stato_norm"] = tmp["stato"].fillna("").astype(str).str.upper()
+
+        tmp = tmp[
+            (tmp["cliente_id_num"] == int(cliente_id)) &
+            (tmp["stato_norm"] == "PRESENTE")
+        ]
+
+        if "note" in tmp.columns:
+            note_norm = tmp["note"].fillna("").astype(str).str.upper()
+            tmp = tmp[~note_norm.str.contains("ANNULLATO|RIMOSSA PRESENZA", na=False)]
+
+        if data_da is not None and "data_lezione" in tmp.columns:
+            tmp = tmp[tmp["data_lezione"].astype(str) >= str(parse_date(data_da, date.today()))]
+        if data_a is not None and "data_lezione" in tmp.columns:
+            tmp = tmp[tmp["data_lezione"].astype(str) <= str(parse_date(data_a, date.today()))]
+
+        return int(len(tmp))
+    except Exception:
+        return 0
+
+
+def registra_movimento_lezione(cliente_id, tipo, quantita=1, motivo="", accesso_id=None, lezione_id=None, note=""):
+    """
+    Ledger centrale movimenti lezione.
+
+    Tipi consigliati:
+    - SCALA
+    - RESTITUISCI
+    - EXTRA_AUTORIZZATA
+    - ANNULLA
+    - RETTIFICA_MANUALE
+
+    Se la tabella movimenti_lezioni non esiste, salva fallback in cronologia.
+    """
+    try:
+        cid = int(float(cliente_id)) if cliente_id not in [None, "", "nan"] else None
+    except Exception:
+        cid = None
+
+    payload = {
+        "cliente_id": cid,
+        "tipo": str(tipo or "").upper(),
+        "quantita": int(quantita or 1),
+        "motivo": motivo or "",
+        "accesso_id": accesso_id,
+        "lezione_id": lezione_id,
+        "note": note or "",
+        "created_at": datetime.now().isoformat(),
+    }
+
+    try:
+        user_name = kreo_current_user_display_name() if "kreo_current_user_display_name" in globals() else ""
+        if user_name:
+            payload["created_by"] = user_name
+    except Exception:
+        pass
+
+    sb = get_supabase()
+
+    try:
+        sb.table("movimenti_lezioni").insert(payload).execute()
+        return True, "Movimento lezione registrato."
+    except Exception:
+        # fallback: cronologia
+        try:
+            sb.table("cronologia").insert({
+                "cliente_id": cid,
+                "azione": f"MOVIMENTO_LEZIONE_{payload['tipo']}",
+                "dettaglio": f"Quantità {payload['quantita']} | {payload['motivo']} | accesso_id={accesso_id} | lezione_id={lezione_id} | {note}",
+                "created_at": datetime.now().isoformat()
+            }).execute()
+            return True, "Movimento salvato in cronologia."
+        except Exception as e:
+            return False, f"Movimento non salvato: {e}"
+
+
+def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
+    """
+    Legge solo rettifiche manuali dal ledger.
+    Non conta automaticamente SCALA legata a lezioni PRESENTE, per evitare doppio conteggio.
+    """
+    try:
+        sb = get_supabase()
+        q = sb.table("movimenti_lezioni").select("*").eq("cliente_id", int(cliente_id))
+        res = q.execute()
+        rows = res.data or []
+        if not rows:
+            return 0
+
+        delta_usate = 0
+        for r in rows:
+            tipo = str(r.get("tipo") or "").upper()
+            qty = int(float(r.get("quantita") or 1))
+            created = str(r.get("created_at") or "")[:10]
+
+            if data_da and created and created < str(parse_date(data_da, date.today())):
+                continue
+            if data_a and created and created > str(parse_date(data_a, date.today())):
+                continue
+
+            # Solo movimenti che non hanno lezione_id/accesso_id, cioè rettifiche manuali pure
+            if r.get("lezione_id") or r.get("accesso_id"):
+                continue
+
+            if tipo in ["SCALA", "EXTRA_AUTORIZZATA", "RETTIFICA_SCALA"]:
+                delta_usate += qty
+            elif tipo in ["RESTITUISCI", "ANNULLA", "RETTIFICA_RESTITUISCI"]:
+                delta_usate -= qty
+
+        return int(delta_usate)
+    except Exception:
+        return 0
+
+
+def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
+    """
+    NUOVA LOGICA KREO V35.32
+
+    Pacchetti standard:
+    - Luxury / Gold / VIP / Coaching in sede
+    - maturano 3 lezioni ogni settimana
+    - le lezioni non usate restano disponibili
+    - totale = settimane maturate * 3
+    - usate = lezioni PRESENTE valide + rettifiche manuali
+    - residue = totale - usate
+
+    Pacchetti personalizzati:
+    - esclusi dal ricalcolo automatico
+    - mantengono i valori presenti in anagrafica
+    - gestiti manualmente
+    """
+    data_ref = parse_date(data_ref or date.today(), date.today())
+
+    try:
+        c = get_cliente(int(cliente_id))
+    except Exception:
+        c = None
+
+    if not c:
+        return 0, 0, 0, 0
+
+    pac = pacchetto if pacchetto is not None else c.get("pacchetto", "")
+
+    # Personalizzato: non ricalcolare, non sovrascrivere.
+    if kreo_is_pacchetto_personalizzato_strict(pac):
+        try:
+            totale = int(float(c.get("numero_lezioni") or c.get("numero_lezioni_totali") or 0))
+        except Exception:
+            totale = 0
+        try:
+            usate = int(float(c.get("lezioni_utilizzate") or 0))
+        except Exception:
+            usate = 0
+        try:
+            residue = int(float(c.get("lezioni_residue") or max(totale - usate, 0)))
+        except Exception:
+            residue = max(totale - usate, 0)
+        extra = max(usate - totale, 0) if totale > 0 else 0
+        return int(totale), int(usate), int(residue), int(extra)
+
+    # Standard cumulativo.
+    if kreo_is_pacchetto_standard_cumulativo(pac):
+        data_inizio = kreo_data_inizio_contatori_cliente(c)
+        settimane = kreo_settimane_maturate_da_inizio(data_inizio, data_ref)
+        totale = int(settimane * 3)
+
+        usate_da_lezioni = kreo_lezioni_presenti_cliente(
+            int(cliente_id),
+            data_da=data_inizio,
+            data_a=data_ref
+        )
+        rettifiche = kreo_movimenti_rettifica_cliente(
+            int(cliente_id),
+            data_da=data_inizio,
+            data_a=data_ref
+        )
+        usate = max(int(usate_da_lezioni) + int(rettifiche), 0)
+        residue = max(totale - usate, 0)
+        extra = max(usate - totale, 0)
+        return int(totale), int(usate), int(residue), int(extra)
+
+    # Altri pacchetti non riconosciuti: comportamento manuale conservativo.
+    try:
+        totale = int(float(c.get("numero_lezioni") or c.get("numero_lezioni_totali") or 0))
+    except Exception:
+        totale = 0
+    try:
+        usate = int(float(c.get("lezioni_utilizzate") or 0))
+    except Exception:
+        usate = kreo_lezioni_presenti_cliente(int(cliente_id), data_a=data_ref)
+    residue = max(totale - usate, 0)
+    extra = max(usate - totale, 0) if totale > 0 else 0
+    return int(totale), int(usate), int(residue), int(extra)
+
+
+def aggiorna_contatori_dopo_presenza_lezione(cliente_id):
+    """
+    Aggiorna i contatori cliente usando la logica cumulativa centrale.
+    Non sovrascrive i personalizzati.
+    """
+    try:
+        c = get_cliente(int(cliente_id))
+        if c and kreo_is_pacchetto_personalizzato_strict(c.get("pacchetto", "")):
+            return True
+
+        totale, usate, residue, extra = contatori_cumulativi_cliente(int(cliente_id))
+        ok_update, _ = safe_update_cliente_contatori(int(cliente_id), totale, usate, residue)
+        return bool(ok_update)
+    except Exception:
+        return False
+
+
+def aggiorna_contatori_cumulativi_clienti():
+    """
+    Ricalcolo cumulativo automatico:
+    - aggiorna solo pacchetti standard cumulativi
+    - salta i personalizzati
+    """
+    sb = get_supabase()
+    clienti = load_clienti()
+    if clienti.empty:
+        return {"aggiornati": 0, "personalizzati_ignorati": 0, "saltati": 0}
+
+    aggiornati = 0
+    personalizzati_ignorati = 0
+    saltati = 0
+
+    for _, c in clienti.iterrows():
+        try:
+            cid = int(c.get("id"))
+            pac = c.get("pacchetto", "")
+
+            if kreo_is_pacchetto_personalizzato_strict(pac):
+                personalizzati_ignorati += 1
+                continue
+
+            if not kreo_is_pacchetto_standard_cumulativo(pac):
+                saltati += 1
+                continue
+
+            totale, usate, residue, extra = contatori_cumulativi_cliente(cid, pac)
+            ok_update, _ = safe_update_cliente_contatori(cid, totale, usate, residue)
+            if ok_update:
+                aggiornati += 1
+            else:
+                saltati += 1
+        except Exception:
+            saltati += 1
+
+    return {
+        "aggiornati": aggiornati,
+        "personalizzati_ignorati": personalizzati_ignorati,
+        "saltati": saltati,
+    }
+
+
+def ricalcola_contatori_settimanali_clienti_robust(data_ref=None):
+    """
+    Compatibilità con vecchi pulsanti:
+    ora usa il ricalcolo cumulativo, non il reset settimanale a 3.
+    """
+    return aggiorna_contatori_cumulativi_clienti()
 
 
 def normalize_status_text(x):
@@ -7480,6 +7805,7 @@ def kreo_rimuovi_presenza_agenda(row):
             "note": (note + " | Presenza rimossa da Agenda Luxury").strip(" |")
         }).eq("id", lezione_id).execute()
 
+        registra_movimento_lezione(cliente_id, "RESTITUISCI", 1, "Presenza rimossa da Agenda Luxury", lezione_id=lezione_id)
         ok, msg = kreo_restituisci_lezione_cliente(cliente_id)
 
         try:
@@ -7508,6 +7834,7 @@ def kreo_conferma_presenza_agenda(row):
         }).eq("id", int(float(r.get("id")))).execute()
 
         if r.get("cliente_id") not in [None, "", "nan"]:
+            registra_movimento_lezione(r.get("cliente_id"), "SCALA", 1, "Presenza confermata da Agenda Luxury", lezione_id=r.get("id"))
             aggiorna_contatori_dopo_presenza_lezione(int(float(r.get("cliente_id"))))
 
         try:
@@ -8948,7 +9275,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.31")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.32")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
