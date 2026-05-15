@@ -5746,20 +5746,56 @@ def kreo_render_table(df, title=None, subtitle=None, max_rows=None, height=None,
         st.dataframe(display_df, use_container_width=True, height=height)
 
 
-def kreo_render_clienti_cards(df, max_rows=12):
+def kreo_cliente_card_status_colors(residue, stato_pagamento=""):
+    try:
+        residue_num = int(float(residue or 0))
+    except Exception:
+        residue_num = 0
+    stato = str(stato_pagamento or "").upper()
+
+    if "SCAD" in stato or "INSOL" in stato or "RESID" in stato:
+        return "#e74c3c", "Pagamento/Residuo da verificare"
+    if residue_num <= 0:
+        return "#e74c3c", "Lezioni esaurite"
+    if residue_num <= 1:
+        return "#f1c40f", "Quasi esaurito"
+    return "#2ecc71", "Attivo"
+
+
+def kreo_render_clienti_cards(df, max_rows=20):
     """
-    Vista clienti meno tecnica: card compatte.
+    Vista clienti realmente operativa: card grandi, non tabella tecnica.
     """
     if df is None or df.empty:
         st.info("Nessun cliente disponibile.")
         return
 
     work = df.copy().head(max_rows)
-    st.markdown("### 👥 Clienti principali")
+
+    st.markdown(
+        """
+        <div style="
+            border:1.5px solid rgba(212,175,55,.70);
+            border-radius:18px;
+            background:#fffdf7;
+            padding:14px 18px;
+            margin:12px 0 14px 0;
+            box-shadow:0 6px 18px rgba(0,0,0,.05);
+        ">
+            <div style="font-size:22px;font-weight:950;color:#111;">👥 Vista semplice clienti</div>
+            <div style="font-size:12px;color:#666;">Schede operative: lezioni residue, pacchetto, contatti e stato.</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
     for _, r in work.iterrows():
         nome = f"{r.get('nome','')} {r.get('cognome','')}".strip() or str(r.get("cliente", "Cliente"))
         pac = r.get("pacchetto", "-")
         cell = r.get("cellulare") or r.get("telefono") or "-"
+        email = r.get("email") or "-"
+        pag = r.get("tipologia_pagamento") or "-"
+        stato_pag = r.get("stato_pagamento") or ""
         try:
             residue = int(float(r.get("lezioni_residue") or 0))
         except Exception:
@@ -5768,29 +5804,46 @@ def kreo_render_clienti_cards(df, max_rows=12):
             usate = int(float(r.get("lezioni_utilizzate") or 0))
         except Exception:
             usate = r.get("lezioni_utilizzate") or "-"
+        try:
+            totale = int(float(r.get("numero_lezioni") or 0))
+        except Exception:
+            totale = r.get("numero_lezioni") or "-"
         importo = r.get("importo", "")
+        residuo = r.get("residuo", "")
+        scad = r.get("scadenza_abbonamento_it") or r.get("scadenza_abbonamento") or "-"
+        cert = r.get("certificato_medico") or "-"
+
+        color, label = kreo_cliente_card_status_colors(residue, stato_pag)
 
         st.markdown(
             f"""
             <div style="
-                border:1.5px solid rgba(212,175,55,.70);
-                border-radius:16px;
+                border:2px solid {color};
+                border-radius:18px;
                 background:#fffdf7;
-                padding:13px 16px;
-                margin:8px 0;
-                box-shadow:0 5px 15px rgba(0,0,0,.045);
+                padding:15px 18px;
+                margin:10px 0;
+                box-shadow:0 7px 20px rgba(0,0,0,.055);
             ">
-                <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;">
-                    <div>
-                        <div style="font-size:18px;font-weight:950;color:#111;">{nome}</div>
-                        <div style="font-size:12px;color:#555;">{pac} · Tel: {cell}</div>
+                <div style="display:flex;justify-content:space-between;gap:18px;align-items:center;">
+                    <div style="flex:1;">
+                        <div style="font-size:20px;font-weight:950;color:#111;">{nome}</div>
+                        <div style="font-size:12px;color:#555;margin-top:3px;">{pac} · {pag}</div>
+                        <div style="font-size:12px;color:#666;margin-top:5px;">📞 {cell} · ✉️ {email}</div>
                     </div>
-                    <div style="text-align:right;">
-                        <div style="font-size:22px;font-weight:950;color:#111;">{residue}</div>
-                        <div style="font-size:11px;color:#777;">lezioni residue</div>
+                    <div style="min-width:110px;text-align:center;border-left:1px solid rgba(0,0,0,.08);padding-left:14px;">
+                        <div style="font-size:30px;font-weight:950;color:{color};line-height:1;">{residue}</div>
+                        <div style="font-size:11px;color:#777;">residue</div>
                     </div>
                 </div>
-                <div style="font-size:12px;color:#666;margin-top:6px;">Usate: {usate} · Importo: {importo}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                    <span style="background:#f7f2df;border:1px solid rgba(212,175,55,.55);border-radius:999px;padding:5px 9px;font-size:11px;">Usate: {usate}/{totale}</span>
+                    <span style="background:#f7f2df;border:1px solid rgba(212,175,55,.55);border-radius:999px;padding:5px 9px;font-size:11px;">Scadenza: {scad}</span>
+                    <span style="background:#f7f2df;border:1px solid rgba(212,175,55,.55);border-radius:999px;padding:5px 9px;font-size:11px;">Certificato: {cert}</span>
+                    <span style="background:#f7f2df;border:1px solid rgba(212,175,55,.55);border-radius:999px;padding:5px 9px;font-size:11px;">Importo: {importo}</span>
+                    <span style="background:#f7f2df;border:1px solid rgba(212,175,55,.55);border-radius:999px;padding:5px 9px;font-size:11px;">Residuo €: {residuo}</span>
+                    <span style="background:{color};color:white;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:850;">{label}</span>
+                </div>
             </div>
             """,
             unsafe_allow_html=True
@@ -5993,7 +6046,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.33
+    NUOVA LOGICA KREO V35.34
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9453,7 +9506,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.33")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.34")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -9971,7 +10024,19 @@ def main():
             st.info("Nessun cliente inserito.")
         else:
             cols = ["id","nome","cognome","cellulare","email","pacchetto","tipologia_pagamento","numero_lezioni","lezioni_utilizzate","lezioni_residue","importo","importo_pagato","residuo","stato_pagamento","data_iscrizione_it","scadenza_abbonamento_it","certificato_medico","scadenza_certificato_it","consenso_foto_video","stato_cliente","note"]
-            st.dataframe(df[[c for c in cols if c in df.columns]], use_container_width=True, hide_index=True)
+            df_clienti_view = df[[c for c in cols if c in df.columns]].copy()
+
+            # Vista nuova: semplice di default, tabella tecnica solo se serve
+            tab_simple, tab_table = st.tabs(["👥 Vista semplice", "📋 Tabella completa"])
+            with tab_simple:
+                kreo_render_clienti_cards(df_clienti_view, max_rows=30)
+            with tab_table:
+                kreo_render_table(
+                    df_clienti_view,
+                    title="📋 Database clienti completo",
+                    subtitle="Tabella completa con intestazioni leggibili. Usala per controllo tecnico/amministrativo.",
+                    height=460
+                )
             if is_admin():
                 with st.expander("Elimina cliente"):
                     cliente_id = st.number_input("ID cliente da eliminare", min_value=1, step=1)
