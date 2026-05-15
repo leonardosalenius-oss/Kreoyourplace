@@ -4710,6 +4710,7 @@ def render_v32_navigation():
 
     forced = st.session_state.get("kreo_force_menu")
     forced_macro_map = {
+        "👤 Cliente 360": "👥 Clienti",
         "🚨 Alert Center": "🛎️ Reception",
         "🚦 Check-In Center": "🛎️ Reception",
         "🏠 Reception Center": "🛎️ Reception",
@@ -5746,6 +5747,336 @@ def kreo_render_table(df, title=None, subtitle=None, max_rows=None, height=None,
         st.dataframe(display_df, use_container_width=True, height=height)
 
 
+
+def kreo_cliente_360_label(row):
+    try:
+        r = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        r = {}
+    cid = r.get("id", "")
+    nome = f"{r.get('nome','')} {r.get('cognome','')}".strip()
+    if not nome:
+        nome = str(r.get("cliente") or f"Cliente {cid}")
+    return f"{cid} - {nome}"
+
+
+def kreo_load_cliente_360(cliente_id):
+    try:
+        cid = int(float(cliente_id))
+        clienti = load_clienti()
+        if clienti.empty:
+            return {}
+        sub = clienti[pd.to_numeric(clienti["id"], errors="coerce") == cid]
+        if sub.empty:
+            return {}
+        return sub.iloc[0].to_dict()
+    except Exception:
+        return {}
+
+
+def kreo_load_pagamenti_cliente(cliente_id):
+    try:
+        sb = get_supabase()
+        res = sb.table("pagamenti").select("*").eq("cliente_id", int(float(cliente_id))).order("data_pagamento", desc=True).execute()
+        return pd.DataFrame(res.data or [])
+    except Exception:
+        return pd.DataFrame()
+
+
+def kreo_load_documenti_cliente(cliente_id):
+    try:
+        sb = get_supabase()
+        res = sb.table("documenti_cliente").select("*").eq("cliente_id", int(float(cliente_id))).order("created_at", desc=True).execute()
+        return pd.DataFrame(res.data or [])
+    except Exception:
+        return pd.DataFrame()
+
+
+def kreo_load_lezioni_cliente(cliente_id):
+    try:
+        lez = load_lezioni()
+        if lez.empty:
+            return pd.DataFrame()
+        tmp = lez.copy()
+        tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+        tmp = tmp[tmp["cliente_id_num"] == int(float(cliente_id))]
+        if "data_lezione" in tmp.columns:
+            tmp = tmp.sort_values(["data_lezione", "ora_inizio"], ascending=[False, False])
+        return tmp
+    except Exception:
+        return pd.DataFrame()
+
+
+def kreo_load_accessi_cliente(cliente_id):
+    try:
+        accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+        if accessi.empty:
+            return pd.DataFrame()
+        tmp = accessi.copy()
+        if "cliente_id" in tmp.columns:
+            tmp["cliente_id_num"] = pd.to_numeric(tmp["cliente_id"], errors="coerce").fillna(0).astype(int)
+            tmp = tmp[tmp["cliente_id_num"] == int(float(cliente_id))]
+        if "id" in tmp.columns:
+            tmp["id_num"] = pd.to_numeric(tmp["id"], errors="coerce").fillna(0).astype(int)
+            tmp = tmp.sort_values("id_num", ascending=False)
+        return tmp
+    except Exception:
+        return pd.DataFrame()
+
+
+def kreo_load_movimenti_lezioni_cliente(cliente_id):
+    """
+    Legge movimenti_lezioni se esiste; altrimenti dataframe vuoto.
+    """
+    try:
+        sb = get_supabase()
+        res = sb.table("movimenti_lezioni").select("*").eq("cliente_id", int(float(cliente_id))).order("created_at", desc=True).execute()
+        return pd.DataFrame(res.data or [])
+    except Exception:
+        return pd.DataFrame()
+
+
+def kreo_build_estratto_conto_lezioni(cliente_id):
+    """
+    Estratto conto lezioni:
+    combina movimenti_lezioni + lezioni presenti/rimosse.
+    """
+    rows = []
+
+    mov = kreo_load_movimenti_lezioni_cliente(cliente_id)
+    if not mov.empty:
+        for _, r in mov.iterrows():
+            tipo = str(r.get("tipo") or "").upper()
+            qty = int(float(r.get("quantita") or 1))
+            if tipo in ["SCALA", "EXTRA_AUTORIZZATA", "RETTIFICA_SCALA"]:
+                delta = -qty
+            elif tipo in ["RESTITUISCI", "ANNULLA", "RETTIFICA_RESTITUISCI"]:
+                delta = qty
+            else:
+                delta = 0
+            rows.append({
+                "Data": str(r.get("created_at") or "")[:19],
+                "Origine": "Movimento",
+                "Tipo": tipo,
+                "Delta": delta,
+                "Motivo": r.get("motivo") or r.get("note") or "",
+                "Riferimento": f"accesso {r.get('accesso_id') or '-'} / lezione {r.get('lezione_id') or '-'}",
+            })
+
+    lez = kreo_load_lezioni_cliente(cliente_id)
+    if not lez.empty:
+        for _, r in lez.iterrows():
+            stato = str(r.get("stato") or "").upper()
+            note = str(r.get("note") or "")
+            if stato == "PRESENTE":
+                delta = -1
+                tipo = "PRESENZA"
+            elif "RIMOSSA" in note.upper() or "ANNULL" in stato:
+                delta = +1
+                tipo = "PRESENZA_RIMOSSA"
+            else:
+                continue
+            rows.append({
+                "Data": f"{r.get('data_lezione','')} {r.get('ora_inizio','')}",
+                "Origine": "Agenda",
+                "Tipo": tipo,
+                "Delta": delta,
+                "Motivo": note,
+                "Riferimento": f"lezione {r.get('id') or '-'}",
+            })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    try:
+        df["_sort"] = pd.to_datetime(df["Data"], errors="coerce")
+        df = df.sort_values("_sort", ascending=False).drop(columns=["_sort"])
+    except Exception:
+        pass
+    return df
+
+
+def kreo_render_kpi_cliente_360(cliente):
+    try:
+        residue = int(float(cliente.get("lezioni_residue") or 0))
+    except Exception:
+        residue = 0
+    try:
+        usate = int(float(cliente.get("lezioni_utilizzate") or 0))
+    except Exception:
+        usate = 0
+    try:
+        totale = int(float(cliente.get("numero_lezioni") or 0))
+    except Exception:
+        totale = 0
+
+    pac = cliente.get("pacchetto") or "-"
+    cell = cliente.get("cellulare") or cliente.get("telefono") or "-"
+    email = cliente.get("email") or "-"
+    scad = cliente.get("scadenza_abbonamento_it") or cliente.get("scadenza_abbonamento") or "-"
+    cert = cliente.get("certificato_medico") or "-"
+    importo = cliente.get("importo") or "-"
+    residuo = cliente.get("residuo") or "-"
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Lezioni residue", residue)
+    with c2:
+        st.metric("Lezioni usate", usate)
+    with c3:
+        st.metric("Lezioni totali", totale)
+    with c4:
+        st.metric("Residuo €", residuo)
+
+    st.markdown(
+        f"""
+        <div style="
+            border:1.5px solid rgba(212,175,55,.70);
+            border-radius:18px;
+            background:#fffdf7;
+            padding:16px 20px;
+            margin:12px 0;
+            box-shadow:0 7px 20px rgba(0,0,0,.055);
+        ">
+            <div style="font-size:13px;color:#666;">Pacchetto</div>
+            <div style="font-size:20px;font-weight:950;color:#111;">{pac}</div>
+            <div style="font-size:12px;color:#555;margin-top:8px;">
+                📞 {cell} · ✉️ {email} · Scadenza: {scad} · Certificato: {cert} · Importo: {importo}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def render_cliente_360_page():
+    st.header("👤 Cliente 360")
+    st.caption("Scheda unica: dati cliente, pacchetto, lezioni, pagamenti, documenti, presenze, accessi e movimenti.")
+
+    clienti = load_clienti()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    clienti = clienti.copy()
+    clienti["label_360"] = clienti.apply(kreo_cliente_360_label, axis=1)
+
+    pre_id = st.session_state.get("cliente_preselezionato_id")
+    labels = clienti["label_360"].tolist()
+    default_index = 0
+
+    if pre_id not in [None, "", "nan"]:
+        try:
+            pre_id_int = int(float(pre_id))
+            ids = pd.to_numeric(clienti["id"], errors="coerce").fillna(0).astype(int).tolist()
+            if pre_id_int in ids:
+                default_index = ids.index(pre_id_int)
+        except Exception:
+            pass
+
+    selected = st.selectbox("Seleziona cliente", labels, index=default_index, key="cliente_360_select")
+    cliente_id = int(str(selected).split(" - ")[0])
+    cliente = kreo_load_cliente_360(cliente_id)
+
+    if not cliente:
+        st.error("Cliente non trovato.")
+        return
+
+    nome = f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip() or selected
+    st.markdown(
+        f"""
+        <div style="
+            background:#050505;
+            border:2px solid #d4af37;
+            border-radius:20px;
+            padding:18px 22px;
+            margin:12px 0 18px 0;
+            box-shadow:0 10px 25px rgba(0,0,0,.15);
+        ">
+            <div style="font-size:13px;color:#d4af37;font-weight:900;">CLIENTE 360</div>
+            <div style="font-size:30px;font-weight:950;color:#d4af37;">{nome}</div>
+            <div style="font-size:12px;color:#f5e7b2;">ID Cliente {cliente_id}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    kreo_render_kpi_cliente_360(cliente)
+
+    t1, t2, t3, t4, t5, t6 = st.tabs([
+        "📒 Estratto lezioni",
+        "📅 Lezioni/presenze",
+        "💳 Pagamenti",
+        "🚦 Accessi",
+        "📎 Documenti",
+        "📝 Note / Azioni"
+    ])
+
+    with t1:
+        estratto = kreo_build_estratto_conto_lezioni(cliente_id)
+        kreo_render_table(
+            estratto,
+            title="📒 Estratto conto lezioni",
+            subtitle="Ogni scalaggio, restituzione, extra o rimozione presenza viene riepilogato qui.",
+            height=420
+        )
+
+        with st.expander("➕ Rettifica manuale lezioni"):
+            tipo = st.selectbox("Tipo rettifica", ["RETTIFICA_RESTITUISCI", "RETTIFICA_SCALA"], key="ret_tipo_360")
+            qty = st.number_input("Quantità", min_value=1, max_value=30, value=1, key="ret_qty_360")
+            motivo = st.text_input("Motivo", value="Rettifica manuale da Cliente 360", key="ret_motivo_360")
+            if st.button("Registra rettifica", use_container_width=True, key="btn_rettifica_360"):
+                ok, msg = registra_movimento_lezione(cliente_id, tipo, qty, motivo)
+                if ok:
+                    aggiorna_contatori_dopo_presenza_lezione(cliente_id)
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    with t2:
+        lez = kreo_load_lezioni_cliente(cliente_id)
+        kreo_render_table(lez, title="📅 Lezioni e presenze", subtitle="Storico lezioni del cliente.", height=420)
+
+    with t3:
+        pag = kreo_load_pagamenti_cliente(cliente_id)
+        kreo_render_table(pag, title="💳 Pagamenti", subtitle="Incassi, rate e saldi associati al cliente.", height=420)
+
+    with t4:
+        acc = kreo_load_accessi_cliente(cliente_id)
+        kreo_render_table(acc, title="🚦 Accessi tornello", subtitle="Accessi rilevati dal tornello/badge.", height=420)
+
+    with t5:
+        docs = kreo_load_documenti_cliente(cliente_id)
+        kreo_render_table(docs, title="📎 Documenti", subtitle="Documenti caricati per il cliente.", height=360)
+
+    with t6:
+        st.markdown("### Azioni rapide")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("✏️ Modifica cliente", use_container_width=True, key="c360_modifica"):
+                st.session_state["cliente_preselezionato_id"] = cliente_id
+                st.session_state["kreo_force_menu"] = "✏️ Modifica cliente"
+                st.rerun()
+        with c2:
+            if st.button("💳 Registra incasso", use_container_width=True, key="c360_incasso"):
+                st.session_state["cliente_preselezionato_id"] = cliente_id
+                st.session_state["kreo_force_menu"] = "💳 Gestione incassi"
+                st.rerun()
+        with c3:
+            phone = cliente.get("cellulare") or cliente.get("telefono") or ""
+            msg = f"Ciao {nome}, ti contattiamo da KREO."
+            try:
+                wa = kreo_whatsapp_url(phone, msg)
+                st.link_button("💬 WhatsApp", wa, use_container_width=True)
+            except Exception:
+                st.info("WhatsApp non disponibile.")
+
+        note = cliente.get("note") or ""
+        st.text_area("Note cliente", value=note, height=140, disabled=True)
+
+
 def kreo_cliente_card_status_colors(residue, stato_pagamento=""):
     try:
         residue_num = int(float(residue or 0))
@@ -6046,7 +6377,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.34
+    NUOVA LOGICA KREO V35.35
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9506,7 +9837,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.34")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.35")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -9998,6 +10329,8 @@ def main():
                 priorita = st.multiselect("Filtra priorità", ["ALTA","MEDIA"], default=["ALTA","MEDIA"])
                 st.dataframe(alert_df[alert_df["Priorità"].isin(priorita)], use_container_width=True, hide_index=True)
 
+    elif menu == "👤 Cliente 360":
+        render_cliente_360_page()
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
 
