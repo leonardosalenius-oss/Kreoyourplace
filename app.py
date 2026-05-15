@@ -6721,7 +6721,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.49
+    NUOVA LOGICA KREO V36.00
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -8212,72 +8212,6 @@ def render_checkin_event_card(row, clienti_map=None, key_prefix="checkin"):
             st.caption(note)
 
 
-
-def kreo_extra_should_scale_lesson(motivo_autorizzazione):
-    """
-    Decide se l'autorizzazione extra deve consumare una lezione.
-    Regola:
-    - presenza valida / recupero autorizzato / normale ingresso autorizzato => scala
-    - extra omaggio / prova / errore tornello / ingresso tecnico => non scala
-    """
-    m = str(motivo_autorizzazione or "").upper()
-    no_scale_keywords = ["OMAGGIO", "PROVA", "ERRORE TORNELLO", "NON SCALARE", "INGRESSO TECNICO", "VISITA"]
-    if any(k in m for k in no_scale_keywords):
-        return False
-    scale_keywords = ["RECUPERO", "PRESENZA VALIDA", "SCALA", "INGRESSO AUTORIZZATO", "LEZIONE AUTORIZZATA"]
-    if any(k in m for k in scale_keywords):
-        return True
-    # Default prudente: non scalare se non è chiarissimo
-    return False
-
-
-def kreo_registra_presenza_extra_autorizzata(cliente_id, accesso_id=None, motivo="", nota="", scala_lezione=False):
-    """
-    Centralizza la decisione:
-    - registra movimento lezione coerente
-    - aggiorna contatori se serve
-    - lascia traccia in cronologia
-    """
-    qty = 1 if scala_lezione else 0
-    tipo = "EXTRA_AUTORIZZATA_SCALA" if scala_lezione else "EXTRA_AUTORIZZATA_NO_SCALA"
-
-    try:
-        if "registra_movimento_lezione" in globals():
-            registra_movimento_lezione(
-                cliente_id,
-                "SCALA" if scala_lezione else "EXTRA_AUTORIZZATA",
-                qty,
-                motivo or "Presenza extra autorizzata",
-                accesso_id=accesso_id,
-                note=nota or ""
-            )
-    except Exception:
-        pass
-
-    try:
-        insert_history(
-            cliente_id,
-            tipo,
-            "",
-            motivo or "",
-            nota or f"Presenza extra autorizzata. Scala lezione: {scala_lezione}"
-        )
-    except Exception:
-        pass
-
-    if scala_lezione:
-        try:
-            aggiorna_contatori_dopo_presenza_lezione(cliente_id)
-        except Exception:
-            try:
-                totale, usate, residue, extra = contatori_cumulativi_cliente(cliente_id)
-                safe_update_cliente_contatori(cliente_id, totale, usate, residue)
-            except Exception:
-                pass
-
-    return True
-
-
 def render_reception_accessi_smart_panel():
     st.subheader("🚦 Check-In Center")
     st.caption("Nuova logica: Accesso ≠ Presenza ≠ Consumo. Il tornello genera eventi; KREO interpreta e gestisce lezioni.")
@@ -8304,21 +8238,6 @@ def render_reception_accessi_smart_panel():
     st.markdown("### Ultimo accesso")
     render_checkin_event_card(latest, clienti_map, key_prefix="latest_checkin")
 
-    tipo_autorizzazione_extra = st.selectbox(
-        "Tipo autorizzazione",
-        [
-            "Recupero lezione autorizzato - scala 1 lezione",
-            "Presenza valida autorizzata - scala 1 lezione",
-            "Extra omaggio / prova - non scala lezione",
-            "Errore tornello / verifica manuale - non scala lezione",
-        ],
-        key="tipo_autorizzazione_extra_scala"
-    )
-    scala_lezione_extra = kreo_extra_should_scale_lesson(tipo_autorizzazione_extra)
-    if scala_lezione_extra:
-        st.warning("Questa autorizzazione scalerà 1 lezione dal cliente.")
-    else:
-        st.info("Questa autorizzazione NON scalerà lezioni. Verrà solo tracciata.")
     with st.expander("✅ Autorizza presenza extra", expanded=False):
         kreo_autorizza_presenza_extra(latest)
 
@@ -8329,17 +8248,7 @@ def render_reception_accessi_smart_panel():
 
     if current_cliente:
         try:
-            registra_movimento_lezione(cliente_id, "SCALA" if scala_lezione_extra else "EXTRA_AUTORIZZATA", 1 if scala_lezione_extra else 0, motivo if "motivo" in locals() else "Presenza extra autorizzata", accesso_id=accesso_id if "accesso_id" in locals() else None)
-        except Exception:
-            pass
-        try:
-            kreo_registra_presenza_extra_autorizzata(
-                cliente_id,
-                accesso_id=accesso_id if "accesso_id" in locals() else None,
-                motivo=tipo_autorizzazione_extra if "tipo_autorizzazione_extra" in locals() else (motivo if "motivo" in locals() else "Presenza extra autorizzata"),
-                nota=nota if "nota" in locals() else (nota_interna if "nota_interna" in locals() else ""),
-                scala_lezione=scala_lezione_extra if "scala_lezione_extra" in locals() else False
-            )
+            registra_movimento_lezione(cliente_id, "EXTRA_AUTORIZZATA", 0, motivo if "motivo" in locals() else "Presenza extra autorizzata", accesso_id=accesso_id if "accesso_id" in locals() else None)
         except Exception:
             pass
         st.success(f"Ultimo badge già associato a: {current_cliente}")
@@ -8374,6 +8283,7 @@ def render_reception_accessi_smart_panel():
     with st.expander("Vista tecnica accessi"):
         cols = ["id", "data_accesso_it", "ora_accesso", "cliente", "badge_uid", "stato_accesso", "cooldown_duplicate", "note"]
         st.dataframe(live[[c for c in cols if c in live.columns]].head(30), use_container_width=True, hide_index=True)
+
 
 def kreo_clienti_lookup_by_badge_safe():
     """
@@ -10505,6 +10415,10 @@ def kreo_render_reception_internal_view_if_any():
     if not view:
         return False
 
+    if view == "v36_checkin":
+        render_v36_checkin_core()
+        return True
+
     if st.button("⬅️ Torna alla Reception", key=f"reception_internal_back_{view}"):
         st.session_state["reception_internal_view"] = None
         st.rerun()
@@ -10588,6 +10502,424 @@ def kreo_render_reception_internal_view_if_any():
     return True
 
 
+
+# ============================================================
+# KREO V36 CORE STABLE
+# Accessi -> Presenze -> Ledger lezioni
+# ============================================================
+
+def v36_sb():
+    try:
+        return get_supabase()
+    except Exception:
+        try:
+            return supabase
+        except Exception as e:
+            raise RuntimeError(f"Supabase non disponibile: {e}")
+
+
+def v36_now_iso():
+    try:
+        return now_iso()
+    except Exception:
+        return datetime.now().isoformat()
+
+
+def v36_user_label():
+    try:
+        return user_label()
+    except Exception:
+        return str(st.session_state.get("username") or st.session_state.get("user") or "KREO")
+
+
+def v36_is_personalizzato(pacchetto):
+    return "PERSONALIZZATO" in str(pacchetto or "").upper()
+
+
+def v36_is_standard_cumulativo(pacchetto):
+    p = str(pacchetto or "").upper()
+    if "PERSONALIZZATO" in p:
+        return False
+    return any(x in p for x in ["LUXURY", "GOLD", "VIP", "COACHING"])
+
+
+def v36_cliente_by_id(cliente_id):
+    try:
+        if cliente_id in [None, "", "nan"]:
+            return {}
+        try:
+            c = get_cliente(int(float(cliente_id)))
+            if c:
+                return c
+        except Exception:
+            pass
+        res = v36_sb().table("clienti").select("*").eq("id", int(float(cliente_id))).limit(1).execute()
+        rows = res.data or []
+        return rows[0] if rows else {}
+    except Exception:
+        return {}
+
+
+def v36_cliente_nome(cliente):
+    if not cliente:
+        return ""
+    return (f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip()
+            or str(cliente.get("cliente") or cliente.get("ragione_sociale") or ""))
+
+
+def v36_cliente_by_badge(badge_uid):
+    badge = str(badge_uid or "").strip()
+    if not badge:
+        return None, {}
+    for table in ["badge_clienti", "clienti_badge", "badge"]:
+        for col in ["badge_uid", "badge", "codice_badge", "uid"]:
+            try:
+                res = v36_sb().table(table).select("*").eq(col, badge).limit(1).execute()
+                rows = res.data or []
+                if rows:
+                    cid = rows[0].get("cliente_id") or rows[0].get("id_cliente")
+                    return cid, v36_cliente_by_id(cid)
+            except Exception:
+                pass
+    try:
+        clienti = load_clienti()
+        if clienti is not None and not clienti.empty:
+            for col in ["badge_uid", "badge", "codice_badge", "id_badge", "tessera", "codice_tessera"]:
+                if col in clienti.columns:
+                    sub = clienti[clienti[col].fillna("").astype(str).str.strip() == badge]
+                    if not sub.empty:
+                        row = sub.iloc[0].to_dict()
+                        return row.get("id"), row
+    except Exception:
+        pass
+    return None, {}
+
+
+def v36_accesso_status(accesso):
+    stato = str(accesso.get("stato_accesso") or accesso.get("stato") or "").upper()
+    no_accesso = str(accesso.get("no_accesso") or accesso.get("No_accesso") or "").upper()
+    if "ANNULL" in stato:
+        return "ANNULLATO"
+    if "NEGATO" in stato or "VERIFICARE" in stato or no_accesso in ["1", "TRUE", "SI", "SÌ", "YES"]:
+        return "DA_VERIFICARE"
+    if "OK" in stato or "REGISTRATO" in stato or "ASSOCIATO" in stato:
+        return "OK"
+    return "DA_VERIFICARE"
+
+
+def v36_registra_ledger(cliente_id, delta, tipo, motivo="", accesso_id=None, lezione_id=None, note=""):
+    payload = {
+        "cliente_id": int(float(cliente_id)) if cliente_id not in [None, "", "nan"] else None,
+        "tipo": str(tipo or "").upper(),
+        "quantita": abs(int(delta or 0)),
+        "delta": int(delta or 0),
+        "motivo": motivo or "",
+        "accesso_id": accesso_id,
+        "lezione_id": lezione_id,
+        "note": note or "",
+        "created_by": v36_user_label(),
+        "created_at": v36_now_iso(),
+    }
+    try:
+        v36_sb().table("movimenti_lezioni").insert(payload).execute()
+        return True, "Movimento registrato nel ledger."
+    except Exception:
+        try:
+            v36_sb().table("cronologia").insert({
+                "cliente_id": payload["cliente_id"],
+                "azione": f"LEDGER_{payload['tipo']}",
+                "dettaglio": f"delta={payload['delta']} | {payload['motivo']} | accesso_id={accesso_id}",
+                "created_at": v36_now_iso(),
+            }).execute()
+            return True, "Movimento registrato in cronologia."
+        except Exception as e:
+            return False, f"Movimento non salvato: {e}"
+
+
+def v36_ledger_cliente(cliente_id):
+    try:
+        res = v36_sb().table("movimenti_lezioni").select("*").eq("cliente_id", int(float(cliente_id))).order("created_at", desc=False).execute()
+        return pd.DataFrame(res.data or [])
+    except Exception:
+        return pd.DataFrame()
+
+
+def v36_maturazioni_standard(cliente_id, cliente=None, data_ref=None):
+    cliente = cliente or v36_cliente_by_id(cliente_id)
+    if not cliente:
+        return 0
+    pac = cliente.get("pacchetto", "")
+    if v36_is_personalizzato(pac):
+        return None
+    if not v36_is_standard_cumulativo(pac):
+        return None
+    data_ref = data_ref or date.today()
+    start = None
+    for k in ["data_inizio_pacchetto", "data_iscrizione", "created_at"]:
+        v = cliente.get(k)
+        if v not in [None, "", "nan"]:
+            try:
+                start = pd.to_datetime(v, errors="coerce").date()
+                if start:
+                    break
+            except Exception:
+                pass
+    if not start:
+        start = date.today()
+    start_monday = start - timedelta(days=start.weekday())
+    ref_monday = data_ref - timedelta(days=data_ref.weekday())
+    weeks = max(((ref_monday - start_monday).days // 7) + 1, 1)
+    return int(weeks * 3)
+
+
+def v36_saldo_lezioni(cliente_id):
+    cliente = v36_cliente_by_id(cliente_id)
+    if not cliente:
+        return {"totale": 0, "usate": 0, "residue": 0, "manuale": True}
+    if v36_is_personalizzato(cliente.get("pacchetto", "")):
+        totale = int(float(cliente.get("numero_lezioni") or 0))
+        residue = int(float(cliente.get("lezioni_residue") or 0))
+        usate = int(float(cliente.get("lezioni_utilizzate") or max(totale - residue, 0)))
+        return {"totale": totale, "usate": usate, "residue": residue, "manuale": True}
+
+    maturate = v36_maturazioni_standard(cliente_id, cliente)
+    if maturate is None:
+        maturate = int(float(cliente.get("numero_lezioni") or 0))
+
+    ledger = v36_ledger_cliente(cliente_id)
+    delta = 0
+    if ledger is not None and not ledger.empty:
+        if "delta" in ledger.columns:
+            delta = int(pd.to_numeric(ledger["delta"], errors="coerce").fillna(0).sum())
+        else:
+            for _, r in ledger.iterrows():
+                tipo = str(r.get("tipo") or "").upper()
+                q = int(float(r.get("quantita") or 1))
+                if tipo in ["SCALA", "PRESENZA_VALIDA", "RECUPERO_AUTORIZZATO"]:
+                    delta -= q
+                elif tipo in ["RESTITUISCI", "ANNULLA", "ANNULLA_RESTITUISCI"]:
+                    delta += q
+    residue = max(int(maturate) + int(delta), 0)
+    usate = max(int(maturate) - residue, 0)
+    return {"totale": int(maturate), "usate": int(usate), "residue": int(residue), "manuale": False}
+
+
+def v36_aggiorna_saldo_cliente(cliente_id):
+    cliente = v36_cliente_by_id(cliente_id)
+    if not cliente or v36_is_personalizzato(cliente.get("pacchetto", "")):
+        return True
+    saldo = v36_saldo_lezioni(cliente_id)
+    try:
+        v36_sb().table("clienti").update({
+            "numero_lezioni": saldo["totale"],
+            "lezioni_utilizzate": saldo["usate"],
+            "lezioni_residue": saldo["residue"],
+            "updated_at": v36_now_iso(),
+        }).eq("id", int(float(cliente_id))).execute()
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def v36_registra_presenza(cliente_id, accesso_id=None, tipo_presenza="PRESENZA_VALIDA", scala_lezione=True, motivo="", note=""):
+    delta = -1 if scala_lezione else 0
+    payload = {
+        "cliente_id": int(float(cliente_id)) if cliente_id not in [None, "", "nan"] else None,
+        "accesso_id": int(float(accesso_id)) if accesso_id not in [None, "", "nan"] else None,
+        "tipo_presenza": str(tipo_presenza or "").upper(),
+        "scala_lezione": bool(scala_lezione),
+        "motivo": motivo or tipo_presenza,
+        "note": note or "",
+        "staff_autorizzante": v36_user_label(),
+        "created_at": v36_now_iso(),
+    }
+    saved = False
+    for table in ["presenze_v36", "presenze_clienti"]:
+        try:
+            v36_sb().table(table).insert(payload).execute()
+            saved = True
+            break
+        except Exception:
+            pass
+    if not saved:
+        try:
+            v36_sb().table("cronologia").insert({
+                "cliente_id": payload["cliente_id"],
+                "azione": f"PRESENZA_{payload['tipo_presenza']}",
+                "dettaglio": f"scala={scala_lezione} | accesso_id={accesso_id} | {motivo}",
+                "created_at": v36_now_iso(),
+            }).execute()
+        except Exception:
+            pass
+    ok, msg = v36_registra_ledger(cliente_id, delta, payload["tipo_presenza"], motivo=motivo, accesso_id=accesso_id, note=note)
+    v36_aggiorna_saldo_cliente(cliente_id)
+    if accesso_id not in [None, "", "nan"]:
+        try:
+            stato = "PRESENZA_VALIDA_SCALATA" if scala_lezione else "PRESENZA_AUTORIZZATA_NO_SCALA"
+            v36_sb().table("accessi_tornello").update({
+                "stato_accesso": stato,
+                "note": f"{motivo or tipo_presenza} | {note or ''}".strip(" |"),
+            }).eq("id", int(float(accesso_id))).execute()
+        except Exception:
+            pass
+    return True, "Presenza registrata. " + msg
+
+
+def v36_annulla_accesso(cliente_id, accesso_id=None, motivo="Accesso annullato da Reception"):
+    ok, msg = v36_registra_ledger(cliente_id, +1, "ANNULLA_RESTITUISCI", motivo=motivo, accesso_id=accesso_id)
+    try:
+        if accesso_id not in [None, "", "nan"]:
+            v36_sb().table("accessi_tornello").update({
+                "stato_accesso": "ANNULLATO_DA_NON_RICALCOLARE",
+                "note": motivo,
+            }).eq("id", int(float(accesso_id))).execute()
+    except Exception:
+        pass
+    v36_aggiorna_saldo_cliente(cliente_id)
+    return ok, msg
+
+
+def v36_tipo_autorizzazione_ui(key_suffix=""):
+    tipo = st.selectbox(
+        "Tipo autorizzazione",
+        [
+            "Presenza valida - scala 1 lezione",
+            "Recupero autorizzato - scala 1 lezione",
+            "Extra omaggio / prova - non scala",
+            "Errore tornello / verifica manuale - non scala",
+            "Accesso tecnico / visita - non scala",
+        ],
+        key=f"v36_tipo_autorizzazione_{key_suffix}"
+    )
+    upper = tipo.upper()
+    scala = ("SCALA" in upper) and ("NON SCALA" not in upper)
+    if scala:
+        st.warning("Questa scelta scalerà 1 lezione dal cliente.")
+    else:
+        st.info("Questa scelta non scalerà lezioni. Verrà solo tracciata.")
+    return tipo, scala
+
+
+def render_v36_checkin_core():
+    st.header("🚦 Check-in / Tornello V36")
+    st.caption("Il tornello genera eventi. KREO decide se trasformarli in presenza e se scalare una lezione.")
+
+    try:
+        accessi = enrich_accessi_with_cliente(load_accessi_tornello())
+    except Exception:
+        try:
+            res = v36_sb().table("accessi_tornello").select("*").order("id", desc=True).limit(50).execute()
+            accessi = pd.DataFrame(res.data or [])
+        except Exception:
+            accessi = pd.DataFrame()
+
+    if accessi is None or accessi.empty:
+        st.info("Nessun accesso rilevato.")
+        return
+
+    try:
+        accessi["id_sort"] = pd.to_numeric(accessi["id"], errors="coerce").fillna(0).astype(int)
+        accessi = accessi.sort_values("id_sort", ascending=False)
+    except Exception:
+        pass
+
+    labels, rows = [], {}
+    for _, r in accessi.head(25).iterrows():
+        d = r.to_dict()
+        badge = d.get("badge_uid") or d.get("badge") or ""
+        cid = d.get("cliente_id")
+        cliente = v36_cliente_by_id(cid) if cid not in [None, "", "nan"] else {}
+        if not cliente and badge:
+            cid, cliente = v36_cliente_by_badge(badge)
+            if cid:
+                d["cliente_id"] = cid
+        nome = v36_cliente_nome(cliente) or "Badge non associato"
+        label = f"{d.get('id','-')} | {d.get('data_accesso_it') or d.get('data_accesso') or '-'} {d.get('ora_accesso') or '-'} | {nome} | badge {badge}"
+        labels.append(label)
+        rows[label] = d
+
+    selected = st.selectbox("Accesso da gestire", labels, key="v36_accesso_select")
+    accesso = rows.get(selected, {})
+    badge = accesso.get("badge_uid") or accesso.get("badge") or ""
+    cliente_id = accesso.get("cliente_id")
+    cliente = v36_cliente_by_id(cliente_id) if cliente_id else {}
+    if not cliente and badge:
+        cliente_id, cliente = v36_cliente_by_badge(badge)
+
+    nome = v36_cliente_nome(cliente) or "Badge non associato"
+    status = v36_accesso_status(accesso)
+
+    st.markdown(
+        f"""
+        <div style="border:2px solid #d4af37;border-radius:18px;background:#fffdf7;padding:16px 20px;margin:12px 0;">
+            <div style="font-size:13px;color:#666;">Accesso selezionato</div>
+            <div style="font-size:24px;font-weight:950;color:#111;">{nome}</div>
+            <div style="font-size:12px;color:#555;">Badge: {badge} · Stato tornello: {status} · Accesso ID: {accesso.get('id')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if not cliente_id:
+        st.error("Badge non associato: associa prima il badge a un cliente.")
+        return
+
+    tipo, scala = v36_tipo_autorizzazione_ui("checkin")
+    motivo = st.text_area("Motivo / nota operativa", value=tipo, key="v36_motivo_checkin")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("✅ Autorizza presenza", use_container_width=True, key="v36_autorizza_presenza"):
+            ok, msg = v36_registra_presenza(cliente_id, accesso_id=accesso.get("id"), tipo_presenza=tipo, scala_lezione=scala, motivo=tipo, note=motivo)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+    with c2:
+        if st.button("❌ Annulla accesso", use_container_width=True, key="v36_annulla_accesso"):
+            ok, msg = v36_annulla_accesso(cliente_id, accesso_id=accesso.get("id"), motivo=motivo or "Accesso annullato da Reception")
+            if ok:
+                st.success("Accesso annullato / lezione restituita se necessario.")
+                st.rerun()
+            else:
+                st.error(msg)
+
+    st.markdown("---")
+    try:
+        if "kreo_render_accessi_cards" in globals():
+            kreo_render_accessi_cards(accessi.head(20))
+        else:
+            st.dataframe(accessi.head(20), use_container_width=True, hide_index=True)
+    except Exception:
+        st.dataframe(accessi.head(20), use_container_width=True)
+
+
+def render_v36_admin_ledger_tools():
+    st.header("🧮 V36 Ledger & Ricalcolo")
+    st.caption("Luxury/Gold/VIP/Coaching maturano +3/settimana. Personalizzati esclusi.")
+    if st.button("Ricalcola tutti i clienti standard", use_container_width=True, key="v36_ricalcolo_tutti"):
+        try:
+            clienti = load_clienti()
+            agg = pers = salt = 0
+            for _, c in clienti.iterrows():
+                cid = c.get("id")
+                pac = c.get("pacchetto", "")
+                if v36_is_personalizzato(pac):
+                    pers += 1
+                elif v36_is_standard_cumulativo(pac):
+                    agg += 1 if v36_aggiorna_saldo_cliente(cid) else 0
+                else:
+                    salt += 1
+            st.success(f"Aggiornati: {agg} | Personalizzati ignorati: {pers} | Saltati: {salt}")
+        except Exception as e:
+            st.error(f"Errore ricalcolo: {e}")
+
+
 def render_reception_center():
     if st.session_state.get("reception_internal_view") == "alert_center":
         render_alert_center_page()
@@ -10645,7 +10977,7 @@ def render_reception_center():
         c4, c5, c6 = st.columns(3)
         with c4:
             if st.button("🚦 Accesso tornello", use_container_width=True, key="rc_btn_tornello"):
-               kreo_open_reception_internal("tornello")
+               kreo_open_reception_internal("v36_checkin")
         with c5:
             if st.button("📅 Agenda / Calendario", use_container_width=True, key="rc_btn_agenda"):
                kreo_open_reception_internal("agenda")
@@ -10932,7 +11264,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.49")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V36.00")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -11500,8 +11832,12 @@ def main():
         render_accessi_tornello_operativo_page()
     elif menu == "🚨 Alert Center":
         render_alert_center_page()
+    elif menu == "🧮 V36 Ledger & Ricalcolo":
+        render_v36_admin_ledger_tools()
     elif menu == "🏠 Reception Center":
         render_reception_center()
+    elif menu == "🚦 Check-in V36":
+        render_v36_checkin_core()
     elif menu == "🚪 Accessi tornello":
         render_accessi_tornello_operativo_page()
 
