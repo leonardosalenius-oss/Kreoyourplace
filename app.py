@@ -5950,6 +5950,19 @@ def kreo_render_kpi_cliente_360(cliente):
     )
 
 
+
+def kreo_open_cliente_360(cliente_id=None):
+    """
+    Apre Cliente 360 in modo robusto.
+    """
+    if cliente_id not in [None, "", "nan"]:
+        st.session_state["cliente_preselezionato_id"] = cliente_id
+    st.session_state["kreo_force_menu"] = "👤 Cliente 360"
+    st.session_state["kreo_force_area"] = "👥 Clienti"
+    st.session_state["kreo_area"] = "👥 Clienti"
+    st.session_state["kreo_menu"] = "👤 Cliente 360"
+    st.rerun()
+
 def render_cliente_360_page():
     st.header("👤 Cliente 360")
     st.caption("Scheda unica: dati cliente, pacchetto, lezioni, pagamenti, documenti, presenze, accessi e movimenti.")
@@ -6377,7 +6390,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.35
+    NUOVA LOGICA KREO V35.36
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9564,7 +9577,8 @@ def render_reception_center():
             if st.button("💬 Messaggio cliente", use_container_width=True, key="rc_btn_messaggio"):
                 kreo_go_to("💬 Messaggio cliente")
         with c8:
-            st.empty()
+            if st.button("👤 Cliente 360", use_container_width=True, key="rc_btn_cliente_360"):
+                kreo_open_cliente_360()
         with c9:
             st.empty()
 
@@ -9837,7 +9851,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.35")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.36")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -10333,6 +10347,13 @@ def main():
         render_cliente_360_page()
     elif menu == "📋 Database clienti":
         st.header("Database clienti")
+        c360a, c360b = st.columns([1, 3])
+        with c360a:
+            if st.button("👤 Apri Cliente 360", use_container_width=True, key="db_cliente_360_quick_open"):
+                kreo_open_cliente_360()
+        with c360b:
+            st.caption("Scheda completa cliente: lezioni, pagamenti, accessi, documenti ed estratto conto.")
+
 
         if is_admin():
             with st.expander("📈 Ricalcolo lezioni cumulative"):
