@@ -7392,6 +7392,165 @@ def kreo_lesson_progress_text(row):
         pass
     return ""
 
+
+def kreo_restituisci_lezione_cliente(cliente_id):
+    """
+    Restituisce una lezione al cliente quando una presenza viene rimossa.
+    Operazione inversa rispetto alla conferma presenza.
+    """
+    try:
+        if cliente_id in [None, "", "nan"]:
+            return False, "Cliente non valido"
+
+        cid = int(float(cliente_id))
+        sb = get_supabase()
+
+        cliente = {}
+        try:
+            res = sb.table("clienti").select("*").eq("id", cid).limit(1).execute()
+            data = res.data or []
+            if data:
+                cliente = data[0]
+        except Exception:
+            pass
+
+        if not cliente:
+            return False, "Cliente non trovato"
+
+        update = {}
+
+        if "lezioni_residue" in cliente:
+            try:
+                cur = int(float(cliente.get("lezioni_residue") or 0))
+                update["lezioni_residue"] = cur + 1
+            except Exception:
+                pass
+
+        if "lezioni_utilizzate" in cliente:
+            try:
+                cur = int(float(cliente.get("lezioni_utilizzate") or 0))
+                update["lezioni_utilizzate"] = max(cur - 1, 0)
+            except Exception:
+                pass
+
+        if not update:
+            return False, "Colonne lezioni non trovate"
+
+        try:
+            update["updated_at"] = now_iso()
+        except Exception:
+            update["updated_at"] = datetime.now().isoformat()
+
+        sb.table("clienti").update(update).eq("id", cid).execute()
+
+        try:
+            sb.table("cronologia").insert({
+                "cliente_id": cid,
+                "azione": "RIMOSSA_PRESENZA_AGENDA",
+                "dettaglio": "Presenza rimossa da Agenda Luxury: lezione restituita",
+                "created_at": datetime.now().isoformat()
+            }).execute()
+        except Exception:
+            pass
+
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+
+        return True, "Lezione restituita al cliente"
+    except Exception as e:
+        return False, f"Errore restituzione lezione: {e}"
+
+
+def kreo_rimuovi_presenza_agenda(row):
+    """
+    Rimuove presenza dalla lezione e restituisce una lezione al cliente.
+    """
+    try:
+        r = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+        lezione_id = int(float(r.get("id")))
+        cliente_id = r.get("cliente_id")
+        note = str(r.get("note") or "")
+        sb = get_supabase()
+
+        sb.table("lezioni").update({
+            "stato": "PRENOTATO",
+            "updated_at": now_iso(),
+            "note": (note + " | Presenza rimossa da Agenda Luxury").strip(" |")
+        }).eq("id", lezione_id).execute()
+
+        ok, msg = kreo_restituisci_lezione_cliente(cliente_id)
+
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+
+        return ok, "Presenza rimossa. " + msg
+    except Exception as e:
+        return False, f"Errore rimozione presenza: {e}"
+
+
+def kreo_conferma_presenza_agenda(row):
+    """
+    Conferma presenza e consuma una lezione usando la logica già esistente.
+    """
+    try:
+        r = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+        note = str(r.get("note") or "")
+        sb = get_supabase()
+
+        sb.table("lezioni").update({
+            "stato": "PRESENTE",
+            "updated_at": now_iso(),
+            "note": (note + " | Confermata da Agenda Luxury").strip(" |")
+        }).eq("id", int(float(r.get("id")))).execute()
+
+        if r.get("cliente_id") not in [None, "", "nan"]:
+            aggiorna_contatori_dopo_presenza_lezione(int(float(r.get("cliente_id"))))
+
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+
+        return True, "Presenza confermata. Lezione scalata."
+    except Exception as e:
+        return False, f"Errore conferma presenza: {e}"
+
+
+def kreo_render_presenza_agenda_actions(row):
+    """
+    Azioni Agenda: conferma o rimuovi presenza vicino al cliente.
+    """
+    try:
+        r = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    except Exception:
+        r = {}
+
+    stato_norm = str(r.get("stato") or "").upper()
+    row_id = r.get("id") or "x"
+
+    if stato_norm == "PRESENTE":
+        st.success("Presente")
+        if st.button("↩️ Rimuovi presenza", key=f"agenda_remove_presence_{row_id}", use_container_width=True):
+            ok, msg = kreo_rimuovi_presenza_agenda(r)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+    else:
+        if st.button("✅ Presente", key=f"agenda_confirm_presence_{row_id}", use_container_width=True):
+            ok, msg = kreo_conferma_presenza_agenda(r)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+
 def render_agenda_light_launch():
     """
     Agenda veloce per lancio:
@@ -7559,23 +7718,7 @@ def render_agenda_light_launch():
                     st.markdown(trainer or "Trainer non indicato")
                     st.caption(stato or "Stato non indicato")
                 with c4:
-                    if stato_norm != "PRESENTE":
-                        if st.button("✅ Presente", key=f"agenda_light_pres_v2_{r.get('id')}", use_container_width=True):
-                            try:
-                                sb = get_supabase()
-                                sb.table("lezioni").update({
-                                    "stato": "PRESENTE",
-                                    "updated_at": now_iso(),
-                                    "note": (note + " | Confermata da Agenda Luxury").strip(" |")
-                                }).eq("id", int(r.get("id"))).execute()
-                                if r.get("cliente_id") not in [None, "", "nan"]:
-                                    aggiorna_contatori_dopo_presenza_lezione(int(r.get("cliente_id")))
-                                st.success("Presenza confermata.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Errore conferma presenza: {e}")
-                    else:
-                        st.success("Presente")
+                    kreo_render_presenza_agenda_actions(r)
 
     st.markdown("---")
     with st.expander("Vista avanzata calendario"):
@@ -8805,7 +8948,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.30")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.31")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
