@@ -5678,40 +5678,118 @@ def kreo_humanize_column_name(col):
 def kreo_prepare_display_df(df, max_rows=None):
     """
     Prepara dataframe per visualizzazione operativa.
+    Anti-errore: rimuove colonne duplicate e rende univoche le intestazioni dopo il rename.
     """
     if df is None or getattr(df, "empty", True):
         return pd.DataFrame()
 
     work = df.copy()
 
+    # Rimuove colonne duplicate già presenti nel dataframe originale
+    try:
+        work = work.loc[:, ~work.columns.duplicated()]
+    except Exception:
+        pass
+
     # Elimina colonne tecniche troppo rumorose se presenti
     technical_cols = [
         "id_num", "_full", "created_at", "updated_at", "updated_by",
-        "source_system", "source_record_id", "raw_payload", "embedding"
+        "source_system", "source_record_id", "raw_payload", "embedding",
+        "cliente_id_num"
     ]
     work = work[[c for c in work.columns if c not in technical_cols]]
 
-    # Formattazioni semplici
-    for c in work.columns:
-        cl = str(c).lower()
-        if "importo" in cl or "prezzo" in cl or "saldo" in cl or "residuo" in cl:
-            try:
-                work[c] = pd.to_numeric(work[c], errors="ignore")
-            except Exception:
-                pass
-
+    # Limite righe
     if max_rows:
         work = work.head(max_rows)
 
-    work = work.rename(columns={c: kreo_humanize_column_name(c) for c in work.columns})
+    # Rename leggibile
+    renamed = [kreo_humanize_column_name(c) for c in work.columns]
+
+    # Rende univoci i nomi dopo rename, perché "data_accesso" e "data_accesso_it"
+    # possono diventare entrambi "Data".
+    seen = {}
+    unique_cols = []
+    for col in renamed:
+        base = str(col)
+        if base not in seen:
+            seen[base] = 0
+            unique_cols.append(base)
+        else:
+            seen[base] += 1
+            unique_cols.append(f"{base} {seen[base] + 1}")
+
+    work.columns = unique_cols
+
+    try:
+        work = work.loc[:, ~pd.Index(work.columns).duplicated()]
+    except Exception:
+        pass
+
     return work
+
+
+
+def kreo_make_dataframe_streamlit_safe(df):
+    """
+    Ultima difesa prima di st.dataframe:
+    - elimina colonne duplicate
+    - rende univoci i nomi colonna anche dopo rename
+    - converte valori complessi in stringa
+    """
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame()
+
+    safe = df.copy()
+
+    # elimina duplicate già presenti
+    try:
+        safe = safe.loc[:, ~safe.columns.duplicated()]
+    except Exception:
+        pass
+
+    # nomi colonna sempre stringa e univoci
+    new_cols = []
+    seen = {}
+    for c in list(safe.columns):
+        base = str(c)
+        if base not in seen:
+            seen[base] = 0
+            new_cols.append(base)
+        else:
+            seen[base] += 1
+            new_cols.append(f"{base} {seen[base] + 1}")
+    safe.columns = new_cols
+
+    # se dopo tutto esiste ancora duplicazione, rinomina forzata
+    if len(set(map(str, safe.columns))) != len(safe.columns):
+        safe.columns = [f"Colonna {i+1}" for i in range(len(safe.columns))]
+
+    # Streamlit/Arrow non ama dict/list misti
+    for col in safe.columns:
+        try:
+            if safe[col].apply(lambda x: isinstance(x, (dict, list, tuple, set))).any():
+                safe[col] = safe[col].astype(str)
+        except Exception:
+            try:
+                safe[col] = safe[col].astype(str)
+            except Exception:
+                pass
+
+    return safe
 
 
 def kreo_render_table(df, title=None, subtitle=None, max_rows=None, height=None, key=None):
     """
-    Tabella KREO più leggibile: titolo, card, colonne rinominate, meno tecnica.
+    Tabella KREO leggibile e sicura per Streamlit.
+    Fix definitivo: pulizia anti-duplicati anche immediatamente prima di st.dataframe().
     """
-    display_df = kreo_prepare_display_df(df, max_rows=max_rows)
+    try:
+        display_df = kreo_prepare_display_df(df, max_rows=max_rows)
+    except Exception:
+        display_df = df.copy() if df is not None else pd.DataFrame()
+
+    display_df = kreo_make_dataframe_streamlit_safe(display_df)
 
     if title:
         st.markdown(
@@ -5731,7 +5809,7 @@ def kreo_render_table(df, title=None, subtitle=None, max_rows=None, height=None,
             unsafe_allow_html=True
         )
 
-    if display_df.empty:
+    if display_df is None or display_df.empty:
         st.info("Nessun dato disponibile.")
         return
 
@@ -5743,9 +5821,25 @@ def kreo_render_table(df, title=None, subtitle=None, max_rows=None, height=None,
             height=height,
             key=key
         )
-    except TypeError:
-        st.dataframe(display_df, use_container_width=True, height=height)
-
+    except Exception as e:
+        st.warning("Vista tabella non disponibile in formato tecnico. Mostro una vista semplificata.")
+        try:
+            for _, row in display_df.head(30).iterrows():
+                content = " · ".join([f"{col}: {row[col]}" for col in display_df.columns[:8]])
+                st.markdown(
+                    f"""
+                    <div style="
+                        border:1.5px solid rgba(212,175,55,.55);
+                        border-radius:14px;
+                        padding:10px 12px;
+                        margin:7px 0;
+                        background:#fffdf7;
+                    ">{content}</div>
+                    """,
+                    unsafe_allow_html=True
+                )
+        except Exception:
+            st.error(f"Errore visualizzazione tabella: {e}")
 
 
 def kreo_cliente_360_label(row):
@@ -5990,6 +6084,154 @@ def kreo_render_internal_view_if_any():
 
 
 
+
+def kreo_render_lezioni_cliente_cards(df, max_rows=20):
+    """
+    Lezioni/presenze in formato card, meno tecnico.
+    """
+    if df is None or df.empty:
+        st.info("Nessuna lezione/presenza disponibile.")
+        return
+
+    work = df.copy().head(max_rows)
+    st.markdown("### 📅 Lezioni e presenze")
+    for _, r in work.iterrows():
+        data = r.get("data_lezione") or r.get("Data") or "-"
+        ora_i = r.get("ora_inizio") or r.get("Inizio") or "-"
+        ora_f = r.get("ora_fine") or r.get("Fine") or "-"
+        trainer = r.get("trainer") or r.get("Trainer") or "-"
+        stato = str(r.get("stato") or r.get("Stato") or "-").upper()
+        note = r.get("note") or r.get("Note") or ""
+
+        if stato == "PRESENTE":
+            color = "#2ecc71"
+            badge = "Presente"
+        elif "EXTRA" in stato:
+            color = "#3498db"
+            badge = "Extra / da verificare"
+        elif "ANNULL" in stato or "RIMOS" in stato:
+            color = "#e74c3c"
+            badge = "Annullata/Rimossa"
+        else:
+            color = "#f1c40f"
+            badge = stato.title() if stato != "-" else "Prenotata"
+
+        st.markdown(
+            f"""
+            <div style="
+                border:2px solid {color};
+                border-radius:18px;
+                background:#fffdf7;
+                padding:14px 18px;
+                margin:10px 0;
+                box-shadow:0 6px 18px rgba(0,0,0,.045);
+            ">
+                <div style="display:flex;justify-content:space-between;gap:14px;">
+                    <div>
+                        <div style="font-size:18px;font-weight:950;color:#111;">{data} · {ora_i} - {ora_f}</div>
+                        <div style="font-size:12px;color:#555;margin-top:4px;">Trainer: {trainer}</div>
+                    </div>
+                    <div style="background:{color};color:white;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:900;height:max-content;">
+                        {badge}
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#666;margin-top:8px;">{note}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+def kreo_render_accessi_cliente_cards(df, max_rows=20):
+    """
+    Accessi tornello in formato card, meno tecnico.
+    """
+    if df is None or df.empty:
+        st.info("Nessun accesso tornello disponibile.")
+        return
+
+    work = df.copy().head(max_rows)
+    st.markdown("### 🚦 Accessi tornello")
+    for _, r in work.iterrows():
+        data = r.get("data_accesso_it") or r.get("data_accesso") or "-"
+        ora = r.get("ora_accesso") or "-"
+        badge_uid = r.get("badge_uid") or "-"
+        stato = str(r.get("stato_accesso") or "-").upper()
+        note = r.get("note") or ""
+
+        if "REGISTRATO" in stato or "ASSOCIATO" in stato:
+            color = "#2ecc71"
+            label = "Associato"
+        elif "NEGATO" in stato or "VERIFICARE" in stato:
+            color = "#e74c3c"
+            label = "Da verificare"
+        elif "ANNULL" in stato:
+            color = "#777"
+            label = "Annullato"
+        else:
+            color = "#f1c40f"
+            label = stato.title()
+
+        st.markdown(
+            f"""
+            <div style="
+                border:2px solid {color};
+                border-radius:18px;
+                background:#fffdf7;
+                padding:14px 18px;
+                margin:10px 0;
+                box-shadow:0 6px 18px rgba(0,0,0,.045);
+            ">
+                <div style="display:flex;justify-content:space-between;gap:14px;">
+                    <div>
+                        <div style="font-size:18px;font-weight:950;color:#111;">{data} · {ora}</div>
+                        <div style="font-size:12px;color:#555;margin-top:4px;">Badge: {badge_uid}</div>
+                    </div>
+                    <div style="background:{color};color:white;border-radius:999px;padding:7px 12px;font-size:12px;font-weight:900;height:max-content;">
+                        {label}
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#666;margin-top:8px;">{note}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+def kreo_render_pagamenti_cliente_cards(df, max_rows=20):
+    """
+    Pagamenti in card leggibili.
+    """
+    if df is None or df.empty:
+        st.info("Nessun pagamento disponibile.")
+        return
+
+    work = df.copy().head(max_rows)
+    st.markdown("### 💳 Pagamenti")
+    for _, r in work.iterrows():
+        data = r.get("data_pagamento") or r.get("data") or "-"
+        importo = r.get("importo") or r.get("Importo") or "-"
+        metodo = r.get("metodo_pagamento") or r.get("metodo") or "-"
+        note = r.get("note") or ""
+        st.markdown(
+            f"""
+            <div style="
+                border:1.5px solid rgba(212,175,55,.70);
+                border-radius:18px;
+                background:#fffdf7;
+                padding:14px 18px;
+                margin:10px 0;
+                box-shadow:0 6px 18px rgba(0,0,0,.045);
+            ">
+                <div style="font-size:18px;font-weight:950;color:#111;">€ {importo}</div>
+                <div style="font-size:12px;color:#555;margin-top:4px;">Data: {data} · Metodo: {metodo}</div>
+                <div style="font-size:12px;color:#666;margin-top:8px;">{note}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
 def render_cliente_360_page():
     st.header("👤 Cliente 360")
     st.caption("Scheda unica: dati cliente, pacchetto, lezioni, pagamenti, documenti, presenze, accessi e movimenti.")
@@ -6077,15 +6319,27 @@ def render_cliente_360_page():
 
     with t2:
         lez = kreo_load_lezioni_cliente(cliente_id)
-        kreo_render_table(lez, title="📅 Lezioni e presenze", subtitle="Storico lezioni del cliente.", height=420)
+        tab_lez_simple, tab_lez_table = st.tabs(["Vista semplice", "Tabella completa"])
+        with tab_lez_simple:
+            kreo_render_lezioni_cliente_cards(lez)
+        with tab_lez_table:
+            kreo_render_table(lez, title="📅 Lezioni e presenze", subtitle="Storico lezioni del cliente.", height=420)
 
     with t3:
         pag = kreo_load_pagamenti_cliente(cliente_id)
-        kreo_render_table(pag, title="💳 Pagamenti", subtitle="Incassi, rate e saldi associati al cliente.", height=420)
+        tab_pag_simple, tab_pag_table = st.tabs(["Vista semplice", "Tabella completa"])
+        with tab_pag_simple:
+            kreo_render_pagamenti_cliente_cards(pag)
+        with tab_pag_table:
+            kreo_render_table(pag, title="💳 Pagamenti", subtitle="Incassi, rate e saldi associati al cliente.", height=420)
 
     with t4:
         acc = kreo_load_accessi_cliente(cliente_id)
-        kreo_render_table(acc, title="🚦 Accessi tornello", subtitle="Accessi rilevati dal tornello/badge.", height=420)
+        tab_acc_simple, tab_acc_table = st.tabs(["Vista semplice", "Tabella completa"])
+        with tab_acc_simple:
+            kreo_render_accessi_cliente_cards(acc)
+        with tab_acc_table:
+            kreo_render_table(acc, title="🚦 Accessi tornello", subtitle="Accessi rilevati dal tornello/badge.", height=420)
 
     with t5:
         docs = kreo_load_documenti_cliente(cliente_id)
@@ -6424,7 +6678,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.38
+    NUOVA LOGICA KREO V35.40
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9885,7 +10139,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.38")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.40")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
