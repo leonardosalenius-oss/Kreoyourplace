@@ -6678,7 +6678,7 @@ def kreo_movimenti_rettifica_cliente(cliente_id, data_da=None, data_a=None):
 
 def contatori_cumulativi_cliente(cliente_id, pacchetto=None, data_ref=None):
     """
-    NUOVA LOGICA KREO V35.41
+    NUOVA LOGICA KREO V35.42
 
     Pacchetti standard:
     - Luxury / Gold / VIP / Coaching in sede
@@ -9836,7 +9836,14 @@ def kreo_render_reception_internal_view_if_any():
         return True
 
     if view == "modifica_cliente":
-        render_modifica_cliente()
+        if "render_modifica_cliente" in globals():
+            render_modifica_cliente()
+        elif "render_clienti_page" in globals():
+            render_clienti_page()
+        elif "render_database_clienti" in globals():
+            render_database_clienti()
+        else:
+            st.warning("Modulo modifica cliente non disponibile per utenza staff.")
         return True
 
     if view == "incasso":
@@ -10242,7 +10249,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.41")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V35.42")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
