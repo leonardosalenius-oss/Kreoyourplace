@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.10")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.11")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16064,7 +16064,7 @@ def v3705_data_from_any(value):
 
 def v3705_certificati_mancanti_o_scaduti():
     """
-    V37.10: controllo certificati blindato.
+    V37.11: controllo certificati blindato.
     Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
     """
     df = v3705_clients_df()
@@ -16593,7 +16593,7 @@ def kreo_render_reception_internal_view_if_any():
 
 
 # ============================================================
-# KREO V37.10 - Tornello & Badge semplificato
+# KREO V37.11 - Tornello & Badge semplificato
 # ============================================================
 
 def v3706_now():
@@ -17150,7 +17150,7 @@ def render_v36_checkin_core():
 
 
 # ============================================================
-# KREO V37.10 - Agenda operativa + Alert cliente apribile
+# KREO V37.11 - Agenda operativa + Alert cliente apribile
 # ============================================================
 
 def v3707_now():
@@ -17340,7 +17340,7 @@ def v3707_insert_lezione(payload):
 
 def render_v37_agenda_7gg():
     """
-    V37.10: Agenda Luxury operativa.
+    V37.11: Agenda Luxury operativa.
     - può vedere giorni precedenti;
     - può confermare presenza e scalare;
     - può confermare presenza senza scalare.
@@ -17606,7 +17606,7 @@ def render_alert_certificati():
 
 
 # ============================================================
-# KREO V37.10 - Anti doppia presenza agenda
+# KREO V37.11 - Anti doppia presenza agenda
 # ============================================================
 
 def v3708_lezione_gia_gestita(lezione_id, cliente_id=None):
@@ -17704,7 +17704,7 @@ def v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, m
 
 def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo):
     """
-    Override compatibile V37.10.
+    Override compatibile V37.11.
     """
     ok, msg = v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, motivo)
     return ok
@@ -17712,7 +17712,7 @@ def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo)
 
 def v3707_conferma_presenza_agenda(row, scala=True):
     """
-    Override V37.10: impedisce doppio click/doppia presenza sulla stessa lezione.
+    Override V37.11: impedisce doppio click/doppia presenza sulla stessa lezione.
     """
     cid = row.get("cliente_id")
     lezione_id = row.get("id")
@@ -17765,7 +17765,7 @@ def v3707_conferma_presenza_agenda(row, scala=True):
 
 def render_v37_agenda_7gg():
     """
-    V37.10: Agenda operativa anti-doppia presenza.
+    V37.11: Agenda operativa anti-doppia presenza.
     """
     st.header("✨ Agenda Luxury")
     st.caption("Consulta passato/futuro, inserisci prenotazioni e conferma presenze una sola volta.")
@@ -17918,7 +17918,7 @@ def render_v37_agenda_7gg():
 
 
 # ============================================================
-# KREO V37.10 - Badge unici + Documenti bucket pubblico fix globale
+# KREO V37.11 - Badge unici + Documenti bucket pubblico fix globale
 # ============================================================
 
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -18420,7 +18420,7 @@ render_cliente_documenti = render_staff_documenti
 
 
 # ============================================================
-# KREO V37.10 - Notifica operativa accesso in Dashboard
+# KREO V37.11 - Notifica operativa accesso in Dashboard
 # ============================================================
 
 def v3710_now():
@@ -18790,6 +18790,130 @@ def render_reception_center():
 
     with right:
         render_reception_alert_side_panel()
+
+
+
+
+# ============================================================
+# KREO V37.11 - Fix movimento senza delta + accessi solo da oggi
+# ============================================================
+
+def v3711_today_str():
+    try:
+        return str(date.today())
+    except Exception:
+        from datetime import date as _date
+        return str(_date.today())
+
+def v3710_accessi_dashboard_da_gestire():
+    """
+    Override V37.11:
+    - mostra solo accessi da oggi in poi;
+    - mostra solo accessi non ancora gestiti.
+    """
+    df = v3710_df_accessi()
+    if df.empty:
+        return pd.DataFrame()
+
+    rows = []
+    today_s = v3711_today_str()
+
+    try:
+        df["id_num"] = pd.to_numeric(df["id"], errors="coerce").fillna(0)
+        df = df.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+
+    for _, r in df.iterrows():
+        row = r.to_dict()
+
+        # Solo accessi da oggi in poi
+        data_accesso = str(row.get("data_accesso") or row.get("data_accesso_it") or "")[:10]
+        if data_accesso and data_accesso < today_s:
+            continue
+
+        if v3710_accesso_gia_gestito(row):
+            continue
+
+        stato = str(row.get("stato_accesso") or "").upper()
+        cid = row.get("cliente_id")
+        has_cliente = cid not in [None, "", "nan", "None", 0, "0", 0.0, "0.0"]
+
+        if has_cliente and any(k in stato for k in ["REGISTRATO_ASSOCIATO", "DA_VERIFICARE", "NEGATO", "ACCESSO"]):
+            rows.append(row)
+        elif has_cliente and not stato:
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, motivo):
+    """
+    Override V37.11:
+    la tabella movimenti_lezioni non ha sempre 'delta'.
+    Provo prima schema compatibile senza delta, poi fallback.
+    """
+    # blocco preventivo: se esiste già movimento su quell'accesso, non duplica
+    try:
+        rows = get_supabase().table("movimenti_lezioni").select("*").eq("accesso_id", int(float(accesso_id))).execute().data or []
+        if rows:
+            for r in rows:
+                t = str(r.get("tipo") or "").upper()
+                if any(k in t for k in ["PRESENZA", "SCALA", "NO_SCALA", "ANNULLA"]):
+                    return False, "Questo accesso è già stato gestito."
+    except Exception:
+        pass
+
+    qta = abs(int(delta)) if int(delta) != 0 else 0
+    segno = "-" if int(delta) < 0 else ("+" if int(delta) > 0 else "0")
+    created = v3710_now().isoformat() if "v3710_now" in globals() else datetime.now().isoformat()
+
+    payloads = [
+        # schema più probabile attuale: quantita, tipo, motivo, riferimento
+        {
+            "cliente_id": int(float(cliente_id)),
+            "accesso_id": int(float(accesso_id)),
+            "quantita": qta,
+            "tipo": tipo,
+            "motivo": motivo,
+            "riferimento": f"accesso {accesso_id} | movimento {segno}{qta}",
+            "created_at": created,
+        },
+        # senza accesso_id se la colonna non esiste
+        {
+            "cliente_id": int(float(cliente_id)),
+            "quantita": qta,
+            "tipo": tipo,
+            "motivo": f"{motivo} | accesso {accesso_id} | movimento {segno}{qta}",
+            "riferimento": f"accesso {accesso_id}",
+            "created_at": created,
+        },
+        # schema minimale
+        {
+            "cliente_id": int(float(cliente_id)),
+            "quantita": qta,
+            "tipo": tipo,
+            "motivo": f"{motivo} | accesso {accesso_id}",
+            "created_at": created,
+        },
+        # ultima spiaggia: solo campi essenziali
+        {
+            "cliente_id": int(float(cliente_id)),
+            "tipo": tipo,
+            "motivo": f"{motivo} | accesso {accesso_id} | movimento {segno}{qta}",
+        },
+    ]
+
+    last = None
+    for p in payloads:
+        p = {k: v for k, v in p.items() if v is not None}
+        try:
+            get_supabase().table("movimenti_lezioni").insert(p).execute()
+            return True, "Movimento registrato."
+        except Exception as e:
+            last = e
+
+    return False, f"Errore movimento: {last}"
 
 
 if __name__ == "__main__":
