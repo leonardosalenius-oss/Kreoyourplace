@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.06")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.07")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16064,7 +16064,7 @@ def v3705_data_from_any(value):
 
 def v3705_certificati_mancanti_o_scaduti():
     """
-    V37.06: controllo certificati blindato.
+    V37.07: controllo certificati blindato.
     Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
     """
     df = v3705_clients_df()
@@ -16593,7 +16593,7 @@ def kreo_render_reception_internal_view_if_any():
 
 
 # ============================================================
-# KREO V37.06 - Tornello & Badge semplificato
+# KREO V37.07 - Tornello & Badge semplificato
 # ============================================================
 
 def v3706_now():
@@ -17145,6 +17145,462 @@ def render_v36_checkin_core():
         render_v3706_accesso_da_gestire()
     with tabs[2]:
         render_v3706_badge()
+
+
+
+
+# ============================================================
+# KREO V37.07 - Agenda operativa + Alert cliente apribile
+# ============================================================
+
+def v3707_now():
+    try:
+        return datetime.now()
+    except Exception:
+        from datetime import datetime as _dt
+        return _dt.now()
+
+def v3707_today():
+    try:
+        return date.today()
+    except Exception:
+        from datetime import date as _date
+        return _date.today()
+
+def v3707_clients_df():
+    try:
+        return v3706_df_clienti()
+    except Exception:
+        try:
+            return v3705_clients_df()
+        except Exception:
+            try:
+                rows = get_supabase().table("clienti").select("*").order("cognome").execute().data or []
+                return pd.DataFrame(rows)
+            except Exception:
+                return pd.DataFrame()
+
+def v3707_lezioni_df():
+    try:
+        rows = get_supabase().table("lezioni").select("*").order("id", desc=True).limit(800).execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        try:
+            return v3705_lezioni_df()
+        except Exception:
+            return pd.DataFrame()
+
+def v3707_get_cliente(cid):
+    try:
+        if cid in [None, "", "nan", "None"]:
+            return {}
+        rows = get_supabase().table("clienti").select("*").eq("id", int(float(cid))).limit(1).execute().data or []
+        return rows[0] if rows else {}
+    except Exception:
+        return {}
+
+def v3707_nome_cliente(cliente):
+    try:
+        return v3706_nome_cliente(cliente)
+    except Exception:
+        if not cliente:
+            return "Cliente non associato"
+        return f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip() or f"Cliente ID {cliente.get('id','')}"
+
+def v3707_int(v, default=0):
+    try:
+        if v in [None, "", "nan", "None"]:
+            return default
+        return int(float(v))
+    except Exception:
+        return default
+
+def v3707_lezioni_cliente(cliente):
+    totale = v3707_int(cliente.get("numero_lezioni"), 0)
+    usate = v3707_int(cliente.get("lezioni_utilizzate"), 0)
+    return totale, usate, max(totale - usate, 0)
+
+def v3707_update_cliente_lezioni(cliente_id, totale, usate):
+    try:
+        totale = max(int(totale), 0)
+        usate = max(min(int(usate), totale), 0)
+        get_supabase().table("clienti").update({
+            "numero_lezioni": totale,
+            "lezioni_utilizzate": usate
+        }).eq("id", int(float(cliente_id))).execute()
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        return True, f"Presenza registrata. Residue: {max(totale-usate,0)}."
+    except Exception as e:
+        return False, f"Errore aggiornamento lezioni: {e}"
+
+def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo):
+    payloads = [
+        {
+            "cliente_id": int(float(cliente_id)),
+            "lezione_id": int(float(lezione_id)) if lezione_id not in [None, "", "nan"] else None,
+            "delta": int(delta),
+            "tipo": tipo,
+            "motivo": motivo,
+            "created_at": v3707_now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "lezione_id": int(float(lezione_id)) if lezione_id not in [None, "", "nan"] else None,
+            "quantita": abs(int(delta)),
+            "tipo": tipo,
+            "motivo": motivo,
+            "created_at": v3707_now().isoformat(),
+        },
+    ]
+    for p in payloads:
+        try:
+            get_supabase().table("movimenti_lezioni").insert(p).execute()
+            return True
+        except Exception:
+            continue
+    return False
+
+def v3707_update_lezione(lezione_id, payload):
+    try:
+        get_supabase().table("lezioni").update(payload).eq("id", int(float(lezione_id))).execute()
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        return True, "Lezione aggiornata."
+    except Exception as e:
+        return False, f"Errore aggiornamento lezione: {e}"
+
+def v3707_conferma_presenza_agenda(row, scala=True):
+    cid = row.get("cliente_id")
+    if cid in [None, "", "nan", "None", 0, "0"]:
+        return False, "Questa lezione non ha cliente associato."
+
+    cliente = v3707_get_cliente(cid)
+    if not cliente:
+        return False, "Cliente non trovato."
+
+    totale, usate, residue = v3707_lezioni_cliente(cliente)
+
+    if scala:
+        if residue <= 0:
+            return False, "Nessuna lezione residua da scalare."
+        v3707_registra_movimento_agenda(cid, row.get("id"), -1, "PRESENZA_AGENDA_SCALATA", "Presenza confermata da agenda: badge dimenticato/non usato")
+        ok, msg = v3707_update_cliente_lezioni(cid, totale, usate + 1)
+        v3707_update_lezione(row.get("id"), {"stato": "PRESENTE"})
+        return ok, msg
+    else:
+        v3707_registra_movimento_agenda(cid, row.get("id"), 0, "PRESENZA_AGENDA_NO_SCALA", "Presenza confermata da agenda senza scalare")
+        v3707_update_lezione(row.get("id"), {"stato": "PRESENTE_NO_SCALA"})
+        return True, "Presenza confermata senza scalare."
+
+def v3707_cliente_label(row):
+    cid = row.get("id")
+    nome = v3707_nome_cliente(row)
+    tel = row.get("cellulare") or row.get("telefono") or "-"
+    return f"{int(float(cid))} - {nome} | tel {tel}"
+
+def v3707_insert_lezione(payload):
+    candidates = [
+        payload,
+        {k: v for k, v in payload.items() if k not in ["created_at", "note"]},
+        {
+            "cliente_id": payload.get("cliente_id"),
+            "data_lezione": payload.get("data_lezione"),
+            "ora_inizio": payload.get("ora_inizio"),
+            "ora_fine": payload.get("ora_fine"),
+            "trainer": payload.get("trainer"),
+            "stato": payload.get("stato"),
+        },
+        {
+            "cliente_id": payload.get("cliente_id"),
+            "data": payload.get("data_lezione"),
+            "ora_inizio": payload.get("ora_inizio"),
+            "ora_fine": payload.get("ora_fine"),
+            "trainer": payload.get("trainer"),
+            "stato": payload.get("stato"),
+        },
+    ]
+    last = None
+    for p in candidates:
+        p = {k: v for k, v in p.items() if v not in [None, ""]}
+        try:
+            get_supabase().table("lezioni").insert(p).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True, "Lezione inserita in agenda."
+        except Exception as e:
+            last = e
+    return False, f"Errore inserimento lezione: {last}"
+
+def render_v37_agenda_7gg():
+    """
+    V37.07: Agenda Luxury operativa.
+    - può vedere giorni precedenti;
+    - può confermare presenza e scalare;
+    - può confermare presenza senza scalare.
+    """
+    st.header("✨ Agenda Luxury")
+    st.caption("Vista operativa: consulta passato/futuro, inserisci prenotazioni e conferma presenze senza badge.")
+
+    with st.expander("➕ Inserisci nuova lezione / prenotazione", expanded=False):
+        clienti = v3707_clients_df()
+        if clienti.empty:
+            st.info("Nessun cliente disponibile.")
+        else:
+            clienti = clienti.copy()
+            clienti["__label"] = clienti.apply(v3707_cliente_label, axis=1)
+            with st.form("v3707_nuova_lezione"):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    cliente_label = st.selectbox("Cliente", clienti["__label"].tolist())
+                    data_lezione = st.date_input("Data", value=v3707_today())
+                with c2:
+                    ora_inizio = st.text_input("Ora inizio", value="10:00")
+                    ora_fine = st.text_input("Ora fine", value="11:00")
+                with c3:
+                    trainer = st.text_input("Trainer", value="")
+                    stato = st.selectbox("Stato", ["PRENOTATO", "PRESENTE", "ASSENTE", "DA VERIFICARE"])
+                note = st.text_area("Note agenda", value="")
+                salva = st.form_submit_button("✅ Inserisci in agenda", use_container_width=True)
+
+            if salva:
+                try:
+                    cid = int(str(cliente_label).split(" - ")[0])
+                    payload = {
+                        "cliente_id": cid,
+                        "data_lezione": str(data_lezione),
+                        "ora_inizio": ora_inizio,
+                        "ora_fine": ora_fine,
+                        "trainer": trainer,
+                        "stato": stato,
+                        "note": note,
+                        "created_at": v3707_now().isoformat(),
+                    }
+                    ok, msg = v3707_insert_lezione(payload)
+                    st.success(msg) if ok else st.error(msg)
+                    if ok:
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Errore inserimento agenda: {e}")
+
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        giorni_indietro = st.selectbox("Giorni precedenti", [0, 1, 3, 7, 14, 30, 60], index=3, key="v3707_past_days")
+    with f2:
+        giorni_avanti = st.selectbox("Giorni futuri", [1, 3, 7, 14, 30, 60], index=2, key="v3707_future_days")
+    with f3:
+        solo_da_gestire = st.checkbox("Mostra solo prenotati/da gestire", value=False)
+
+    df = v3707_lezioni_df()
+    if df.empty:
+        st.info("Nessuna lezione in agenda.")
+        return
+
+    data_col = "data_lezione" if "data_lezione" in df.columns else ("data" if "data" in df.columns else None)
+    if not data_col:
+        st.dataframe(df.head(80), use_container_width=True, hide_index=True)
+        return
+
+    tmp = df.copy()
+    tmp["_data"] = pd.to_datetime(tmp[data_col], errors="coerce").dt.date
+    start = v3707_today() - timedelta(days=int(giorni_indietro))
+    end = v3707_today() + timedelta(days=int(giorni_avanti))
+    tmp = tmp[(tmp["_data"] >= start) & (tmp["_data"] <= end)].copy()
+
+    if solo_da_gestire and "stato" in tmp.columns:
+        stato = tmp["stato"].astype(str).str.upper()
+        tmp = tmp[stato.str.contains("PRENOTATO|DA VERIFICARE|ASSENTE", na=False)]
+
+    if tmp.empty:
+        st.info("Nessuna lezione nel periodo selezionato.")
+        return
+
+    clienti = v3707_clients_df()
+    nome_map = {}
+    if not clienti.empty and "id" in clienti.columns:
+        for _, r in clienti.iterrows():
+            try:
+                nome_map[int(float(r.get("id")))] = v3707_nome_cliente(r)
+            except Exception:
+                pass
+
+    try:
+        tmp["_ora_sort"] = tmp.get("ora_inizio", "").astype(str)
+        tmp = tmp.sort_values(["_data", "_ora_sort"])
+    except Exception:
+        pass
+
+    for d in sorted(tmp["_data"].dropna().unique()):
+        st.markdown(f"### {d.strftime('%d/%m/%Y')}")
+        day = tmp[tmp["_data"] == d].copy()
+        for _, r in day.iterrows():
+            row = r.to_dict()
+            cid = v3707_int(row.get("cliente_id"), 0)
+            cliente_nome = row.get("cliente") or row.get("nome_cliente") or nome_map.get(cid, f"Cliente ID {cid}" if cid else "Cliente non indicato")
+            ora = f"{row.get('ora_inizio','')} - {row.get('ora_fine','')}".strip(" -")
+            trainer = row.get("trainer") or row.get("istruttore") or "-"
+            stato = str(row.get("stato") or "PRENOTATO")
+            lezione_id = row.get("id") or f"{cid}_{d}_{ora}"
+
+            st.markdown(
+                f"""
+                <div style="border:1.5px solid rgba(212,175,55,.65);border-radius:16px;background:#fffdf7;padding:14px 16px;margin:8px 0;box-shadow:0 6px 16px rgba(0,0,0,.04);">
+                    <div style="display:flex;justify-content:space-between;gap:16px;">
+                        <div>
+                            <div style="font-size:18px;font-weight:950;">{ora} · {cliente_nome}</div>
+                            <div style="font-size:13px;color:#666;">Trainer: {trainer} · Stato: {stato}</div>
+                        </div>
+                        <div style="font-size:12px;font-weight:900;border:1px solid #d4af37;border-radius:999px;padding:7px 10px;height:fit-content;">{stato}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("✅ Presente e scala", key=f"v3707_pres_scala_{lezione_id}", use_container_width=True):
+                    ok, msg = v3707_conferma_presenza_agenda(row, scala=True)
+                    st.success(msg) if ok else st.error(msg)
+                    st.rerun()
+            with c2:
+                if st.button("🟦 Presente no scala", key=f"v3707_pres_no_scala_{lezione_id}", use_container_width=True):
+                    ok, msg = v3707_conferma_presenza_agenda(row, scala=False)
+                    st.success(msg) if ok else st.error(msg)
+                    st.rerun()
+            with c3:
+                if st.button("👤 Apri scheda cliente", key=f"v3707_open_cliente_agenda_{lezione_id}", use_container_width=True):
+                    st.session_state["cliente_preselezionato_id"] = cid
+                    st.session_state["cliente_360_id"] = cid
+                    v37_open("cliente_360")
+
+def render_reception_center():
+    if kreo_render_reception_internal_view_if_any():
+        return
+
+    st.header("🏠 Reception Center")
+    st.caption("Dashboard operativa: veloce, leggibile, impossibile da sbagliare.")
+
+    clienti = v3705_clients_df() if "v3705_clients_df" in globals() else v3707_clients_df()
+    accessi = v3705_accessi_df() if "v3705_accessi_df" in globals() else pd.DataFrame()
+    pagamenti = v3704_payments_df() if "v3704_payments_df" in globals() else pd.DataFrame()
+
+    clienti_count = 0 if clienti.empty else len(clienti)
+    accessi_oggi = 0
+    incassi_oggi = 0.0
+
+    try:
+        if not accessi.empty and "data_accesso" in accessi.columns:
+            accessi_oggi = len(accessi[accessi["data_accesso"].astype(str).str[:10] == str(v3707_today())])
+    except Exception:
+        pass
+
+    try:
+        if not pagamenti.empty:
+            pcol = "data_pagamento" if "data_pagamento" in pagamenti.columns else "data"
+            pday = pagamenti[pagamenti[pcol].astype(str).str[:10] == str(v3707_today())]
+            incassi_oggi = float(pd.to_numeric(pday.get("importo", 0), errors="coerce").fillna(0).sum())
+    except Exception:
+        pass
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        v37_metric_card("Clienti", clienti_count, "👥")
+    with m2:
+        lez = v3707_lezioni_df()
+        agenda_count = 0
+        try:
+            dcol = "data_lezione" if "data_lezione" in lez.columns else "data"
+            agenda_count = len(lez[lez[dcol].astype(str).str[:10] == str(v3707_today())])
+        except Exception:
+            pass
+        v37_metric_card("Agenda oggi", agenda_count, "📅")
+    with m3:
+        v37_metric_card("Accessi oggi", accessi_oggi, "🚦")
+    with m4:
+        v37_metric_card("Incassi oggi", f"€ {incassi_oggi:.2f}", "💰")
+
+    st.markdown("---")
+    left, right = st.columns([3.4, 1.15], gap="large")
+    with left:
+        st.markdown("""
+        <div style="background:#fff9e8;border:1px solid rgba(212,175,55,.55);border-radius:16px;padding:13px 15px;margin-bottom:16px;font-weight:850;">
+            Scegli l’azione. Tutto deve stare a massimo due click.
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("➕ Nuovo cliente", key="v3707_btn_new", use_container_width=True): v37_open("nuovo_cliente")
+        with c2:
+            if st.button("✏️ Modifica cliente", key="v3707_btn_mod", use_container_width=True): v37_open("modifica_cliente")
+        with c3:
+            if st.button("💰 Registra incasso", key="v3707_btn_incasso", use_container_width=True): v37_open("incasso")
+
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            if st.button("🚦 Accesso tornello", key="v3707_btn_tornello", use_container_width=True): v37_open("v36_checkin")
+        with c5:
+            if st.button("📅 Agenda / Calendario", key="v3707_btn_agenda", use_container_width=True): v37_open("agenda_7gg")
+        with c6:
+            if st.button("🧾 Stampa ricevuta / storico", key="v3707_btn_ricevuta", use_container_width=True): v37_open("ricevute_storico")
+
+        c7, c8, c9 = st.columns(3)
+        with c7:
+            if st.button("💬 Messaggio cliente", key="v3707_btn_msg", use_container_width=True): v37_open("messaggio")
+        with c8:
+            if st.button("👤 Cliente 360", key="v3707_btn_360", use_container_width=True): v37_open("cliente_360")
+        with c9:
+            if st.button("🔑 Gestione presenze", key="v3707_btn_accessi", use_container_width=True): v37_open("modifica_accessi")
+
+        st.markdown("---")
+        st.markdown("### Attività live")
+        if "v3705_render_ultimo_accesso_pulito" in globals():
+            v3705_render_ultimo_accesso_pulito()
+        st.markdown("### Agenda oggi")
+        if "v3705_render_agenda_oggi_pulita" in globals():
+            v3705_render_agenda_oggi_pulita()
+
+    with right:
+        render_reception_alert_side_panel()
+
+def render_alert_certificati():
+    st.header("🔴 Certificati mancanti/scaduti")
+    df = v3705_certificati_mancanti_o_scaduti() if "v3705_certificati_mancanti_o_scaduti" in globals() else pd.DataFrame()
+    if df.empty:
+        st.success("Nessun certificato mancante/scaduto rilevato.")
+        return
+
+    for _, r in df.head(50).iterrows():
+        row = r.to_dict()
+        cid = row.get("id")
+        nome = v3707_nome_cliente(row)
+        tel = row.get("cellulare") or row.get("telefono") or "-"
+        motivo = row.get("_motivo_certificato") or "Da verificare"
+
+        st.markdown(
+            f"""
+            <div style="border:1.7px solid #ef4444;border-radius:18px;background:#fffdf7;padding:14px 16px;margin:10px 0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;">
+                <div>
+                  <div style="font-size:20px;font-weight:950;">{nome}</div>
+                  <div style="font-size:13px;color:#555;">{motivo} · Tel: {tel}</div>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        if st.button("👤 Apri scheda cliente", key=f"v3707_alert_open_cliente_{cid}", use_container_width=True):
+            st.session_state["cliente_preselezionato_id"] = cid
+            st.session_state["cliente_360_id"] = cid
+            v37_open("cliente_360")
 
 
 if __name__ == "__main__":
