@@ -16647,8 +16647,16 @@ def v3706_get_cliente(cid):
         return {}
 
 def v3706_nome_cliente(cliente):
-    if not cliente:
-        return "Cliente non associato"
+    try:
+        import pandas as pd
+        if cliente is None:
+            return "Cliente non associato"
+        if isinstance(cliente, pd.Series):
+            cliente = cliente.to_dict()
+        if isinstance(cliente, dict) and len(cliente)==0:
+            return "Cliente non associato"
+    except Exception:
+        pass
     return f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip() or f"Cliente ID {cliente.get('id','')}"
 
 def v3706_int(v, default=0):
