@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.08")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.09")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16064,7 +16064,7 @@ def v3705_data_from_any(value):
 
 def v3705_certificati_mancanti_o_scaduti():
     """
-    V37.08: controllo certificati blindato.
+    V37.09: controllo certificati blindato.
     Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
     """
     df = v3705_clients_df()
@@ -16593,7 +16593,7 @@ def kreo_render_reception_internal_view_if_any():
 
 
 # ============================================================
-# KREO V37.08 - Tornello & Badge semplificato
+# KREO V37.09 - Tornello & Badge semplificato
 # ============================================================
 
 def v3706_now():
@@ -17150,7 +17150,7 @@ def render_v36_checkin_core():
 
 
 # ============================================================
-# KREO V37.08 - Agenda operativa + Alert cliente apribile
+# KREO V37.09 - Agenda operativa + Alert cliente apribile
 # ============================================================
 
 def v3707_now():
@@ -17340,7 +17340,7 @@ def v3707_insert_lezione(payload):
 
 def render_v37_agenda_7gg():
     """
-    V37.08: Agenda Luxury operativa.
+    V37.09: Agenda Luxury operativa.
     - può vedere giorni precedenti;
     - può confermare presenza e scalare;
     - può confermare presenza senza scalare.
@@ -17606,7 +17606,7 @@ def render_alert_certificati():
 
 
 # ============================================================
-# KREO V37.08 - Anti doppia presenza agenda
+# KREO V37.09 - Anti doppia presenza agenda
 # ============================================================
 
 def v3708_lezione_gia_gestita(lezione_id, cliente_id=None):
@@ -17704,7 +17704,7 @@ def v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, m
 
 def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo):
     """
-    Override compatibile V37.08.
+    Override compatibile V37.09.
     """
     ok, msg = v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, motivo)
     return ok
@@ -17712,7 +17712,7 @@ def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo)
 
 def v3707_conferma_presenza_agenda(row, scala=True):
     """
-    Override V37.08: impedisce doppio click/doppia presenza sulla stessa lezione.
+    Override V37.09: impedisce doppio click/doppia presenza sulla stessa lezione.
     """
     cid = row.get("cliente_id")
     lezione_id = row.get("id")
@@ -17765,7 +17765,7 @@ def v3707_conferma_presenza_agenda(row, scala=True):
 
 def render_v37_agenda_7gg():
     """
-    V37.08: Agenda operativa anti-doppia presenza.
+    V37.09: Agenda operativa anti-doppia presenza.
     """
     st.header("✨ Agenda Luxury")
     st.caption("Consulta passato/futuro, inserisci prenotazioni e conferma presenze una sola volta.")
@@ -17913,6 +17913,508 @@ def render_v37_agenda_7gg():
                     st.session_state["cliente_preselezionato_id"] = cid
                     st.session_state["cliente_360_id"] = cid
                     v37_open("cliente_360")
+
+
+
+
+# ============================================================
+# KREO V37.09 - Badge unici + Documenti bucket pubblico fix globale
+# ============================================================
+
+KREO_DOCUMENTI_BUCKET = "documenti"
+
+def v3709_now():
+    try:
+        return datetime.now()
+    except Exception:
+        from datetime import datetime as _dt
+        return _dt.now()
+
+def v3709_clients_df():
+    try:
+        return v3707_clients_df()
+    except Exception:
+        try:
+            rows = get_supabase().table("clienti").select("*").order("cognome").execute().data or []
+            return pd.DataFrame(rows)
+        except Exception:
+            return pd.DataFrame()
+
+def v3709_accessi_df(limit=500):
+    try:
+        rows = get_supabase().table("accessi_tornello").select("*").order("id", desc=True).limit(limit).execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        try:
+            return v3706_df_accessi(limit)
+        except Exception:
+            return pd.DataFrame()
+
+def v3709_badge_df():
+    try:
+        rows = get_supabase().table("badge_clienti").select("*").execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+def v3709_nome_cliente(row):
+    try:
+        return v3707_nome_cliente(row)
+    except Exception:
+        if row is None:
+            return "Cliente non associato"
+        try:
+            if isinstance(row, pd.Series):
+                row = row.to_dict()
+        except Exception:
+            pass
+        return f"{row.get('nome','')} {row.get('cognome','')}".strip() or f"Cliente ID {row.get('id','')}"
+
+def v3709_badge_value(row):
+    try:
+        return str(row.get("badge_uid") or row.get("badge") or row.get("codice_badge") or row.get("uid") or "").strip()
+    except Exception:
+        return ""
+
+def v3709_get_cliente(cid):
+    try:
+        if cid in [None, "", "nan", "None"]:
+            return {}
+        rows = get_supabase().table("clienti").select("*").eq("id", int(float(cid))).limit(1).execute().data or []
+        return rows[0] if rows else {}
+    except Exception:
+        return {}
+
+def v3709_cliente_label(row, show_badge=True):
+    cid = row.get("id")
+    nome = v3709_nome_cliente(row)
+    tel = row.get("cellulare") or row.get("telefono") or "-"
+    badge_txt = ""
+    if show_badge:
+        badge = v3709_badge_cliente(cid)
+        badge_txt = f" | badge {badge}" if badge else " | senza badge"
+    return f"{int(float(cid))} - {nome} | tel {tel}{badge_txt}"
+
+def v3709_badge_cliente(cliente_id):
+    df = v3709_badge_df()
+    if df.empty or cliente_id in [None, "", "nan", "None"]:
+        return ""
+    try:
+        cid = int(float(cliente_id))
+        col = "cliente_id" if "cliente_id" in df.columns else ("id_cliente" if "id_cliente" in df.columns else None)
+        if not col:
+            return ""
+        sub = df[pd.to_numeric(df[col], errors="coerce") == cid].copy()
+        if sub.empty:
+            return ""
+        if "attivo" in sub.columns:
+            sub = sub[sub["attivo"].astype(str).str.lower().isin(["true","1","si","sì","yes"])]
+        if "stato" in sub.columns and not sub.empty:
+            sub = sub[~sub["stato"].astype(str).str.upper().str.contains("DIS|ANNULL|ARCHIV|DISSOCIATO", na=False)]
+        if sub.empty:
+            return ""
+        return v3709_badge_value(sub.iloc[0])
+    except Exception:
+        return ""
+
+def v3709_badge_owner(badge_uid):
+    badge = str(badge_uid or "").strip()
+    if not badge:
+        return None, {}
+    df = v3709_badge_df()
+    if df.empty:
+        return None, {}
+    try:
+        badge_cols = [c for c in ["badge_uid", "badge", "codice_badge", "uid"] if c in df.columns]
+        if not badge_cols:
+            return None, {}
+        mask = pd.Series([False] * len(df))
+        for c in badge_cols:
+            mask = mask | (df[c].astype(str).str.strip() == badge)
+        sub = df[mask].copy()
+        if sub.empty:
+            return None, {}
+        if "attivo" in sub.columns:
+            active = sub[sub["attivo"].astype(str).str.lower().isin(["true","1","si","sì","yes"])]
+            if not active.empty:
+                sub = active
+        if "stato" in sub.columns:
+            valid = sub[~sub["stato"].astype(str).str.upper().str.contains("DIS|ANNULL|ARCHIV|DISSOCIATO", na=False)]
+            if not valid.empty:
+                sub = valid
+        row = sub.iloc[0].to_dict()
+        cid = row.get("cliente_id") or row.get("id_cliente")
+        if cid in [None, "", "nan", "None"]:
+            return None, row
+        return int(float(cid)), row
+    except Exception:
+        return None, {}
+
+def v3709_badge_da_associare_unici():
+    """
+    Restituisce un solo record per badge, escludendo:
+    - badge vuoto;
+    - badge già associato a un cliente attivo;
+    - duplicati dello stesso badge.
+    """
+    df = v3709_accessi_df()
+    if df.empty:
+        return pd.DataFrame()
+
+    rows = []
+    seen = set()
+
+    try:
+        df["id_num"] = pd.to_numeric(df["id"], errors="coerce").fillna(0)
+        df = df.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+
+    for _, r in df.iterrows():
+        row = r.to_dict()
+        badge = str(row.get("badge_uid") or row.get("badge") or "").strip()
+        if not badge or badge in seen:
+            continue
+
+        owner_id, _ = v3709_badge_owner(badge)
+        if owner_id:
+            continue
+
+        stato = str(row.get("stato_accesso") or "").upper()
+        cliente_id = row.get("cliente_id")
+        non_associato = cliente_id in [None, "", "nan", "None", 0, "0", 0.0, "0.0"]
+        da_verificare = any(k in stato for k in ["DA_VERIFICARE", "NEGATO", "NON_ASSOCIATO"])
+
+        if non_associato or da_verificare:
+            seen.add(badge)
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+def v3709_insert_badge(cliente_id, badge_uid):
+    badge = str(badge_uid or "").strip()
+    if not badge:
+        return False, "Badge non valido."
+
+    owner_id, _ = v3709_badge_owner(badge)
+    if owner_id and int(owner_id) != int(cliente_id):
+        owner = v3709_get_cliente(owner_id)
+        return False, f"Badge {badge} già associato a {v3709_nome_cliente(owner)}. Prima dissocia o trasferisci."
+
+    current = v3709_badge_cliente(cliente_id)
+    if current and str(current) != badge:
+        cliente = v3709_get_cliente(cliente_id)
+        return False, f"{v3709_nome_cliente(cliente)} ha già il badge {current}. Prima dissocia o trasferisci."
+
+    payloads = [
+        {"cliente_id": int(cliente_id), "badge_uid": badge, "created_at": v3709_now().isoformat(), "attivo": True},
+        {"cliente_id": int(cliente_id), "badge_uid": badge, "created_at": v3709_now().isoformat()},
+        {"cliente_id": int(cliente_id), "badge": badge},
+        {"id_cliente": int(cliente_id), "badge_uid": badge},
+    ]
+    last = None
+    for p in payloads:
+        try:
+            get_supabase().table("badge_clienti").insert(p).execute()
+            try: st.cache_data.clear()
+            except Exception: pass
+            return True, f"Badge {badge} associato correttamente."
+        except Exception as e:
+            last = e
+    return False, f"Errore associazione badge: {last}"
+
+def render_alert_badge_associa():
+    st.header("🔵 Badge/accessi da associare")
+    st.caption("Mostro solo badge unici, non già associati. Un badge può appartenere a un solo cliente.")
+
+    df = v3709_badge_da_associare_unici()
+    if df.empty:
+        st.success("Nessun badge/accesso da associare.")
+        return
+
+    clienti = v3709_clients_df()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(lambda r: v3709_cliente_label(r, show_badge=True), axis=1)
+
+    for _, row in df.iterrows():
+        badge = str(row.get("badge_uid") or row.get("badge") or "").strip()
+        st.markdown(
+            f"""
+            <div style="border:1.7px solid #3b82f6;border-radius:18px;background:#f8fbff;padding:14px 16px;margin:12px 0;">
+              <div style="font-size:20px;font-weight:950;">Badge {badge}</div>
+              <div style="font-size:13px;color:#555;">Ultimo accesso: {row.get('data_accesso','')} {row.get('ora_accesso','')} · Stato: {row.get('stato_accesso') or '-'}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        selected = st.selectbox("Associa a cliente", clienti["__label"].tolist(), key=f"v3709_assoc_badge_{badge}")
+        if st.button("✅ Associa badge/accesso", key=f"v3709_assoc_badge_btn_{badge}", use_container_width=True):
+            cid = int(str(selected).split(" - ")[0])
+            ok, msg = v3709_insert_badge(cid, badge)
+            if ok:
+                try:
+                    get_supabase().table("accessi_tornello").update({
+                        "cliente_id": cid,
+                        "stato_accesso": "REGISTRATO_ASSOCIATO_KREO",
+                        "note": f"Badge {badge} associato a cliente {cid}"
+                    }).eq("id", int(float(row.get("id")))).execute()
+                except Exception:
+                    pass
+            st.success(msg) if ok else st.error(msg)
+            if ok:
+                st.rerun()
+
+# Compatibilità: anche la tab Badge del tornello usa lista unici
+def render_v3706_badge():
+    st.subheader("🔵 Badge")
+    tab1, tab2, tab3 = st.tabs(["Badge non associati", "Badge associati", "Trasferisci/Dissocia"])
+
+    clienti = v3709_clients_df()
+    if not clienti.empty:
+        clienti = clienti.copy()
+        clienti["__label"] = clienti.apply(lambda x: v3709_cliente_label(x, show_badge=True), axis=1)
+
+    with tab1:
+        df = v3709_badge_da_associare_unici()
+        if df.empty:
+            st.success("Nessun badge/accesso non associato.")
+        else:
+            for _, row in df.iterrows():
+                badge = str(row.get("badge_uid") or row.get("badge") or "").strip()
+                st.markdown(
+                    f"""
+                    <div style="border:1.7px solid #3b82f6;border-radius:18px;background:#f8fbff;padding:14px 16px;margin:12px 0;">
+                      <div style="font-size:20px;font-weight:950;">Badge {badge}</div>
+                      <div style="font-size:13px;color:#555;">Accesso {row.get('id')} · {row.get('data_accesso','')} {row.get('ora_accesso','')} · Stato: {row.get('stato_accesso') or '-'}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                if clienti.empty:
+                    st.info("Nessun cliente disponibile.")
+                    continue
+                scelto = st.selectbox("Associa a cliente", clienti["__label"].tolist(), key=f"v3709_tornello_assoc_{badge}")
+                if st.button("✅ Associa badge", key=f"v3709_tornello_assoc_btn_{badge}", use_container_width=True):
+                    cid = int(str(scelto).split(" - ")[0])
+                    ok, msg = v3709_insert_badge(cid, badge)
+                    if ok:
+                        try:
+                            get_supabase().table("accessi_tornello").update({
+                                "cliente_id": cid,
+                                "stato_accesso": "REGISTRATO_ASSOCIATO_KREO",
+                                "note": f"Badge {badge} associato a cliente {cid}"
+                            }).eq("id", int(float(row.get("id")))).execute()
+                        except Exception:
+                            pass
+                    st.success(msg) if ok else st.error(msg)
+                    if ok:
+                        st.rerun()
+
+    with tab2:
+        bdf = v3709_badge_df()
+        if bdf.empty:
+            st.info("Nessun badge associato.")
+        else:
+            seen = set()
+            for _, br in bdf.iterrows():
+                b = br.to_dict()
+                badge = v3709_badge_value(b)
+                if not badge or badge in seen:
+                    continue
+                owner_id, _ = v3709_badge_owner(badge)
+                if not owner_id:
+                    continue
+                seen.add(badge)
+                cliente = v3709_get_cliente(owner_id)
+                st.markdown(
+                    f"""
+                    <div style="border:1.5px solid #22c55e;border-radius:16px;background:#f7fff9;padding:13px 15px;margin:9px 0;">
+                      <b>{v3709_nome_cliente(cliente)}</b><br>
+                      <span style="color:#555;">Badge {badge}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+    with tab3:
+        if clienti.empty:
+            st.info("Nessun cliente disponibile.")
+            return
+        badge = st.text_input("Badge da trasferire/dissociare", key="v3709_badge_transfer")
+        nuovo = st.selectbox("Nuovo cliente", clienti["__label"].tolist(), key="v3709_badge_new_owner")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🔁 Trasferisci badge", use_container_width=True):
+                cid = int(str(nuovo).split(" - ")[0])
+                try:
+                    ok, msg = v3706_trasferisci_badge(badge, cid)
+                except Exception:
+                    old_owner, _ = v3709_badge_owner(badge)
+                    if old_owner:
+                        try:
+                            v3706_dissocia_badge(cliente_id=old_owner, badge_uid=badge)
+                        except Exception:
+                            pass
+                    ok, msg = v3709_insert_badge(cid, badge)
+                st.success(msg) if ok else st.error(msg)
+                if ok:
+                    st.rerun()
+        with c2:
+            if st.button("🗑️ Dissocia badge", use_container_width=True):
+                try:
+                    ok, msg = v3706_dissocia_badge(badge_uid=badge)
+                except Exception as e:
+                    ok, msg = False, str(e)
+                st.success(msg) if ok else st.error(msg)
+                if ok:
+                    st.rerun()
+
+# ============================================================
+# DOCUMENTI - ripristino logica pubblica globale
+# ============================================================
+
+def v3709_upload_documento_storage(cliente_id, file_obj, tipo_documento):
+    """
+    Logica vecchia funzionante:
+    bucket pubblico 'documenti'
+    path: cliente_<id>/<tipo>_<timestamp>.pdf
+    Niente listing bucket: se il bucket esiste, upload diretto.
+    """
+    try:
+        filename = getattr(file_obj, "name", "documento.pdf")
+        safe_tipo = str(tipo_documento or "documento").lower().replace(" ", "_").replace("/", "_")
+        ext = filename.split(".")[-1].lower() if "." in filename else "pdf"
+        storage_path = f"cliente_{int(float(cliente_id))}/{safe_tipo}_{v3709_now().strftime('%Y%m%d%H%M%S')}.{ext}"
+        data = file_obj.getvalue()
+
+        # Supabase-py può cambiare firma tra versioni: provo vari formati.
+        uploaded = False
+        errors = []
+        attempts = [
+            lambda: get_supabase().storage.from_(KREO_DOCUMENTI_BUCKET).upload(storage_path, data, {"content-type": "application/pdf", "upsert": "true"}),
+            lambda: get_supabase().storage.from_(KREO_DOCUMENTI_BUCKET).upload(path=storage_path, file=data, file_options={"content-type": "application/pdf", "upsert": "true"}),
+            lambda: get_supabase().storage.from_(KREO_DOCUMENTI_BUCKET).upload(storage_path, data),
+        ]
+        for fn in attempts:
+            try:
+                fn()
+                uploaded = True
+                break
+            except Exception as e:
+                errors.append(str(e))
+
+        if not uploaded:
+            return False, None, "Upload fallito su bucket pubblico 'documenti'. Dettagli: " + " | ".join(errors[-2:])
+
+        public_url = get_supabase().storage.from_(KREO_DOCUMENTI_BUCKET).get_public_url(storage_path)
+        return True, storage_path, public_url
+    except Exception as e:
+        return False, None, f"Errore upload documento: {e}"
+
+def v3709_insert_documento_record(cliente_id, tipo_documento, filename, storage_path, public_url, note=""):
+    payloads = [
+        {
+            "cliente_id": int(float(cliente_id)),
+            "tipo_documento": tipo_documento,
+            "nome_file": filename,
+            "storage_path": storage_path,
+            "public_url": public_url,
+            "note": note,
+            "created_at": v3709_now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "tipo": tipo_documento,
+            "filename": filename,
+            "path": storage_path,
+            "url": public_url,
+            "note": note,
+        },
+        {
+            "id_cliente": int(float(cliente_id)),
+            "tipo_documento": tipo_documento,
+            "nome_file": filename,
+            "percorso_file": storage_path,
+            "url_file": public_url,
+        },
+    ]
+    last = None
+    for p in payloads:
+        try:
+            get_supabase().table("documenti_cliente").insert(p).execute()
+            try: st.cache_data.clear()
+            except Exception: pass
+            return True, "Documento salvato nello storico cliente."
+        except Exception as e:
+            last = e
+    return False, f"Upload riuscito, ma record in documenti_cliente non salvato: {last}"
+
+def render_staff_documenti():
+    st.header("📄 Documenti e certificati cliente")
+    tab1, tab2 = st.tabs(["Carica documento", "Archivio documenti"])
+
+    clienti = v3709_clients_df()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(lambda r: v3709_cliente_label(r, show_badge=False), axis=1)
+
+    with tab1:
+        st.subheader("Carica PDF cliente")
+        selected = st.selectbox("Cliente", clienti["__label"].tolist(), key="v3709_doc_cliente")
+        cid = int(str(selected).split(" - ")[0])
+        tipo = st.selectbox("Tipo documento", ["CERTIFICATO MEDICO", "CONTRATTO", "PRIVACY", "ALTRO"], key="v3709_tipo_doc")
+        file = st.file_uploader("Carica PDF", type=["pdf"], key="v3709_upload_pdf")
+        note = st.text_area("Note documento", key="v3709_note_doc")
+
+        if st.button("Carica documento", use_container_width=True):
+            if not file:
+                st.error("Seleziona un PDF.")
+            else:
+                ok, path, url_or_err = v3709_upload_documento_storage(cid, file, tipo)
+                if not ok:
+                    st.error(url_or_err)
+                else:
+                    ok2, msg = v3709_insert_documento_record(cid, tipo, getattr(file, "name", "documento.pdf"), path, url_or_err, note)
+                    if ok2:
+                        st.success("Documento caricato e associato al cliente.")
+                        st.link_button("Apri documento", url_or_err)
+                    else:
+                        st.warning(msg)
+
+    with tab2:
+        st.subheader("Archivio documenti")
+        selected2 = st.selectbox("Cliente archivio", clienti["__label"].tolist(), key="v3709_doc_archivio")
+        cid2 = int(str(selected2).split(" - ")[0])
+        try:
+            docs = get_supabase().table("documenti_cliente").select("*").eq("cliente_id", cid2).order("id", desc=True).execute().data or []
+        except Exception:
+            try:
+                docs = get_supabase().table("documenti_cliente").select("*").eq("id_cliente", cid2).order("id", desc=True).execute().data or []
+            except Exception as e:
+                st.error(f"Errore lettura documenti: {e}")
+                docs = []
+
+        if not docs:
+            st.info("Nessun documento in archivio per questo cliente.")
+        for d in docs:
+            url = d.get("public_url") or d.get("url") or d.get("url_file")
+            tipo = d.get("tipo_documento") or d.get("tipo") or "Documento"
+            nome = d.get("nome_file") or d.get("filename") or d.get("storage_path") or d.get("path") or d.get("percorso_file") or ""
+            st.markdown(f"**{tipo}** · {nome}")
+            if url:
+                st.link_button("Apri PDF", url)
+
+# Alias globali per intercettare anche le vecchie schermate documenti
+render_documenti_cliente_page = render_staff_documenti
+render_documenti_page = render_staff_documenti
+render_documenti = render_staff_documenti
+render_cliente_documenti = render_staff_documenti
 
 
 if __name__ == "__main__":
