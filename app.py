@@ -16066,7 +16066,7 @@ def v3705_certificati_mancanti_o_scaduti():
     df = v3705_clients_df()
     if df.empty:
         return pd.DataFrame()
-    today = v3705_today()
+    today = pd.Timestamp(v3705_today()).normalize()
     rows = []
     possibili_colonne = [
         "scadenza_certificato",
@@ -16086,7 +16086,7 @@ def v3705_certificati_mancanti_o_scaduti():
         motivo = None
         if not data:
             motivo = "Certificato mancante"
-        elif data < today:
+        elif pd.Timestamp(data).normalize() < today:
             motivo = f"Certificato scaduto il {data.strftime('%d/%m/%Y')}"
         if motivo:
             rr = r.to_dict()
