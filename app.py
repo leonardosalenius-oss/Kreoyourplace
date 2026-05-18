@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.05.2")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.06")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16064,7 +16064,7 @@ def v3705_data_from_any(value):
 
 def v3705_certificati_mancanti_o_scaduti():
     """
-    V37.05.2: controllo certificati blindato.
+    V37.06: controllo certificati blindato.
     Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
     """
     df = v3705_clients_df()
@@ -16588,6 +16588,555 @@ def kreo_render_reception_internal_view_if_any():
     elif view == "alert_center": kreo_call_first_available(["render_alert_center_page"], "Alert Center")
     else: st.warning(f"Vista Reception non riconosciuta: {view}")
     return True
+
+
+
+
+# ============================================================
+# KREO V37.06 - Tornello & Badge semplificato
+# ============================================================
+
+def v3706_now():
+    try:
+        return datetime.now()
+    except Exception:
+        from datetime import datetime as _dt
+        return _dt.now()
+
+def v3706_today():
+    try:
+        return date.today()
+    except Exception:
+        from datetime import date as _date
+        return _date.today()
+
+def v3706_df_clienti():
+    try:
+        return v3705_clients_df()
+    except Exception:
+        try:
+            return v3704_clients_df()
+        except Exception:
+            rows = get_supabase().table("clienti").select("*").order("cognome").execute().data or []
+            return pd.DataFrame(rows)
+
+def v3706_df_accessi(limit=400):
+    try:
+        rows = get_supabase().table("accessi_tornello").select("*").order("id", desc=True).limit(limit).execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        try:
+            return v3705_accessi_df()
+        except Exception:
+            return pd.DataFrame()
+
+def v3706_df_badge():
+    try:
+        rows = get_supabase().table("badge_clienti").select("*").execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()
+
+def v3706_get_cliente(cid):
+    try:
+        if cid in [None, "", "nan", "None"]:
+            return {}
+        rows = get_supabase().table("clienti").select("*").eq("id", int(float(cid))).limit(1).execute().data or []
+        return rows[0] if rows else {}
+    except Exception:
+        return {}
+
+def v3706_nome_cliente(cliente):
+    if not cliente:
+        return "Cliente non associato"
+    return f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip() or f"Cliente ID {cliente.get('id','')}"
+
+def v3706_int(v, default=0):
+    try:
+        if v in [None, "", "nan", "None"]:
+            return default
+        return int(float(v))
+    except Exception:
+        return default
+
+def v3706_lezioni(cliente):
+    totale = v3706_int(cliente.get("numero_lezioni"), 0)
+    usate = v3706_int(cliente.get("lezioni_utilizzate"), 0)
+    return totale, usate, max(totale-usate, 0)
+
+def v3706_badge_value(row):
+    if row is None:
+        return ""
+    try:
+        return str(row.get("badge_uid") or row.get("badge") or row.get("codice_badge") or row.get("uid") or "").strip()
+    except Exception:
+        return ""
+
+def v3706_cliente_label(row, show_badge=True):
+    cid = row.get("id")
+    nome = v3706_nome_cliente(row)
+    tel = row.get("cellulare") or row.get("telefono") or "-"
+    badge = v3706_badge_cliente(cid) if show_badge else ""
+    extra = f" | badge {badge}" if badge else (" | senza badge" if show_badge else "")
+    return f"{int(float(cid))} - {nome} | tel {tel}{extra}"
+
+def v3706_badge_cliente(cliente_id):
+    df = v3706_df_badge()
+    if df.empty or cliente_id in [None, "", "nan", "None"]:
+        return ""
+    try:
+        cid = int(float(cliente_id))
+        col = "cliente_id" if "cliente_id" in df.columns else ("id_cliente" if "id_cliente" in df.columns else None)
+        if not col:
+            return ""
+        sub = df[pd.to_numeric(df[col], errors="coerce") == cid]
+        if sub.empty:
+            return ""
+        # Preferisci record attivi, se colonna stato/attivo esiste
+        if "attivo" in sub.columns:
+            sub2 = sub[sub["attivo"].astype(str).str.lower().isin(["true", "1", "si", "sì", "yes"])]
+            if not sub2.empty:
+                sub = sub2
+        if "stato" in sub.columns:
+            sub2 = sub[~sub["stato"].astype(str).str.upper().str.contains("DIS|ANNULL|ARCHIV", na=False)]
+            if not sub2.empty:
+                sub = sub2
+        return v3706_badge_value(sub.iloc[0])
+    except Exception:
+        return ""
+
+def v3706_badge_owner(badge_uid):
+    badge = str(badge_uid or "").strip()
+    if not badge:
+        return None, {}
+    df = v3706_df_badge()
+    if df.empty:
+        return None, {}
+    try:
+        badge_cols = [c for c in ["badge_uid", "badge", "codice_badge", "uid"] if c in df.columns]
+        if not badge_cols:
+            return None, {}
+        mask = pd.Series([False] * len(df))
+        for c in badge_cols:
+            mask = mask | (df[c].astype(str).str.strip() == badge)
+        sub = df[mask].copy()
+        if sub.empty:
+            return None, {}
+        if "attivo" in sub.columns:
+            sub2 = sub[sub["attivo"].astype(str).str.lower().isin(["true", "1", "si", "sì", "yes"])]
+            if not sub2.empty:
+                sub = sub2
+        if "stato" in sub.columns:
+            sub2 = sub[~sub["stato"].astype(str).str.upper().str.contains("DIS|ANNULL|ARCHIV", na=False)]
+            if not sub2.empty:
+                sub = sub2
+        row = sub.iloc[0].to_dict()
+        cid = row.get("cliente_id") or row.get("id_cliente")
+        if cid in [None, "", "nan"]:
+            return None, row
+        return int(float(cid)), row
+    except Exception:
+        return None, {}
+
+def v3706_cliente_has_other_badge(cliente_id, badge_uid=None):
+    current = v3706_badge_cliente(cliente_id)
+    if not current:
+        return False, ""
+    if badge_uid and str(current).strip() == str(badge_uid).strip():
+        return False, current
+    return True, current
+
+def v3706_insert_badge(cliente_id, badge_uid):
+    badge = str(badge_uid or "").strip()
+    if not badge:
+        return False, "Badge non valido."
+
+    owner_id, owner_row = v3706_badge_owner(badge)
+    if owner_id and int(owner_id) != int(cliente_id):
+        owner = v3706_get_cliente(owner_id)
+        return False, f"Badge {badge} già associato a {v3706_nome_cliente(owner)}. Prima dissocia o trasferisci."
+
+    has_other, other_badge = v3706_cliente_has_other_badge(cliente_id, badge)
+    if has_other:
+        cliente = v3706_get_cliente(cliente_id)
+        return False, f"{v3706_nome_cliente(cliente)} ha già il badge {other_badge}. Prima dissocia o trasferisci."
+
+    payloads = [
+        {"cliente_id": int(cliente_id), "badge_uid": badge, "created_at": v3706_now().isoformat(), "attivo": True},
+        {"cliente_id": int(cliente_id), "badge_uid": badge, "created_at": v3706_now().isoformat()},
+        {"id_cliente": int(cliente_id), "badge_uid": badge},
+        {"cliente_id": int(cliente_id), "badge": badge},
+    ]
+    last = None
+    for p in payloads:
+        try:
+            get_supabase().table("badge_clienti").insert(p).execute()
+            try: st.cache_data.clear()
+            except Exception: pass
+            return True, f"Badge {badge} associato correttamente."
+        except Exception as e:
+            last = e
+    return False, f"Errore associazione badge: {last}"
+
+def v3706_dissocia_badge(cliente_id=None, badge_uid=None):
+    try:
+        df = v3706_df_badge()
+        if df.empty:
+            return False, "Nessun badge trovato."
+
+        q = get_supabase().table("badge_clienti")
+        # Se possibile, preferisci soft delete
+        update_payload = {}
+        # Non possiamo sapere schema, proviamo soft update, poi delete.
+        filters = []
+        if cliente_id not in [None, "", "nan"]:
+            filters.append(("cliente_id", int(float(cliente_id))))
+        if badge_uid not in [None, "", "nan", ""]:
+            filters.append(("badge_uid", str(badge_uid)))
+
+        # soft update su schema più probabile
+        try:
+            qq = get_supabase().table("badge_clienti").update({"attivo": False, "stato": "DISSOCIATO"})
+            for col, val in filters:
+                if col in df.columns:
+                    qq = qq.eq(col, val)
+            qq.execute()
+            try: st.cache_data.clear()
+            except Exception: pass
+            return True, "Badge dissociato."
+        except Exception:
+            pass
+
+        # delete fallback
+        qq = get_supabase().table("badge_clienti").delete()
+        applied = False
+        if cliente_id not in [None, "", "nan"]:
+            col = "cliente_id" if "cliente_id" in df.columns else ("id_cliente" if "id_cliente" in df.columns else None)
+            if col:
+                qq = qq.eq(col, int(float(cliente_id)))
+                applied = True
+        if badge_uid not in [None, "", "nan", ""]:
+            col = "badge_uid" if "badge_uid" in df.columns else ("badge" if "badge" in df.columns else None)
+            if col:
+                qq = qq.eq(col, str(badge_uid))
+                applied = True
+        if not applied:
+            return False, "Filtro badge non disponibile."
+        qq.execute()
+        try: st.cache_data.clear()
+        except Exception: pass
+        return True, "Badge dissociato."
+    except Exception as e:
+        return False, f"Errore dissociazione badge: {e}"
+
+def v3706_trasferisci_badge(badge_uid, nuovo_cliente_id):
+    badge = str(badge_uid or "").strip()
+    if not badge:
+        return False, "Badge non valido."
+    has_other, other = v3706_cliente_has_other_badge(nuovo_cliente_id, badge)
+    if has_other:
+        nuovo = v3706_get_cliente(nuovo_cliente_id)
+        return False, f"{v3706_nome_cliente(nuovo)} ha già un altro badge: {other}."
+
+    old_owner, _ = v3706_badge_owner(badge)
+    if old_owner:
+        v3706_dissocia_badge(cliente_id=old_owner, badge_uid=badge)
+    return v3706_insert_badge(nuovo_cliente_id, badge)
+
+def v3706_accesso_chiuso(row):
+    stato = str(row.get("stato_accesso") or "").upper()
+    return any(k in stato for k in ["PRESENZA", "ANNULL", "REGISTRATO_ASSOCIATO", "ASSOCIATO"])
+
+def v3706_accessi_da_gestire():
+    df = v3706_df_accessi()
+    if df.empty:
+        return pd.DataFrame()
+    df = df.copy()
+    mask = pd.Series([False] * len(df))
+    if "stato_accesso" in df.columns:
+        stato = df["stato_accesso"].astype(str).str.upper()
+        mask = mask | stato.str.contains("DA_VERIFICARE|NEGATO|NON_ASSOCIATO", na=False)
+    if "cliente_id" in df.columns:
+        mask = mask | df["cliente_id"].isna() | df["cliente_id"].astype(str).isin(["", "None", "nan", "0", "0.0"])
+    df = df[mask].copy()
+    try:
+        df["id_num"] = pd.to_numeric(df["id"], errors="coerce").fillna(0)
+        df = df.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+    return df
+
+def v3706_card_accesso(row, action_area=False):
+    cliente = v3706_get_cliente(row.get("cliente_id"))
+    nome = v3706_nome_cliente(cliente) if cliente else "Cliente non associato"
+    badge = row.get("badge_uid") or row.get("badge") or "-"
+    data = row.get("data_accesso") or row.get("data_accesso_it") or "-"
+    ora = row.get("ora_accesso") or "-"
+    stato = row.get("stato_accesso") or "-"
+    note = row.get("note") or ""
+    totale, usate, residue = v3706_lezioni(cliente) if cliente else (0,0,0)
+
+    color = "#d4af37"
+    if "ANNULL" in str(stato).upper():
+        color = "#999"
+    elif "PRESENZA" in str(stato).upper():
+        color = "#22c55e"
+    elif "NEGATO" in str(stato).upper() or "VERIFICARE" in str(stato).upper():
+        color = "#3b82f6"
+
+    st.markdown(
+        f"""
+        <div style="border:1.7px solid {color};border-radius:18px;background:#fffdf7;padding:14px 16px;margin:10px 0;box-shadow:0 6px 16px rgba(0,0,0,.04);">
+          <div style="display:flex;justify-content:space-between;gap:16px;align-items:center;">
+            <div>
+              <div style="font-size:21px;font-weight:950;">{nome}</div>
+              <div style="font-size:13px;color:#555;">{data} · {ora} · Badge <b>{badge}</b> · Accesso ID <b>{row.get('id')}</b></div>
+              <div style="font-size:12px;color:#777;margin-top:5px;">{note}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:12px;font-weight:900;border:1px solid {color};border-radius:999px;padding:7px 10px;">{stato}</div>
+              <div style="font-size:12px;color:#666;margin-top:7px;">Residue: <b>{residue}</b></div>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    return cliente, totale, usate, residue
+
+def v3706_update_cliente_lezioni(cliente_id, totale, usate):
+    try:
+        totale = max(int(totale), 0)
+        usate = max(min(int(usate), totale), 0)
+        get_supabase().table("clienti").update({"numero_lezioni": totale, "lezioni_utilizzate": usate}).eq("id", int(float(cliente_id))).execute()
+        try: st.cache_data.clear()
+        except Exception: pass
+        return True, f"Lezioni aggiornate: residue {max(totale-usate,0)}."
+    except Exception as e:
+        return False, f"Errore aggiornamento lezioni: {e}"
+
+def v3706_update_accesso(row_id, payload):
+    try:
+        get_supabase().table("accessi_tornello").update(payload).eq("id", int(float(row_id))).execute()
+        try: st.cache_data.clear()
+        except Exception: pass
+        return True, "Accesso aggiornato."
+    except Exception as e:
+        return False, f"Errore aggiornamento accesso: {e}"
+
+def v3706_registra_movimento(cliente_id, accesso_id, delta, tipo, motivo):
+    payloads = [
+        {"cliente_id": int(float(cliente_id)), "accesso_id": int(float(accesso_id)) if accesso_id else None, "delta": int(delta), "tipo": tipo, "motivo": motivo, "created_at": v3706_now().isoformat()},
+        {"cliente_id": int(float(cliente_id)), "accesso_id": int(float(accesso_id)) if accesso_id else None, "quantita": abs(int(delta)), "tipo": tipo, "motivo": motivo, "created_at": v3706_now().isoformat()},
+    ]
+    for p in payloads:
+        try:
+            get_supabase().table("movimenti_lezioni").insert(p).execute()
+            return True
+        except Exception:
+            continue
+    return False
+
+def v3706_decidi_accesso(row, azione, motivo):
+    cid = row.get("cliente_id")
+    if cid in [None, "", "nan", "0", 0, 0.0]:
+        return False, "Associa prima l'accesso a un cliente."
+    cliente = v3706_get_cliente(cid)
+    totale, usate, residue = v3706_lezioni(cliente)
+    aid = row.get("id")
+    if azione == "SCALA":
+        if residue <= 0:
+            return False, "Nessuna lezione residua da scalare."
+        v3706_registra_movimento(cid, aid, -1, "PRESENZA_SCALATA", motivo)
+        ok, msg = v3706_update_cliente_lezioni(cid, totale, usate+1)
+        v3706_update_accesso(aid, {"stato_accesso": "PRESENZA_SCALATA", "note": motivo})
+        return ok, msg
+    if azione == "NO_SCALA":
+        v3706_registra_movimento(cid, aid, 0, "PRESENZA_NO_SCALA", motivo)
+        v3706_update_accesso(aid, {"stato_accesso": "PRESENZA_NO_SCALA", "note": motivo})
+        return True, "Presenza registrata senza scalare."
+    if azione == "ANNULLA":
+        v3706_update_accesso(aid, {"stato_accesso": "ANNULLATO", "note": motivo})
+        return True, "Accesso annullato."
+    return False, "Azione non valida."
+
+def render_v3706_registro_accessi():
+    st.subheader("📋 Registro accessi")
+    df = v3706_df_accessi()
+    if df.empty:
+        st.info("Nessun accesso registrato.")
+        return
+    try:
+        df["id_num"] = pd.to_numeric(df["id"], errors="coerce").fillna(0)
+        df = df.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+    filtro = st.text_input("Cerca per nome, badge, stato", key="v3706_search_accessi")
+    if filtro:
+        f = filtro.lower()
+        keep = []
+        for _, r in df.iterrows():
+            c = v3706_get_cliente(r.get("cliente_id"))
+            txt = f"{v3706_nome_cliente(c)} {r.get('badge_uid','')} {r.get('stato_accesso','')} {r.get('note','')}".lower()
+            keep.append(f in txt)
+        df = df[pd.Series(keep).values]
+    for _, row in df.head(80).iterrows():
+        r = row.to_dict()
+        v3706_card_accesso(r)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("❌ Annulla", key=f"v3706_annulla_reg_{r.get('id')}", use_container_width=True):
+                ok, msg = v3706_update_accesso(r.get("id"), {"stato_accesso": "ANNULLATO", "note": "Annullato da registro accessi"})
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c2:
+            if st.button("↩️ Non scalare", key=f"v3706_noscala_reg_{r.get('id')}", use_container_width=True):
+                ok, msg = v3706_decidi_accesso(r, "NO_SCALA", "Correzione da registro: non scalare")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c3:
+            if st.button("👤 Apri gestione cliente", key=f"v3706_cliente_reg_{r.get('id')}", use_container_width=True):
+                st.session_state["cliente_preselezionato_id"] = r.get("cliente_id")
+                v37_open("modifica_accessi")
+
+def render_v3706_accesso_da_gestire():
+    st.subheader("✅ Accesso da gestire")
+    df = v3706_accessi_da_gestire()
+    if df.empty:
+        st.success("Nessun accesso da gestire.")
+        return
+
+    labels = []
+    rows = []
+    for _, r in df.head(120).iterrows():
+        row = r.to_dict()
+        c = v3706_get_cliente(row.get("cliente_id"))
+        nome = v3706_nome_cliente(c) if c else "Cliente non associato"
+        badge = row.get("badge_uid") or "-"
+        labels.append(f"{row.get('id')} | {row.get('data_accesso','')} {row.get('ora_accesso','')} | {nome} | badge {badge} | {row.get('stato_accesso','')}")
+        rows.append(row)
+    selected = st.selectbox("Seleziona accesso", labels, key="v3706_accesso_select")
+    idx = labels.index(selected)
+    row = rows[idx]
+    cliente, totale, usate, residue = v3706_card_accesso(row)
+
+    motivo = st.text_input("Motivo / nota", value="Gestito da Tornello & Badge", key=f"v3706_motivo_{row.get('id')}")
+
+    # se non associato, consenti associazione qui
+    if not cliente:
+        st.warning("Accesso senza cliente associato. Associa prima un cliente.")
+        clienti = v3706_df_clienti()
+        if not clienti.empty:
+            clienti = clienti.copy()
+            clienti["__label"] = clienti.apply(lambda x: v3706_cliente_label(x, show_badge=True), axis=1)
+            scelto = st.selectbox("Cliente da associare all'accesso", clienti["__label"].tolist(), key=f"v3706_assoc_accesso_{row.get('id')}")
+            if st.button("Associa cliente all'accesso", key=f"v3706_assoc_accesso_btn_{row.get('id')}", use_container_width=True):
+                cid = int(str(scelto).split(" - ")[0])
+                ok, msg = v3706_update_accesso(row.get("id"), {"cliente_id": cid, "note": f"{row.get('note') or ''} | Associato a cliente {cid}".strip(" |")})
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        return
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("✅ Scala 1 lezione", key=f"v3706_scala_{row.get('id')}", use_container_width=True):
+            ok, msg = v3706_decidi_accesso(row, "SCALA", motivo)
+            st.success(msg) if ok else st.error(msg)
+            st.rerun()
+    with c2:
+        if st.button("🟦 Non scalare", key=f"v3706_noscala_{row.get('id')}", use_container_width=True):
+            ok, msg = v3706_decidi_accesso(row, "NO_SCALA", motivo)
+            st.success(msg) if ok else st.error(msg)
+            st.rerun()
+    with c3:
+        if st.button("❌ Annulla accesso", key=f"v3706_annulla_{row.get('id')}", use_container_width=True):
+            ok, msg = v3706_decidi_accesso(row, "ANNULLA", motivo)
+            st.success(msg) if ok else st.error(msg)
+            st.rerun()
+
+def render_v3706_badge():
+    st.subheader("🔵 Badge")
+    tab1, tab2, tab3 = st.tabs(["Badge non associati", "Badge associati", "Trasferisci/Dissocia"])
+
+    clienti = v3706_df_clienti()
+    if not clienti.empty:
+        clienti = clienti.copy()
+        clienti["__label"] = clienti.apply(lambda x: v3706_cliente_label(x, show_badge=True), axis=1)
+
+    with tab1:
+        df = v3706_accessi_da_gestire()
+        if df.empty:
+            st.success("Nessun badge/accesso non associato.")
+        else:
+            # badge unici
+            seen = set()
+            for _, r in df.iterrows():
+                row = r.to_dict()
+                badge = str(row.get("badge_uid") or "").strip()
+                if not badge or badge in seen:
+                    continue
+                seen.add(badge)
+                owner_id, _ = v3706_badge_owner(badge)
+                if owner_id:
+                    owner = v3706_get_cliente(owner_id)
+                    v3706_card_accesso(row)
+                    st.warning(f"Badge {badge} risulta già associato a {v3706_nome_cliente(owner)}.")
+                    continue
+                v3706_card_accesso(row)
+                if clienti.empty:
+                    st.info("Nessun cliente disponibile.")
+                    continue
+                scelto = st.selectbox("Associa a cliente", clienti["__label"].tolist(), key=f"v3706_badge_assoc_{badge}_{row.get('id')}")
+                if st.button("✅ Associa badge", key=f"v3706_badge_assoc_btn_{badge}_{row.get('id')}", use_container_width=True):
+                    cid = int(str(scelto).split(" - ")[0])
+                    ok, msg = v3706_insert_badge(cid, badge)
+                    if ok:
+                        v3706_update_accesso(row.get("id"), {"cliente_id": cid, "stato_accesso": "REGISTRATO_ASSOCIATO_KREO", "note": f"Badge {badge} associato a cliente {cid}"})
+                    st.success(msg) if ok else st.error(msg)
+                    st.rerun()
+
+    with tab2:
+        bdf = v3706_df_badge()
+        if bdf.empty:
+            st.info("Nessun badge associato.")
+        else:
+            for _, br in bdf.head(150).iterrows():
+                b = br.to_dict()
+                badge = v3706_badge_value(b)
+                cid = b.get("cliente_id") or b.get("id_cliente")
+                cliente = v3706_get_cliente(cid)
+                v3706_card_accesso({"id": "-", "cliente_id": cid, "badge_uid": badge, "data_accesso": "", "ora_accesso": "", "stato_accesso": "BADGE ASSOCIATO", "note": v3706_nome_cliente(cliente)})
+
+    with tab3:
+        if clienti.empty:
+            st.info("Nessun cliente disponibile.")
+            return
+        badge = st.text_input("Badge da trasferire/dissociare", key="v3706_badge_transfer")
+        nuovo = st.selectbox("Nuovo cliente", clienti["__label"].tolist(), key="v3706_badge_new_owner")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🔁 Trasferisci badge", use_container_width=True):
+                cid = int(str(nuovo).split(" - ")[0])
+                ok, msg = v3706_trasferisci_badge(badge, cid)
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c2:
+            if st.button("🗑️ Dissocia badge", use_container_width=True):
+                ok, msg = v3706_dissocia_badge(badge_uid=badge)
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+
+def render_v36_checkin_core():
+    st.header("🚦 Tornello & Badge")
+    st.caption("Pagina semplificata: registro, accessi da gestire e badge. Niente doppioni, niente badge duplicati.")
+
+    tabs = st.tabs(["📋 Registro accessi", "✅ Accesso da gestire", "🔵 Badge"])
+    with tabs[0]:
+        render_v3706_registro_accessi()
+    with tabs[1]:
+        render_v3706_accesso_da_gestire()
+    with tabs[2]:
+        render_v3706_badge()
 
 
 if __name__ == "__main__":
