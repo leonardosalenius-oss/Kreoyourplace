@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.05")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.05.2")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16063,37 +16063,67 @@ def v3705_data_from_any(value):
         return None
 
 def v3705_certificati_mancanti_o_scaduti():
+    """
+    V37.05.2: controllo certificati blindato.
+    Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
+    """
     df = v3705_clients_df()
     if df.empty:
         return pd.DataFrame()
+
     today = pd.Timestamp(v3705_today()).normalize()
     rows = []
+
     possibili_colonne = [
         "scadenza_certificato",
         "certificato_scadenza",
         "data_scadenza_certificato",
         "certificato_medico_scadenza",
         "scadenza_certificato_medico",
+        "scadenza_certificato_medico_cliente",
+        "data_certificato",
         "certificato",
     ]
+
     for _, r in df.iterrows():
-        data = None
+        cert_date = None
+
         for col in possibili_colonne:
-            if col in df.columns:
-                data = v3705_data_from_any(r.get(col))
-                if data:
-                    break
+            if col not in df.columns:
+                continue
+            raw = r.get(col)
+            if raw in [None, "", "nan", "NaT"]:
+                continue
+
+            parsed = pd.to_datetime(raw, errors="coerce")
+            if pd.isna(parsed):
+                continue
+
+            try:
+                cert_date = pd.Timestamp(parsed).normalize()
+                break
+            except Exception:
+                cert_date = None
+
         motivo = None
-        if not data:
+        if cert_date is None:
             motivo = "Certificato mancante"
-        elif pd.Timestamp(data).normalize() < today:
-            motivo = f"Certificato scaduto il {data.strftime('%d/%m/%Y')}"
+            scad = "-"
+        elif cert_date < today:
+            motivo = f"Certificato scaduto il {cert_date.strftime('%d/%m/%Y')}"
+            scad = cert_date.strftime("%d/%m/%Y")
+        else:
+            motivo = None
+            scad = cert_date.strftime("%d/%m/%Y")
+
         if motivo:
             rr = r.to_dict()
             rr["_motivo_certificato"] = motivo
-            rr["_scadenza_certificato"] = data.strftime("%d/%m/%Y") if data else "-"
+            rr["_scadenza_certificato"] = scad
             rows.append(rr)
+
     return pd.DataFrame(rows)
+
 
 def v3705_badge_unassigned_rows():
     try:
