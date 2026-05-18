@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.07")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.08")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16064,7 +16064,7 @@ def v3705_data_from_any(value):
 
 def v3705_certificati_mancanti_o_scaduti():
     """
-    V37.07: controllo certificati blindato.
+    V37.08: controllo certificati blindato.
     Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
     """
     df = v3705_clients_df()
@@ -16593,7 +16593,7 @@ def kreo_render_reception_internal_view_if_any():
 
 
 # ============================================================
-# KREO V37.07 - Tornello & Badge semplificato
+# KREO V37.08 - Tornello & Badge semplificato
 # ============================================================
 
 def v3706_now():
@@ -17150,7 +17150,7 @@ def render_v36_checkin_core():
 
 
 # ============================================================
-# KREO V37.07 - Agenda operativa + Alert cliente apribile
+# KREO V37.08 - Agenda operativa + Alert cliente apribile
 # ============================================================
 
 def v3707_now():
@@ -17340,7 +17340,7 @@ def v3707_insert_lezione(payload):
 
 def render_v37_agenda_7gg():
     """
-    V37.07: Agenda Luxury operativa.
+    V37.08: Agenda Luxury operativa.
     - può vedere giorni precedenti;
     - può confermare presenza e scalare;
     - può confermare presenza senza scalare.
@@ -17601,6 +17601,318 @@ def render_alert_certificati():
             st.session_state["cliente_preselezionato_id"] = cid
             st.session_state["cliente_360_id"] = cid
             v37_open("cliente_360")
+
+
+
+
+# ============================================================
+# KREO V37.08 - Anti doppia presenza agenda
+# ============================================================
+
+def v3708_lezione_gia_gestita(lezione_id, cliente_id=None):
+    """
+    Una lezione/prenotazione può essere confermata una sola volta.
+    Controlla sia tabella lezioni sia movimenti_lezioni.
+    """
+    if lezione_id in [None, "", "nan", "None"]:
+        return False, ""
+
+    # 1) Controllo stato della lezione
+    try:
+        rows = get_supabase().table("lezioni").select("*").eq("id", int(float(lezione_id))).limit(1).execute().data or []
+        if rows:
+            stato = str(rows[0].get("stato") or "").upper()
+            if any(k in stato for k in ["PRESENTE", "PRESENTE_NO_SCALA", "SCALATA", "CONFERMATA"]):
+                return True, f"Lezione già gestita con stato: {stato}"
+    except Exception:
+        pass
+
+    # 2) Controllo movimenti lezioni collegati alla lezione
+    try:
+        rows = get_supabase().table("movimenti_lezioni").select("*").eq("lezione_id", int(float(lezione_id))).execute().data or []
+        for r in rows:
+            tipo = str(r.get("tipo") or "").upper()
+            motivo = str(r.get("motivo") or "").upper()
+            if any(k in tipo for k in ["PRESENZA_AGENDA", "PRESENZA", "SCALATA", "NO_SCALA"]) or "AGENDA" in motivo:
+                return True, "Presenza già registrata per questa lezione."
+    except Exception:
+        pass
+
+    # 3) Fallback per schemi senza lezione_id: stesso cliente + riferimento testuale
+    if cliente_id not in [None, "", "nan", "None"]:
+        try:
+            rows = get_supabase().table("movimenti_lezioni").select("*").eq("cliente_id", int(float(cliente_id))).execute().data or []
+            ref = f"LEZIONE {int(float(lezione_id))}"
+            for r in rows:
+                txt = f"{r.get('motivo','')} {r.get('riferimento','')} {r.get('note','')}".upper()
+                tipo = str(r.get("tipo") or "").upper()
+                if ref in txt and ("PRESENZA" in tipo or "AGENDA" in tipo or "SCAL" in tipo):
+                    return True, "Presenza già registrata per questa lezione."
+        except Exception:
+            pass
+
+    return False, ""
+
+
+def v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, motivo):
+    """
+    Inserisce movimento agenda una sola volta.
+    """
+    gia, msg = v3708_lezione_gia_gestita(lezione_id, cliente_id)
+    if gia:
+        return False, msg
+
+    payloads = [
+        {
+            "cliente_id": int(float(cliente_id)),
+            "lezione_id": int(float(lezione_id)) if lezione_id not in [None, "", "nan"] else None,
+            "delta": int(delta),
+            "tipo": tipo,
+            "motivo": motivo,
+            "riferimento": f"lezione {lezione_id}",
+            "created_at": v3707_now().isoformat() if "v3707_now" in globals() else datetime.now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "lezione_id": int(float(lezione_id)) if lezione_id not in [None, "", "nan"] else None,
+            "quantita": abs(int(delta)),
+            "tipo": tipo,
+            "motivo": motivo,
+            "riferimento": f"lezione {lezione_id}",
+            "created_at": v3707_now().isoformat() if "v3707_now" in globals() else datetime.now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "delta": int(delta),
+            "tipo": tipo,
+            "motivo": f"{motivo} | lezione {lezione_id}",
+            "created_at": v3707_now().isoformat() if "v3707_now" in globals() else datetime.now().isoformat(),
+        },
+    ]
+
+    last = None
+    for p in payloads:
+        p = {k: v for k, v in p.items() if v is not None}
+        try:
+            get_supabase().table("movimenti_lezioni").insert(p).execute()
+            return True, "Movimento registrato."
+        except Exception as e:
+            last = e
+
+    return False, f"Errore registrazione movimento: {last}"
+
+
+def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo):
+    """
+    Override compatibile V37.08.
+    """
+    ok, msg = v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, motivo)
+    return ok
+
+
+def v3707_conferma_presenza_agenda(row, scala=True):
+    """
+    Override V37.08: impedisce doppio click/doppia presenza sulla stessa lezione.
+    """
+    cid = row.get("cliente_id")
+    lezione_id = row.get("id")
+
+    if cid in [None, "", "nan", "None", 0, "0"]:
+        return False, "Questa lezione non ha cliente associato."
+
+    gia, msg = v3708_lezione_gia_gestita(lezione_id, cid)
+    if gia:
+        return False, msg or "Questa lezione è già stata gestita."
+
+    cliente = v3707_get_cliente(cid)
+    if not cliente:
+        return False, "Cliente non trovato."
+
+    totale, usate, residue = v3707_lezioni_cliente(cliente)
+
+    if scala:
+        if residue <= 0:
+            return False, "Nessuna lezione residua da scalare."
+
+        ok_mov, msg_mov = v3708_registra_movimento_agenda_unico(
+            cid,
+            lezione_id,
+            -1,
+            "PRESENZA_AGENDA_SCALATA",
+            "Presenza confermata da agenda: badge dimenticato/non usato"
+        )
+        if not ok_mov:
+            return False, msg_mov
+
+        ok, msg = v3707_update_cliente_lezioni(cid, totale, usate + 1)
+        v3707_update_lezione(lezione_id, {"stato": "PRESENTE", "note": "Presenza confermata da agenda e lezione scalata"})
+        return ok, msg
+
+    else:
+        ok_mov, msg_mov = v3708_registra_movimento_agenda_unico(
+            cid,
+            lezione_id,
+            0,
+            "PRESENZA_AGENDA_NO_SCALA",
+            "Presenza confermata da agenda senza scalare"
+        )
+        if not ok_mov:
+            return False, msg_mov
+
+        v3707_update_lezione(lezione_id, {"stato": "PRESENTE_NO_SCALA", "note": "Presenza confermata da agenda senza scalare"})
+        return True, "Presenza confermata senza scalare."
+
+
+def render_v37_agenda_7gg():
+    """
+    V37.08: Agenda operativa anti-doppia presenza.
+    """
+    st.header("✨ Agenda Luxury")
+    st.caption("Consulta passato/futuro, inserisci prenotazioni e conferma presenze una sola volta.")
+
+    with st.expander("➕ Inserisci nuova lezione / prenotazione", expanded=False):
+        clienti = v3707_clients_df()
+        if clienti.empty:
+            st.info("Nessun cliente disponibile.")
+        else:
+            clienti = clienti.copy()
+            clienti["__label"] = clienti.apply(v3707_cliente_label, axis=1)
+            with st.form("v3708_nuova_lezione"):
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    cliente_label = st.selectbox("Cliente", clienti["__label"].tolist())
+                    data_lezione = st.date_input("Data", value=v3707_today())
+                with c2:
+                    ora_inizio = st.text_input("Ora inizio", value="10:00")
+                    ora_fine = st.text_input("Ora fine", value="11:00")
+                with c3:
+                    trainer = st.text_input("Trainer", value="")
+                    stato = st.selectbox("Stato", ["PRENOTATO", "PRESENTE", "ASSENTE", "DA VERIFICARE"])
+                note = st.text_area("Note agenda", value="")
+                salva = st.form_submit_button("✅ Inserisci in agenda", use_container_width=True)
+
+            if salva:
+                try:
+                    cid = int(str(cliente_label).split(" - ")[0])
+                    payload = {
+                        "cliente_id": cid,
+                        "data_lezione": str(data_lezione),
+                        "ora_inizio": ora_inizio,
+                        "ora_fine": ora_fine,
+                        "trainer": trainer,
+                        "stato": stato,
+                        "note": note,
+                        "created_at": v3707_now().isoformat(),
+                    }
+                    ok, msg = v3707_insert_lezione(payload)
+                    st.success(msg) if ok else st.error(msg)
+                    if ok:
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Errore inserimento agenda: {e}")
+
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        giorni_indietro = st.selectbox("Giorni precedenti", [0, 1, 3, 7, 14, 30, 60], index=3, key="v3708_past_days")
+    with f2:
+        giorni_avanti = st.selectbox("Giorni futuri", [1, 3, 7, 14, 30, 60], index=2, key="v3708_future_days")
+    with f3:
+        solo_da_gestire = st.checkbox("Mostra solo prenotati/da gestire", value=False)
+
+    df = v3707_lezioni_df()
+    if df.empty:
+        st.info("Nessuna lezione in agenda.")
+        return
+
+    data_col = "data_lezione" if "data_lezione" in df.columns else ("data" if "data" in df.columns else None)
+    if not data_col:
+        st.dataframe(df.head(80), use_container_width=True, hide_index=True)
+        return
+
+    tmp = df.copy()
+    tmp["_data"] = pd.to_datetime(tmp[data_col], errors="coerce").dt.date
+    start = v3707_today() - timedelta(days=int(giorni_indietro))
+    end = v3707_today() + timedelta(days=int(giorni_avanti))
+    tmp = tmp[(tmp["_data"] >= start) & (tmp["_data"] <= end)].copy()
+
+    if solo_da_gestire and "stato" in tmp.columns:
+        stato = tmp["stato"].astype(str).str.upper()
+        tmp = tmp[stato.str.contains("PRENOTATO|DA VERIFICARE|ASSENTE", na=False)]
+
+    if tmp.empty:
+        st.info("Nessuna lezione nel periodo selezionato.")
+        return
+
+    clienti = v3707_clients_df()
+    nome_map = {}
+    if not clienti.empty and "id" in clienti.columns:
+        for _, r in clienti.iterrows():
+            try:
+                nome_map[int(float(r.get("id")))] = v3707_nome_cliente(r)
+            except Exception:
+                pass
+
+    try:
+        tmp["_ora_sort"] = tmp.get("ora_inizio", "").astype(str)
+        tmp = tmp.sort_values(["_data", "_ora_sort"])
+    except Exception:
+        pass
+
+    for d in sorted(tmp["_data"].dropna().unique()):
+        st.markdown(f"### {d.strftime('%d/%m/%Y')}")
+        day = tmp[tmp["_data"] == d].copy()
+
+        for _, r in day.iterrows():
+            row = r.to_dict()
+            cid = v3707_int(row.get("cliente_id"), 0)
+            cliente_nome = row.get("cliente") or row.get("nome_cliente") or nome_map.get(cid, f"Cliente ID {cid}" if cid else "Cliente non indicato")
+            ora = f"{row.get('ora_inizio','')} - {row.get('ora_fine','')}".strip(" -")
+            trainer = row.get("trainer") or row.get("istruttore") or "-"
+            stato = str(row.get("stato") or "PRENOTATO")
+            lezione_id = row.get("id") or f"{cid}_{d}_{ora}"
+            gia_gestita, motivo_gestita = v3708_lezione_gia_gestita(row.get("id"), cid)
+
+            colore = "#22c55e" if gia_gestita else "#d4af37"
+            badge = "GIÀ GESTITA" if gia_gestita else stato
+
+            st.markdown(
+                f"""
+                <div style="border:1.5px solid {colore};border-radius:16px;background:#fffdf7;padding:14px 16px;margin:8px 0;box-shadow:0 6px 16px rgba(0,0,0,.04);">
+                    <div style="display:flex;justify-content:space-between;gap:16px;">
+                        <div>
+                            <div style="font-size:18px;font-weight:950;">{ora} · {cliente_nome}</div>
+                            <div style="font-size:13px;color:#666;">Trainer: {trainer} · Stato: {stato}</div>
+                            <div style="font-size:12px;color:#777;margin-top:5px;">{motivo_gestita if gia_gestita else ''}</div>
+                        </div>
+                        <div style="font-size:12px;font-weight:900;border:1px solid {colore};border-radius:999px;padding:7px 10px;height:fit-content;">{badge}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if gia_gestita:
+                    st.button("✅ Presenza già gestita", key=f"v3708_locked_scala_{lezione_id}", use_container_width=True, disabled=True)
+                else:
+                    if st.button("✅ Presente e scala", key=f"v3708_pres_scala_{lezione_id}", use_container_width=True):
+                        ok, msg = v3707_conferma_presenza_agenda(row, scala=True)
+                        st.success(msg) if ok else st.error(msg)
+                        st.rerun()
+            with c2:
+                if gia_gestita:
+                    st.button("🟦 No scala bloccato", key=f"v3708_locked_no_scala_{lezione_id}", use_container_width=True, disabled=True)
+                else:
+                    if st.button("🟦 Presente no scala", key=f"v3708_pres_no_scala_{lezione_id}", use_container_width=True):
+                        ok, msg = v3707_conferma_presenza_agenda(row, scala=False)
+                        st.success(msg) if ok else st.error(msg)
+                        st.rerun()
+            with c3:
+                if st.button("👤 Apri scheda cliente", key=f"v3708_open_cliente_agenda_{lezione_id}", use_container_width=True):
+                    st.session_state["cliente_preselezionato_id"] = cid
+                    st.session_state["cliente_360_id"] = cid
+                    v37_open("cliente_360")
 
 
 if __name__ == "__main__":
