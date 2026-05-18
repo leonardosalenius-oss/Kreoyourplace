@@ -12001,7 +12001,7 @@ def main():
         show_logo()
     with col_title:
         st.title("Gestionale Clienti")
-        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.09")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | Launch Stable V37.10")
 
     st.sidebar.markdown(f"**Utente:** {user_label()}")
     st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
@@ -16064,7 +16064,7 @@ def v3705_data_from_any(value):
 
 def v3705_certificati_mancanti_o_scaduti():
     """
-    V37.09: controllo certificati blindato.
+    V37.10: controllo certificati blindato.
     Non va in crash con NaT, stringhe vuote, date non valide o colonne mancanti.
     """
     df = v3705_clients_df()
@@ -16593,7 +16593,7 @@ def kreo_render_reception_internal_view_if_any():
 
 
 # ============================================================
-# KREO V37.09 - Tornello & Badge semplificato
+# KREO V37.10 - Tornello & Badge semplificato
 # ============================================================
 
 def v3706_now():
@@ -17150,7 +17150,7 @@ def render_v36_checkin_core():
 
 
 # ============================================================
-# KREO V37.09 - Agenda operativa + Alert cliente apribile
+# KREO V37.10 - Agenda operativa + Alert cliente apribile
 # ============================================================
 
 def v3707_now():
@@ -17340,7 +17340,7 @@ def v3707_insert_lezione(payload):
 
 def render_v37_agenda_7gg():
     """
-    V37.09: Agenda Luxury operativa.
+    V37.10: Agenda Luxury operativa.
     - può vedere giorni precedenti;
     - può confermare presenza e scalare;
     - può confermare presenza senza scalare.
@@ -17606,7 +17606,7 @@ def render_alert_certificati():
 
 
 # ============================================================
-# KREO V37.09 - Anti doppia presenza agenda
+# KREO V37.10 - Anti doppia presenza agenda
 # ============================================================
 
 def v3708_lezione_gia_gestita(lezione_id, cliente_id=None):
@@ -17704,7 +17704,7 @@ def v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, m
 
 def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo):
     """
-    Override compatibile V37.09.
+    Override compatibile V37.10.
     """
     ok, msg = v3708_registra_movimento_agenda_unico(cliente_id, lezione_id, delta, tipo, motivo)
     return ok
@@ -17712,7 +17712,7 @@ def v3707_registra_movimento_agenda(cliente_id, lezione_id, delta, tipo, motivo)
 
 def v3707_conferma_presenza_agenda(row, scala=True):
     """
-    Override V37.09: impedisce doppio click/doppia presenza sulla stessa lezione.
+    Override V37.10: impedisce doppio click/doppia presenza sulla stessa lezione.
     """
     cid = row.get("cliente_id")
     lezione_id = row.get("id")
@@ -17765,7 +17765,7 @@ def v3707_conferma_presenza_agenda(row, scala=True):
 
 def render_v37_agenda_7gg():
     """
-    V37.09: Agenda operativa anti-doppia presenza.
+    V37.10: Agenda operativa anti-doppia presenza.
     """
     st.header("✨ Agenda Luxury")
     st.caption("Consulta passato/futuro, inserisci prenotazioni e conferma presenze una sola volta.")
@@ -17918,7 +17918,7 @@ def render_v37_agenda_7gg():
 
 
 # ============================================================
-# KREO V37.09 - Badge unici + Documenti bucket pubblico fix globale
+# KREO V37.10 - Badge unici + Documenti bucket pubblico fix globale
 # ============================================================
 
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -18415,6 +18415,381 @@ render_documenti_cliente_page = render_staff_documenti
 render_documenti_page = render_staff_documenti
 render_documenti = render_staff_documenti
 render_cliente_documenti = render_staff_documenti
+
+
+
+
+# ============================================================
+# KREO V37.10 - Notifica operativa accesso in Dashboard
+# ============================================================
+
+def v3710_now():
+    try:
+        return datetime.now()
+    except Exception:
+        from datetime import datetime as _dt
+        return _dt.now()
+
+def v3710_today():
+    try:
+        return date.today()
+    except Exception:
+        from datetime import date as _date
+        return _date.today()
+
+def v3710_int(v, default=0):
+    try:
+        if v in [None, "", "nan", "None"]:
+            return default
+        return int(float(v))
+    except Exception:
+        return default
+
+def v3710_df_accessi(limit=300):
+    try:
+        rows = get_supabase().table("accessi_tornello").select("*").order("id", desc=True).limit(limit).execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        try:
+            return v3709_accessi_df(limit)
+        except Exception:
+            return pd.DataFrame()
+
+def v3710_get_cliente(cid):
+    try:
+        if cid in [None, "", "nan", "None", 0, "0"]:
+            return {}
+        rows = get_supabase().table("clienti").select("*").eq("id", int(float(cid))).limit(1).execute().data or []
+        return rows[0] if rows else {}
+    except Exception:
+        return {}
+
+def v3710_nome_cliente(cliente):
+    try:
+        return v3709_nome_cliente(cliente)
+    except Exception:
+        if not cliente:
+            return "Cliente non associato"
+        return f"{cliente.get('nome','')} {cliente.get('cognome','')}".strip() or f"Cliente ID {cliente.get('id','')}"
+
+def v3710_lezioni_cliente(cliente):
+    totale = v3710_int(cliente.get("numero_lezioni"), 0)
+    usate = v3710_int(cliente.get("lezioni_utilizzate"), 0)
+    residue = max(totale - usate, 0)
+    return totale, usate, residue
+
+def v3710_accesso_gia_gestito(accesso):
+    stato = str(accesso.get("stato_accesso") or "").upper()
+    note = str(accesso.get("note") or "").upper()
+    # REGISTRATO_ASSOCIATO_KREO = badge riconosciuto, ma presenza ancora da decidere.
+    if stato in ["REGISTRATO_ASSOCIATO_KREO", "DA_VERIFICARE", "ACCESSO_NEGATO_O_DA_VERIFICARE"]:
+        return False
+    if any(k in stato for k in ["PRESENZA_SCALATA", "PRESENZA_NO_SCALA", "ANNULLATO", "ANNULLATA"]):
+        return True
+    if "PRESENZA" in note and ("SCAL" in note or "NO SCALA" in note):
+        return True
+    return False
+
+def v3710_accessi_dashboard_da_gestire():
+    df = v3710_df_accessi()
+    if df.empty:
+        return pd.DataFrame()
+
+    rows = []
+    try:
+        df["id_num"] = pd.to_numeric(df["id"], errors="coerce").fillna(0)
+        df = df.sort_values("id_num", ascending=False)
+    except Exception:
+        pass
+
+    for _, r in df.iterrows():
+        row = r.to_dict()
+        if v3710_accesso_gia_gestito(row):
+            continue
+
+        stato = str(row.get("stato_accesso") or "").upper()
+        cid = row.get("cliente_id")
+        has_cliente = cid not in [None, "", "nan", "None", 0, "0", 0.0, "0.0"]
+
+        # Da mostrare in dashboard: accessi riconosciuti/associati o da verificare recenti.
+        if has_cliente and any(k in stato for k in ["REGISTRATO_ASSOCIATO", "DA_VERIFICARE", "NEGATO", "ACCESSO"]):
+            rows.append(row)
+        elif has_cliente and not stato:
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
+def v3710_update_cliente_lezioni(cliente_id, totale, usate):
+    try:
+        totale = max(int(totale), 0)
+        usate = max(min(int(usate), totale), 0)
+        get_supabase().table("clienti").update({
+            "numero_lezioni": totale,
+            "lezioni_utilizzate": usate
+        }).eq("id", int(float(cliente_id))).execute()
+        try: st.cache_data.clear()
+        except Exception: pass
+        return True, f"Presenza registrata. Residue: {max(totale-usate, 0)}."
+    except Exception as e:
+        return False, f"Errore aggiornamento lezioni: {e}"
+
+def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, motivo):
+    # blocco preventivo: se esiste già movimento su quell'accesso, non duplica
+    try:
+        rows = get_supabase().table("movimenti_lezioni").select("*").eq("accesso_id", int(float(accesso_id))).execute().data or []
+        if rows:
+            for r in rows:
+                t = str(r.get("tipo") or "").upper()
+                if any(k in t for k in ["PRESENZA", "SCALA", "NO_SCALA", "ANNULLA"]):
+                    return False, "Questo accesso è già stato gestito."
+    except Exception:
+        pass
+
+    payloads = [
+        {
+            "cliente_id": int(float(cliente_id)),
+            "accesso_id": int(float(accesso_id)),
+            "delta": int(delta),
+            "tipo": tipo,
+            "motivo": motivo,
+            "riferimento": f"accesso {accesso_id}",
+            "created_at": v3710_now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "accesso_id": int(float(accesso_id)),
+            "quantita": abs(int(delta)),
+            "tipo": tipo,
+            "motivo": motivo,
+            "riferimento": f"accesso {accesso_id}",
+            "created_at": v3710_now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "delta": int(delta),
+            "tipo": tipo,
+            "motivo": f"{motivo} | accesso {accesso_id}",
+            "created_at": v3710_now().isoformat(),
+        },
+    ]
+    last = None
+    for p in payloads:
+        p = {k: v for k, v in p.items() if v is not None}
+        try:
+            get_supabase().table("movimenti_lezioni").insert(p).execute()
+            return True, "Movimento registrato."
+        except Exception as e:
+            last = e
+    return False, f"Errore movimento: {last}"
+
+def v3710_update_accesso(accesso_id, payload):
+    try:
+        get_supabase().table("accessi_tornello").update(payload).eq("id", int(float(accesso_id))).execute()
+        try: st.cache_data.clear()
+        except Exception: pass
+        return True, "Accesso aggiornato."
+    except Exception as e:
+        return False, f"Errore aggiornamento accesso: {e}"
+
+def v3710_decidi_accesso_dashboard(accesso, azione):
+    aid = accesso.get("id")
+    cid = accesso.get("cliente_id")
+
+    if cid in [None, "", "nan", "None", 0, "0"]:
+        return False, "Accesso senza cliente. Associa prima il badge/cliente."
+
+    # rileggi l'accesso dal DB per evitare doppio click da sessioni diverse
+    try:
+        rows = get_supabase().table("accessi_tornello").select("*").eq("id", int(float(aid))).limit(1).execute().data or []
+        if rows:
+            accesso = rows[0]
+            if v3710_accesso_gia_gestito(accesso):
+                return False, "Questo accesso è già stato gestito."
+    except Exception:
+        pass
+
+    cliente = v3710_get_cliente(cid)
+    if not cliente:
+        return False, "Cliente non trovato."
+
+    totale, usate, residue = v3710_lezioni_cliente(cliente)
+
+    if azione == "SCALA":
+        if residue <= 0:
+            return False, "Il cliente non ha lezioni residue. Usa 'senza scalare'."
+        ok_mov, msg_mov = v3710_registra_movimento_accesso_unico(
+            cid, aid, -1, "PRESENZA_ACCESSO_SCALATA", "Conferma dashboard: presenza valida, scala 1 lezione"
+        )
+        if not ok_mov:
+            return False, msg_mov
+        ok, msg = v3710_update_cliente_lezioni(cid, totale, usate + 1)
+        v3710_update_accesso(aid, {"stato_accesso": "PRESENZA_SCALATA", "note": "Presenza confermata da dashboard e lezione scalata"})
+        return ok, msg
+
+    if azione == "NO_SCALA":
+        ok_mov, msg_mov = v3710_registra_movimento_accesso_unico(
+            cid, aid, 0, "PRESENZA_ACCESSO_NO_SCALA", "Conferma dashboard: presenza valida senza scalare"
+        )
+        if not ok_mov:
+            return False, msg_mov
+        v3710_update_accesso(aid, {"stato_accesso": "PRESENZA_NO_SCALA", "note": "Presenza confermata da dashboard senza scalare"})
+        return True, "Presenza confermata senza scalare."
+
+    if azione == "ANNULLA":
+        v3710_update_accesso(aid, {"stato_accesso": "ANNULLATO", "note": "Accesso annullato da dashboard"})
+        return True, "Accesso annullato."
+
+    return False, "Azione non valida."
+
+def v3710_render_notifica_accesso_dashboard():
+    df = v3710_accessi_dashboard_da_gestire()
+    if df.empty:
+        return
+
+    # Mostra massimo i primi 3, così non appesantisce
+    st.markdown("### 🚦 Accessi da confermare")
+    st.caption("Il badge è passato: conferma se scalare la lezione oppure no.")
+
+    for _, r in df.head(3).iterrows():
+        accesso = r.to_dict()
+        cliente = v3710_get_cliente(accesso.get("cliente_id"))
+        nome = v3710_nome_cliente(cliente)
+        totale, usate, residue = v3710_lezioni_cliente(cliente)
+        badge = accesso.get("badge_uid") or accesso.get("badge") or "-"
+        ora = accesso.get("ora_accesso") or "-"
+        data = accesso.get("data_accesso") or accesso.get("data_accesso_it") or "-"
+        stato = accesso.get("stato_accesso") or "-"
+
+        st.markdown(
+            f"""
+            <div style="border:2px solid #3b82f6;border-radius:20px;background:#f8fbff;padding:16px 18px;margin:12px 0;box-shadow:0 8px 22px rgba(0,0,0,.06);">
+              <div style="display:flex;justify-content:space-between;gap:18px;align-items:center;">
+                <div>
+                  <div style="font-size:13px;font-weight:900;color:#2563eb;">ACCESSO DA CONFERMARE</div>
+                  <div style="font-size:25px;font-weight:950;">{nome}</div>
+                  <div style="font-size:13px;color:#555;">{data} · {ora} · Badge <b>{badge}</b> · Stato: <b>{stato}</b></div>
+                </div>
+                <div style="text-align:right;border-left:1px solid #dbeafe;padding-left:18px;">
+                  <div style="font-size:34px;font-weight:950;color:#111;">{residue}</div>
+                  <div style="font-size:12px;color:#666;">lezioni residue</div>
+                  <div style="font-size:12px;color:#777;">Usate {usate}/{totale}</div>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            disabled = residue <= 0
+            if st.button("✅ Scala 1 lezione", key=f"v3710_dash_scala_{accesso.get('id')}", use_container_width=True, disabled=disabled):
+                ok, msg = v3710_decidi_accesso_dashboard(accesso, "SCALA")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c2:
+            if st.button("🟦 Conferma no scala", key=f"v3710_dash_noscala_{accesso.get('id')}", use_container_width=True):
+                ok, msg = v3710_decidi_accesso_dashboard(accesso, "NO_SCALA")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c3:
+            if st.button("❌ Annulla", key=f"v3710_dash_annulla_{accesso.get('id')}", use_container_width=True):
+                ok, msg = v3710_decidi_accesso_dashboard(accesso, "ANNULLA")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c4:
+            if st.button("👤 Apri cliente", key=f"v3710_dash_cliente_{accesso.get('id')}", use_container_width=True):
+                st.session_state["cliente_preselezionato_id"] = accesso.get("cliente_id")
+                st.session_state["cliente_360_id"] = accesso.get("cliente_id")
+                v37_open("cliente_360")
+
+def render_reception_center():
+    if kreo_render_reception_internal_view_if_any():
+        return
+
+    st.header("🏠 Reception Center")
+    st.caption("Dashboard operativa: veloce, leggibile, impossibile da sbagliare.")
+
+    clienti = v3705_clients_df() if "v3705_clients_df" in globals() else v3709_clients_df()
+    accessi = v3710_df_accessi()
+    pagamenti = v3704_payments_df() if "v3704_payments_df" in globals() else pd.DataFrame()
+
+    clienti_count = 0 if clienti.empty else len(clienti)
+    accessi_oggi = 0
+    incassi_oggi = 0.0
+
+    try:
+        if not accessi.empty and "data_accesso" in accessi.columns:
+            accessi_oggi = len(accessi[accessi["data_accesso"].astype(str).str[:10] == str(v3710_today())])
+    except Exception:
+        pass
+
+    try:
+        if not pagamenti.empty:
+            pcol = "data_pagamento" if "data_pagamento" in pagamenti.columns else "data"
+            pday = pagamenti[pagamenti[pcol].astype(str).str[:10] == str(v3710_today())]
+            incassi_oggi = float(pd.to_numeric(pday.get("importo", 0), errors="coerce").fillna(0).sum())
+    except Exception:
+        pass
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1: v37_metric_card("Clienti", clienti_count, "👥")
+    with m2:
+        lez = v3707_lezioni_df() if "v3707_lezioni_df" in globals() else pd.DataFrame()
+        agenda_count = 0
+        try:
+            dcol = "data_lezione" if "data_lezione" in lez.columns else "data"
+            agenda_count = len(lez[lez[dcol].astype(str).str[:10] == str(v3710_today())])
+        except Exception:
+            pass
+        v37_metric_card("Agenda oggi", agenda_count, "📅")
+    with m3: v37_metric_card("Accessi oggi", accessi_oggi, "🚦")
+    with m4: v37_metric_card("Incassi oggi", f"€ {incassi_oggi:.2f}", "💰")
+
+    st.markdown("---")
+    left, right = st.columns([3.4, 1.15], gap="large")
+    with left:
+        # Nuova notifica operativa in alto
+        v3710_render_notifica_accesso_dashboard()
+
+        st.markdown("""
+        <div style="background:#fff9e8;border:1px solid rgba(212,175,55,.55);border-radius:16px;padding:13px 15px;margin:18px 0 16px 0;font-weight:850;">
+            Scegli l’azione. Tutto deve stare a massimo due click.
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("➕ Nuovo cliente", key="v3710_btn_new", use_container_width=True): v37_open("nuovo_cliente")
+        with c2:
+            if st.button("✏️ Modifica cliente", key="v3710_btn_mod", use_container_width=True): v37_open("modifica_cliente")
+        with c3:
+            if st.button("💰 Registra incasso", key="v3710_btn_incasso", use_container_width=True): v37_open("incasso")
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            if st.button("🚦 Accesso tornello", key="v3710_btn_tornello", use_container_width=True): v37_open("v36_checkin")
+        with c5:
+            if st.button("📅 Agenda / Calendario", key="v3710_btn_agenda", use_container_width=True): v37_open("agenda_7gg")
+        with c6:
+            if st.button("🧾 Stampa ricevuta / storico", key="v3710_btn_ricevuta", use_container_width=True): v37_open("ricevute_storico")
+        c7, c8, c9 = st.columns(3)
+        with c7:
+            if st.button("💬 Messaggio cliente", key="v3710_btn_msg", use_container_width=True): v37_open("messaggio")
+        with c8:
+            if st.button("👤 Cliente 360", key="v3710_btn_360", use_container_width=True): v37_open("cliente_360")
+        with c9:
+            if st.button("🔑 Gestione presenze", key="v3710_btn_accessi", use_container_width=True): v37_open("modifica_accessi")
+
+        st.markdown("---")
+        st.markdown("### Attività live")
+        if "v3705_render_ultimo_accesso_pulito" in globals():
+            v3705_render_ultimo_accesso_pulito()
+        st.markdown("### Agenda oggi")
+        if "v3705_render_agenda_oggi_pulita" in globals():
+            v3705_render_agenda_oggi_pulita()
+
+    with right:
+        render_reception_alert_side_panel()
 
 
 if __name__ == "__main__":
