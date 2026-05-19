@@ -1,4 +1,4 @@
-# KREO V38.01 PRODUCTION - base reale stabilizzata da V37.05/V37.11
+# KREO V38.02 PRODUCTION - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.01 PRODUCTION OVERRIDE
+# KREO V38.02 PRODUCTION OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.01 PRODUCTION"
+APP_VERSION = "KREO V38.02 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.01 PRODUCTION"
+APP_VERSION = "KREO V38.02 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20202,6 +20202,372 @@ render_documenti_cliente_page = render_staff_documenti
 render_documenti_page = render_staff_documenti
 render_documenti = render_staff_documenti
 render_cliente_documenti = render_staff_documenti
+
+
+
+
+# ============================================================
+# KREO V38.02 RECEPTION + TORNELLO CLEANUP
+# Obiettivi:
+# - mantenere documenti V38.01 intatti
+# - un solo pulsante "Torna a Reception"
+# - Reception pulita con 9 azioni operative
+# - Tornello/Badge più leggibile e meno tecnico
+# - Accessi da confermare con anti doppio click
+# ============================================================
+
+APP_VERSION = "KREO V38.02 PRODUCTION"
+
+
+def v3802_go_reception():
+    """Ritorno unico alla Reception, pulendo tutte le chiavi di navigazione duplicate."""
+    for k in [
+        "reception_internal_view",
+        "reception_view",
+        "v32_macro_nav",
+        "v32_sub_nav",
+        "macro_nav",
+        "sub_nav",
+        "cliente_preselezionato_id",
+    ]:
+        try:
+            st.session_state.pop(k, None)
+        except Exception:
+            pass
+    try:
+        st.session_state["reception_home"] = True
+    except Exception:
+        pass
+    st.rerun()
+
+
+def v37_render_back(label="↩️ Torna a Reception"):
+    """
+    Override V38.02:
+    in molte pagine venivano renderizzati due pulsanti.
+    Da ora esiste un solo back button, sempre con la stessa chiave controllata.
+    """
+    if st.button(label, key="v3802_single_back_to_reception", use_container_width=False):
+        v3802_go_reception()
+
+
+def kreo_reception_go_home():
+    v3802_go_reception()
+
+
+def kreo_reception_clear_navigation():
+    for k in ["reception_internal_view", "reception_view", "v32_macro_nav", "v32_sub_nav", "macro_nav", "sub_nav"]:
+        st.session_state.pop(k, None)
+
+
+def kreo_render_back_to_reception():
+    """
+    Vecchio secondo pulsante: lo neutralizziamo per evitare duplicati.
+    Le pagine usano già v37_render_back().
+    """
+    return None
+
+
+def kreo_render_reception_back():
+    return None
+
+
+def render_back_to_reception():
+    return None
+
+
+def render_torna_reception():
+    return None
+
+
+def v3802_action_button(label, view, key):
+    if st.button(label, use_container_width=True, key=key):
+        if view == "documenti":
+            st.session_state["reception_internal_view"] = "documenti"
+        elif view == "badge_alert":
+            st.session_state["reception_internal_view"] = "badge_alert"
+        else:
+            kreo_reception_open(view)
+        st.rerun()
+
+
+def v3802_render_reception_buttons():
+    st.markdown(
+        """
+        <div style="background:#fff9e8;border:1px solid rgba(212,175,55,.55);border-radius:16px;padding:13px 15px;margin:18px 0 16px 0;font-weight:850;">
+            Scegli l’azione. Tutto deve stare a massimo due click.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        v3802_action_button("➕ Nuovo cliente", "nuovo_cliente", "v3802_btn_nuovo_cliente")
+    with c2:
+        v3802_action_button("✏️ Modifica cliente", "modifica_cliente", "v3802_btn_modifica_cliente")
+    with c3:
+        v3802_action_button("💳 Registra incasso", "incasso", "v3802_btn_incasso")
+
+    c4, c5, c6 = st.columns(3)
+    with c4:
+        v3802_action_button("🚦 Accesso tornello", "v36_checkin", "v3802_btn_tornello")
+    with c5:
+        v3802_action_button("📅 Agenda / Calendario", "agenda_7gg", "v3802_btn_agenda")
+    with c6:
+        v3802_action_button("🧾 Ricevute / storico", "ricevute_storico", "v3802_btn_ricevute")
+
+    c7, c8, c9 = st.columns(3)
+    with c7:
+        v3802_action_button("💬 Messaggio cliente", "messaggio", "v3802_btn_messaggio")
+    with c8:
+        v3802_action_button("👤 Cliente 360", "cliente_360", "v3802_btn_cliente_360")
+    with c9:
+        v3802_action_button("🔧 Gestione presenze", "modifica_accessi", "v3802_btn_gestione_presenze")
+
+    c10, c11, c12 = st.columns(3)
+    with c10:
+        v3802_action_button("📄 Documenti cliente", "documenti", "v3802_btn_documenti")
+    with c11:
+        v3802_action_button("🔵 Badge da associare", "badge_alert", "v3802_btn_badge_associare")
+    with c12:
+        if st.button("🔄 Aggiorna dashboard", use_container_width=True, key="v3802_btn_refresh"):
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            st.rerun()
+
+
+def render_reception_center():
+    """
+    V38.02 override:
+    Reception centrata, pulita, con logica già stabilizzata in V38.01.
+    """
+    st.session_state.setdefault("reception_home", True)
+
+    if st.session_state.get("reception_internal_view") == "badge_alert":
+        v37_render_back()
+        render_alert_badge_associa()
+        return
+
+    if st.session_state.get("reception_internal_view") == "documenti":
+        v37_render_back()
+        render_staff_documenti()
+        return
+
+    if kreo_render_reception_internal_view_if_any():
+        return
+
+    st.header("🏠 Reception Center")
+    st.caption("V38.02: dashboard operativa pulita. Pochi click, nessuna funzione doppia.")
+
+    clienti = v38_load_clienti()
+    accessi = v38_load_accessi()
+
+    agenda_count = 0
+    accessi_count = 0
+    incassi_oggi = 0.0
+
+    try:
+        lez = load_lezioni()
+        dcol = "data_lezione" if "data_lezione" in lez.columns else ("data" if "data" in lez.columns else None)
+        if dcol:
+            agenda_count = len(lez[lez[dcol].astype(str).str[:10] == str(v38_today())])
+    except Exception:
+        try:
+            agenda_count = len(v3705_agenda_oggi_df())
+        except Exception:
+            agenda_count = 0
+
+    try:
+        if not accessi.empty and "data_accesso" in accessi.columns:
+            accessi_count = len(accessi[accessi["data_accesso"].astype(str).str[:10] == str(v38_today())])
+    except Exception:
+        accessi_count = 0
+
+    try:
+        pag = load_pagamenti()
+        pcol = "data_pagamento" if "data_pagamento" in pag.columns else ("data" if "data" in pag.columns else None)
+        if pcol and "importo" in pag.columns:
+            incassi_oggi = float(pd.to_numeric(pag[pag[pcol].astype(str).str[:10] == str(v38_today())]["importo"], errors="coerce").fillna(0).sum())
+    except Exception:
+        incassi_oggi = 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>👥 Clienti</b><br><span style='font-size:28px;font-weight:950'>{0 if clienti.empty else len(clienti)}</span></div>", unsafe_allow_html=True)
+    with m2:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>📅 Agenda oggi</b><br><span style='font-size:28px;font-weight:950'>{agenda_count}</span></div>", unsafe_allow_html=True)
+    with m3:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>🚦 Accessi oggi</b><br><span style='font-size:28px;font-weight:950'>{accessi_count}</span></div>", unsafe_allow_html=True)
+    with m4:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>💰 Incassi oggi</b><br><span style='font-size:28px;font-weight:950'>{v38_euro(incassi_oggi)}</span></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    left, right = st.columns([3.6, 1.15], gap="large")
+
+    with left:
+        v38_render_accessi_da_confermare_dashboard()
+        v3802_render_reception_buttons()
+
+        st.markdown("---")
+        st.markdown("### Agenda oggi")
+        try:
+            v3705_render_agenda_oggi_pulita()
+        except Exception:
+            try:
+                render_agenda_light_launch()
+            except Exception:
+                st.caption("Agenda oggi non disponibile.")
+
+    with right:
+        render_reception_alert_side_panel()
+
+
+def v3802_render_accessi_cards(limit=70):
+    df = v38_load_accessi(limit)
+    if df.empty:
+        st.info("Nessun accesso registrato.")
+        return
+
+    try:
+        df["_idnum"] = pd.to_numeric(df["id"], errors="coerce").fillna(0)
+        df = df.sort_values("_idnum", ascending=False)
+    except Exception:
+        pass
+
+    for _, r in df.head(limit).iterrows():
+        row = r.to_dict()
+        cliente = v38_get_cliente(row.get("cliente_id"))
+        nome = v38_cliente_nome(cliente)
+        badge = row.get("badge_uid") or row.get("badge") or "-"
+        data = row.get("data_accesso") or row.get("data_accesso_it") or "-"
+        ora = row.get("ora_accesso") or "-"
+        stato = row.get("stato_accesso") or "-"
+        color = "#22c55e" if "PRESENZA" in str(stato).upper() or "ASSOCIATO" in str(stato).upper() else "#d4af37"
+        if "ANNULL" in str(stato).upper():
+            color = "#777"
+
+        st.markdown(
+            f"""
+            <div style="border:1.6px solid {color};border-radius:18px;background:#fffdf7;padding:14px 16px;margin:10px 0;">
+              <div style="display:flex;justify-content:space-between;gap:14px;align-items:center;">
+                <div>
+                  <div style="font-size:20px;font-weight:950;">{nome}</div>
+                  <div style="font-size:13px;color:#555;">{data} · {ora} · Badge <b>{badge}</b> · Accesso ID {row.get('id')}</div>
+                </div>
+                <div style="font-weight:950;color:{color};text-align:right;">{stato}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("👤 Apri cliente", key=f"v3802_accesso_cliente_{row.get('id')}", use_container_width=True):
+                st.session_state["cliente_preselezionato_id"] = row.get("cliente_id")
+                st.session_state["cliente_360_id"] = row.get("cliente_id")
+                kreo_reception_open("cliente_360")
+        with c2:
+            if not v38_accesso_gia_gestito(row):
+                if st.button("✅ Scala", key=f"v3802_accesso_scala_{row.get('id')}", use_container_width=True):
+                    ok, msg = v38_decidi_accesso(row, "SCALA")
+                    st.success(msg) if ok else st.error(msg)
+                    st.rerun()
+            else:
+                st.button("✅ Scala", key=f"v3802_accesso_scala_disabled_{row.get('id')}", disabled=True, use_container_width=True)
+        with c3:
+            if not v38_accesso_gia_gestito(row):
+                if st.button("🟦 No scala / annulla", key=f"v3802_accesso_noscala_{row.get('id')}", use_container_width=True):
+                    ok, msg = v38_decidi_accesso(row, "NO_SCALA")
+                    st.success(msg) if ok else st.error(msg)
+                    st.rerun()
+            else:
+                st.button("🟦 Già gestito", key=f"v3802_accesso_gestito_{row.get('id')}", disabled=True, use_container_width=True)
+
+
+def v3802_render_accessi_da_gestire():
+    df = v38_accessi_da_confermare()
+    if df.empty:
+        st.success("Nessun accesso da gestire.")
+        return
+
+    for _, r in df.head(50).iterrows():
+        row = r.to_dict()
+        cliente = v38_get_cliente(row.get("cliente_id"))
+        totale, usate, residue = v38_contatori_cliente(cliente)
+        nome = v38_cliente_nome(cliente)
+        badge = row.get("badge_uid") or row.get("badge") or "-"
+        data = row.get("data_accesso") or row.get("data_accesso_it") or "-"
+        ora = row.get("ora_accesso") or "-"
+
+        st.markdown(
+            f"""
+            <div style="border:2px solid #3b82f6;border-radius:20px;background:#f8fbff;padding:16px 18px;margin:12px 0;">
+              <div style="display:flex;justify-content:space-between;gap:18px;align-items:center;">
+                <div>
+                  <div style="font-size:13px;font-weight:900;color:#2563eb;">ACCESSO DA GESTIRE</div>
+                  <div style="font-size:25px;font-weight:950;">{nome}</div>
+                  <div style="font-size:13px;color:#555;">{data} · {ora} · Badge <b>{badge}</b></div>
+                </div>
+                <div style="text-align:right;border-left:1px solid #dbeafe;padding-left:18px;">
+                  <div style="font-size:34px;font-weight:950;color:#111;">{residue}</div>
+                  <div style="font-size:12px;color:#666;">lezioni residue</div>
+                  <div style="font-size:12px;color:#777;">Usate {usate}/{totale}</div>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("✅ Scala 1 lezione", key=f"v3802_gestisci_scala_{row.get('id')}", disabled=residue <= 0, use_container_width=True):
+                ok, msg = v38_decidi_accesso(row, "SCALA")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c2:
+            if st.button("🟦 Conferma no scala", key=f"v3802_gestisci_no_{row.get('id')}", use_container_width=True):
+                ok, msg = v38_decidi_accesso(row, "NO_SCALA")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        with c3:
+            if st.button("❌ Annulla accesso", key=f"v3802_gestisci_annulla_{row.get('id')}", use_container_width=True):
+                ok, msg = v38_decidi_accesso(row, "ANNULLA")
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+
+
+def render_v36_checkin_core():
+    """
+    Override V38.02:
+    pagina tornello più semplice:
+    - Registro accessi
+    - Accessi da gestire
+    - Badge da associare
+    """
+    st.header("🚦 Tornello & Badge")
+    st.caption("V38.02: gestione accessi senza tabelle tecniche e senza badge duplicati.")
+
+    tab1, tab2, tab3 = st.tabs(["Registro accessi", "Accessi da gestire", "Badge da associare"])
+
+    with tab1:
+        v3802_render_accessi_cards()
+
+    with tab2:
+        v3802_render_accessi_da_gestire()
+
+    with tab3:
+        render_alert_badge_associa()
+
+
+# Se alcune route chiamano funzioni con altri nomi, le forziamo alla nuova pagina tornello.
+render_v36_checkin = render_v36_checkin_core
+render_tornello_badge = render_v36_checkin_core
+render_accesso_tornello = render_v36_checkin_core
 
 
 if __name__ == "__main__":
