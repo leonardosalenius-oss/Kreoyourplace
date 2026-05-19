@@ -1,4 +1,4 @@
-# KREO V38.02 PRODUCTION - base reale stabilizzata da V37.05/V37.11
+# KREO V38.03 PRODUCTION - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.02 PRODUCTION OVERRIDE
+# KREO V38.03 PRODUCTION OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.02 PRODUCTION"
+APP_VERSION = "KREO V38.03 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.02 PRODUCTION"
+APP_VERSION = "KREO V38.03 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.02 PRODUCTION"
+APP_VERSION = "KREO V38.03 PRODUCTION"
 
 
 def v3802_go_reception():
@@ -20568,6 +20568,746 @@ def render_v36_checkin_core():
 render_v36_checkin = render_v36_checkin_core
 render_tornello_badge = render_v36_checkin_core
 render_accesso_tornello = render_v36_checkin_core
+
+
+
+
+# ============================================================
+# KREO V38.03 CLIENTI + DOCUMENTI + BACK BUTTON FIX
+# - elimina davvero il doppio pulsante Torna a Reception
+# - nuovo cliente completo: date, durata abbonamento, scadenze, rate, certificato, privacy
+# - upload certificato/privacy in fase di creazione cliente
+# - Cliente 360 senza doppia selezione cliente
+# - storico documenti con eliminazione documento
+# ============================================================
+
+APP_VERSION = "KREO V38.03 PRODUCTION"
+
+
+# ------------------------------------------------------------
+# V38.03 - back button: il pulsante extra generato fuori dalle pagine è disattivato.
+# Rimane quello interno già presente nelle viste.
+# ------------------------------------------------------------
+
+def v37_render_back(label="↩️ Torna a Reception"):
+    return None
+
+def kreo_render_back_to_reception():
+    return None
+
+def kreo_render_reception_back():
+    return None
+
+def render_back_to_reception():
+    return None
+
+def render_torna_reception():
+    return None
+
+
+def v3803_back_button():
+    if st.button("↩️ Torna a Reception", key="v3803_single_back", use_container_width=False):
+        v3802_go_reception()
+
+
+# ------------------------------------------------------------
+# V38.03 - helper clienti/date/scadenze
+# ------------------------------------------------------------
+
+def v3803_add_months(dt, months):
+    try:
+        month = dt.month - 1 + int(months)
+        year = dt.year + month // 12
+        month = month % 12 + 1
+        day = min(dt.day, [31, 29 if year % 4 == 0 and not year % 100 == 0 or year % 400 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month-1])
+        return date(year, month, day)
+    except Exception:
+        return dt
+
+
+def v3803_durata_mesi(tipo_abbonamento):
+    mapping = {
+        "MENSILE": 1,
+        "BIMESTRALE": 2,
+        "TRIMESTRALE": 3,
+        "SEMESTRALE": 6,
+        "ANNUALE": 12,
+        "PERSONALIZZATO": 1,
+    }
+    return mapping.get(str(tipo_abbonamento or "").upper(), 1)
+
+
+def v3803_scadenza_rata(data_inizio, tipo_pagamento, scadenza_abbonamento):
+    tipo = str(tipo_pagamento or "").upper()
+    if tipo in ["UNICA SOLUZIONE", "SALDATO", "ANTICIPATO"]:
+        return scadenza_abbonamento
+    if tipo in ["MENSILE", "RATE MENSILI"]:
+        return v3803_add_months(data_inizio, 1)
+    if tipo in ["QUINDICINALE"]:
+        return data_inizio + timedelta(days=15)
+    if tipo in ["SETTIMANALE"]:
+        return data_inizio + timedelta(days=7)
+    if tipo in ["PERSONALIZZATO"]:
+        return data_inizio + timedelta(days=30)
+    return v3803_add_months(data_inizio, 1)
+
+
+def v3803_cliente_exists(nome, cognome, telefono="", email=""):
+    try:
+        df = v38_load_clienti()
+    except Exception:
+        df = pd.DataFrame()
+    if df.empty:
+        return False, {}
+    n = str(nome or "").strip().lower()
+    c = str(cognome or "").strip().lower()
+    tel = "".join(ch for ch in str(telefono or "") if ch.isdigit())
+    mail = str(email or "").strip().lower()
+
+    for _, r in df.iterrows():
+        same_name = str(r.get("nome") or "").strip().lower() == n and str(r.get("cognome") or "").strip().lower() == c and n and c
+        row_tel = "".join(ch for ch in str(r.get("cellulare") or r.get("telefono") or "") if ch.isdigit())
+        same_tel = tel and row_tel == tel
+        same_mail = mail and str(r.get("email") or "").strip().lower() == mail
+        if same_name or same_tel or same_mail:
+            return True, r.to_dict()
+    return False, {}
+
+
+def v3803_insert_cliente(payload):
+    """
+    Inserimento robusto: prova payload completo, poi fallback progressivi
+    perché il DB reale può avere colonne diverse tra versioni.
+    """
+    attempts = []
+
+    attempts.append(payload.copy())
+
+    p2 = payload.copy()
+    # possibili alias storici
+    if "data_inizio_pacchetto" in p2:
+        p2["data_inizio"] = p2["data_inizio_pacchetto"]
+    if "scadenza_abbonamento" in p2:
+        p2["data_scadenza"] = p2["scadenza_abbonamento"]
+    if "scadenza_rata" in p2:
+        p2["prossima_scadenza_pagamento"] = p2["scadenza_rata"]
+    attempts.append(p2)
+
+    safe_keys = [
+        "nome", "cognome", "cellulare", "telefono", "email",
+        "pacchetto", "numero_lezioni", "lezioni_utilizzate",
+        "importo", "importo_pagato", "residuo",
+        "data_iscrizione", "data_inizio_pacchetto", "scadenza_abbonamento",
+        "scadenza_rata", "certificato_medico", "autorizzazione_trattamento",
+        "note", "created_at", "updated_at"
+    ]
+    attempts.append({k: v for k, v in payload.items() if k in safe_keys})
+
+    minimal = {
+        "nome": payload.get("nome"),
+        "cognome": payload.get("cognome"),
+        "cellulare": payload.get("cellulare"),
+        "email": payload.get("email"),
+        "pacchetto": payload.get("pacchetto"),
+        "numero_lezioni": payload.get("numero_lezioni"),
+        "lezioni_utilizzate": 0,
+        "importo": payload.get("importo"),
+    }
+    attempts.append({k: v for k, v in minimal.items() if v is not None})
+
+    last = None
+    for p in attempts:
+        try:
+            res = get_supabase().table("clienti").insert({k: v for k, v in p.items() if v is not None}).execute()
+            rows = res.data or []
+            if rows:
+                return True, rows[0], "Cliente creato."
+            return True, {}, "Cliente creato."
+        except Exception as e:
+            last = e
+    return False, {}, f"Errore creazione cliente: {last}"
+
+
+def v3803_registra_pagamento_cliente(cliente_id, importo, metodo, causale, scadenza_rata=None):
+    if not importo or float(importo) <= 0:
+        return True, "Nessun incasso iniziale da registrare."
+
+    payloads = [
+        {
+            "cliente_id": int(float(cliente_id)),
+            "data_pagamento": str(date.today()),
+            "importo": float(importo),
+            "metodo_pagamento": metodo,
+            "causale": causale,
+            "note": causale,
+            "scadenza_rata": str(scadenza_rata) if scadenza_rata else None,
+            "created_at": datetime.now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "data": str(date.today()),
+            "importo": float(importo),
+            "metodo": metodo,
+            "note": causale,
+        },
+    ]
+
+    last = None
+    for p in payloads:
+        try:
+            get_supabase().table("pagamenti").insert({k: v for k, v in p.items() if v is not None}).execute()
+            return True, "Incasso iniziale registrato."
+        except Exception as e:
+            last = e
+    return False, f"Cliente creato, ma incasso non registrato: {last}"
+
+
+# ------------------------------------------------------------
+# V38.03 - Nuovo Cliente completo
+# ------------------------------------------------------------
+
+def render_v37_nuovo_cliente():
+    st.header("➕ Nuovo cliente")
+    st.caption("V38.03: registrazione completa con date, scadenze, pagamento, certificato e privacy.")
+
+    today = date.today()
+
+    with st.form("v3803_nuovo_cliente_form"):
+        st.markdown("### Dati cliente")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            nome = st.text_input("Nome *", key="v3803_nome")
+            cognome = st.text_input("Cognome *", key="v3803_cognome")
+            telefono = st.text_input("Telefono / WhatsApp", key="v3803_tel")
+        with c2:
+            email = st.text_input("Email", key="v3803_email")
+            data_iscrizione = st.date_input("Data iscrizione", value=today, key="v3803_data_iscrizione")
+            data_inizio = st.date_input("Data inizio pacchetto", value=today, key="v3803_data_inizio")
+        with c3:
+            stato_cliente = st.selectbox("Stato cliente", ["ATTIVO", "IN PROVA", "SOSPESO", "ARCHIVIATO"], key="v3803_stato")
+
+        st.markdown("### Abbonamento / pacchetto")
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            pacchetto = st.selectbox(
+                "Pacchetto",
+                ["PACCHETTO LUXURY", "PACCHETTO GOLD", "PACCHETTO VIP", "COACHING IN SEDE", "PERSONALIZZATO"],
+                key="v3803_pacchetto",
+            )
+            lezioni_iniziali = st.number_input("Lezioni iniziali", min_value=0, max_value=500, value=3, step=1, key="v3803_lezioni")
+        with a2:
+            tipo_abbonamento = st.selectbox(
+                "Tipologia abbonamento",
+                ["MENSILE", "BIMESTRALE", "TRIMESTRALE", "SEMESTRALE", "ANNUALE", "PERSONALIZZATO"],
+                key="v3803_tipo_abbonamento",
+            )
+            durata_mesi = v3803_durata_mesi(tipo_abbonamento)
+            scadenza_abbonamento_auto = v3803_add_months(data_inizio, durata_mesi)
+            scadenza_abbonamento = st.date_input("Scadenza abbonamento", value=scadenza_abbonamento_auto, key="v3803_scad_abbonamento")
+        with a3:
+            note_abbonamento = st.text_input("Note abbonamento", key="v3803_note_abbonamento")
+
+        st.markdown("### Pagamento / rate")
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            importo_totale = st.number_input("Importo totale", min_value=0.0, step=10.0, format="%.2f", key="v3803_importo_totale")
+            importo_pagato = st.number_input("Importo pagato oggi", min_value=0.0, step=10.0, format="%.2f", key="v3803_importo_pagato")
+        with p2:
+            metodo_pagamento = st.selectbox("Metodo pagamento", ["Contanti", "Carta", "Bonifico", "Assegno", "Altro"], key="v3803_metodo")
+            tipo_pagamento = st.selectbox(
+                "Tipologia pagamento",
+                ["UNICA SOLUZIONE", "RATE MENSILI", "QUINDICINALE", "SETTIMANALE", "PERSONALIZZATO"],
+                key="v3803_tipo_pagamento",
+            )
+        with p3:
+            scadenza_rata_auto = v3803_scadenza_rata(data_inizio, tipo_pagamento, scadenza_abbonamento)
+            scadenza_rata = st.date_input("Scadenza prossima rata", value=scadenza_rata_auto, key="v3803_scad_rata")
+            residuo = max(float(importo_totale or 0) - float(importo_pagato or 0), 0)
+            st.metric("Residuo €", v38_euro(residuo))
+
+        st.markdown("### Documenti iniziali")
+        d1, d2 = st.columns(2)
+        with d1:
+            certificato_medico = st.selectbox("Certificato medico consegnato?", ["NO", "SÌ"], key="v3803_certificato")
+            scadenza_certificato = st.date_input("Scadenza certificato medico", value=v3803_add_months(today, 12), key="v3803_scad_cert")
+            upload_certificato = st.file_uploader("Upload certificato medico PDF", type=["pdf"], key="v3803_upload_cert", accept_multiple_files=False)
+        with d2:
+            autorizzazione_trattamento = st.selectbox("Autorizzazione trattamento dati consegnata?", ["NO", "SÌ"], key="v3803_privacy")
+            upload_privacy = st.file_uploader("Upload privacy / autorizzazione PDF", type=["pdf"], key="v3803_upload_privacy", accept_multiple_files=False)
+
+        note = st.text_area("Note operative", key="v3803_note")
+
+        ok = st.form_submit_button("✅ Salva cliente", use_container_width=True)
+
+    if not ok:
+        return
+
+    if not nome or not cognome:
+        st.error("Nome e cognome sono obbligatori.")
+        return
+
+    exists, existing = v3803_cliente_exists(nome, cognome, telefono, email)
+    if exists:
+        st.error(f"Cliente già presente: {v38_cliente_nome(existing)}")
+        return
+
+    payload = {
+        "nome": nome,
+        "cognome": cognome,
+        "cellulare": telefono,
+        "telefono": telefono,
+        "email": email,
+        "stato": stato_cliente,
+        "pacchetto": pacchetto,
+        "tipo_abbonamento": tipo_abbonamento,
+        "numero_lezioni": int(lezioni_iniziali),
+        "lezioni_utilizzate": 0,
+        "lezioni_residue": int(lezioni_iniziali),
+        "importo": float(importo_totale or 0),
+        "importo_pagato": float(importo_pagato or 0),
+        "residuo": float(residuo),
+        "metodo_pagamento": metodo_pagamento,
+        "tipo_pagamento": tipo_pagamento,
+        "data_iscrizione": str(data_iscrizione),
+        "data_inizio_pacchetto": str(data_inizio),
+        "scadenza_abbonamento": str(scadenza_abbonamento),
+        "scadenza_rata": str(scadenza_rata),
+        "certificato_medico": certificato_medico,
+        "scadenza_certificato": str(scadenza_certificato) if certificato_medico == "SÌ" else None,
+        "autorizzazione_trattamento": autorizzazione_trattamento,
+        "note": note,
+        "note_abbonamento": note_abbonamento,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    ok_create, created, msg = v3803_insert_cliente(payload)
+    if not ok_create:
+        st.error(msg)
+        return
+
+    cliente_id = created.get("id")
+    if not cliente_id:
+        # recupero best effort
+        try:
+            rows = get_supabase().table("clienti").select("*").eq("nome", nome).eq("cognome", cognome).order("id", desc=True).limit(1).execute().data or []
+            cliente_id = rows[0].get("id") if rows else None
+        except Exception:
+            cliente_id = None
+
+    if cliente_id:
+        if importo_pagato and float(importo_pagato) > 0:
+            ok_pay, msg_pay = v3803_registra_pagamento_cliente(
+                cliente_id,
+                importo_pagato,
+                metodo_pagamento,
+                "Primo incasso registrato in fase di creazione cliente",
+                scadenza_rata,
+            )
+            if not ok_pay:
+                st.warning(msg_pay)
+
+        if upload_certificato:
+            ok_doc, msg_doc = upload_documento_cliente(cliente_id, upload_certificato, "CERTIFICATO MEDICO", "Caricato in fase di creazione cliente")
+            if not ok_doc:
+                st.warning(f"Cliente creato, ma certificato non caricato: {msg_doc}")
+
+        if upload_privacy:
+            ok_doc2, msg_doc2 = upload_documento_cliente(cliente_id, upload_privacy, "PRIVACY / AUTORIZZAZIONE TRATTAMENTO", "Caricato in fase di creazione cliente")
+            if not ok_doc2:
+                st.warning(f"Cliente creato, ma privacy/autorizzazione non caricata: {msg_doc2}")
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+    st.success("Cliente creato correttamente.")
+    st.rerun()
+
+
+# Alias eventuali per nuovi clienti
+render_staff_nuovo_cliente = render_v37_nuovo_cliente
+render_nuovo_cliente = render_v37_nuovo_cliente
+
+
+# ------------------------------------------------------------
+# V38.03 - Documenti con eliminazione
+# ------------------------------------------------------------
+
+def v3803_delete_documento(doc):
+    if not doc:
+        return False, "Documento non valido."
+
+    doc_id = doc.get("id")
+    storage_path = doc.get("storage_path") or doc.get("path") or doc.get("percorso_file")
+
+    # 1) elimina file storage, se possibile
+    if storage_path:
+        try:
+            get_supabase().storage.from_("documenti").remove([storage_path])
+        except Exception:
+            pass
+
+    # 2) elimina record DB
+    if doc_id not in [None, "", "nan", "None"]:
+        for table in ["documenti_cliente", "documenti_clienti"]:
+            try:
+                get_supabase().table(table).delete().eq("id", int(float(doc_id))).execute()
+                try:
+                    st.cache_data.clear()
+                except Exception:
+                    pass
+                return True, "Documento eliminato dallo storico."
+            except Exception:
+                pass
+
+    # fallback per path
+    if storage_path:
+        for table in ["documenti_cliente", "documenti_clienti"]:
+            for col in ["storage_path", "path", "percorso_file"]:
+                try:
+                    get_supabase().table(table).delete().eq(col, storage_path).execute()
+                    try:
+                        st.cache_data.clear()
+                    except Exception:
+                        pass
+                    return True, "Documento eliminato dallo storico."
+                except Exception:
+                    pass
+
+    return False, "Non sono riuscito a eliminare il documento dallo storico."
+
+
+def render_staff_documenti():
+    st.header("📄 Documenti e certificati cliente")
+    st.caption("V38.03: upload diretto su bucket 'documenti' + archivio con eliminazione.")
+
+    clienti = v3801_doc_clienti_df()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(v3801_cliente_label, axis=1)
+
+    tab1, tab2 = st.tabs(["Carica documento", "Archivio documenti"])
+
+    with tab1:
+        st.subheader("Carica PDF cliente")
+        selected = st.selectbox("Cliente", clienti["__label"].tolist(), key="v3803_doc_cliente")
+        cliente_id = int(str(selected).split(" - ")[0])
+        tipo_documento = st.selectbox("Tipo documento", ["CERTIFICATO MEDICO", "CONTRATTO", "PRIVACY", "AUTORIZZAZIONE TRATTAMENTO", "ALTRO DOCUMENTO"], key="v3803_tipo_doc")
+        file = st.file_uploader("Carica PDF", type=["pdf"], key="v3803_upload_pdf")
+        note_documento = st.text_area("Note documento", key="v3803_note_doc")
+
+        if st.button("Carica documento", use_container_width=True, key="v3803_carica_doc"):
+            ok, msg = upload_documento_cliente(cliente_id, file, tipo_documento, note_documento)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    with tab2:
+        st.subheader("Archivio documenti")
+        selected2 = st.selectbox("Cliente archivio", clienti["__label"].tolist(), key="v3803_doc_arch_cliente")
+        cid2 = int(str(selected2).split(" - ")[0])
+
+        docs = []
+        for table in ["documenti_cliente", "documenti_clienti"]:
+            for col in ["cliente_id", "id_cliente"]:
+                try:
+                    docs = get_supabase().table(table).select("*").eq(col, cid2).order("id", desc=True).execute().data or []
+                    if docs:
+                        break
+                except Exception:
+                    pass
+            if docs:
+                break
+
+        if not docs:
+            st.info("Nessun documento in archivio per questo cliente.")
+        else:
+            for d in docs:
+                tipo = d.get("tipo_documento") or d.get("tipo") or "Documento"
+                nome = d.get("nome_file") or d.get("filename") or d.get("storage_path") or d.get("path") or d.get("percorso_file") or ""
+                data_doc = d.get("created_at") or d.get("data") or ""
+                url = document_url_for_display(d)
+                st.markdown(
+                    f"""
+                    <div style="border:1.5px solid #d4af37;border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;">
+                      <div style="font-size:18px;font-weight:950;">{tipo}</div>
+                      <div style="font-size:13px;color:#555;">{nome}</div>
+                      <div style="font-size:12px;color:#777;">{data_doc}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    if url:
+                        st.link_button("Apri PDF", url)
+                with c2:
+                    if st.button("🗑️ Elimina documento", key=f"v3803_del_doc_{d.get('id')}_{nome}", use_container_width=True):
+                        ok_del, msg_del = v3803_delete_documento(d)
+                        st.success(msg_del) if ok_del else st.error(msg_del)
+                        if ok_del:
+                            st.rerun()
+
+
+# Alias documenti
+render_documenti_operativi = render_staff_documenti
+render_documenti_cliente_page = render_staff_documenti
+render_documenti_page = render_staff_documenti
+render_documenti = render_staff_documenti
+render_cliente_documenti = render_staff_documenti
+
+
+# ------------------------------------------------------------
+# V38.03 - Cliente 360 pulito, una sola selezione cliente
+# ------------------------------------------------------------
+
+def v3803_cliente_360_documenti(cliente_id):
+    docs = []
+    for table in ["documenti_cliente", "documenti_clienti"]:
+        for col in ["cliente_id", "id_cliente"]:
+            try:
+                docs = get_supabase().table(table).select("*").eq(col, int(float(cliente_id))).order("id", desc=True).execute().data or []
+                if docs:
+                    break
+            except Exception:
+                pass
+        if docs:
+            break
+
+    if not docs:
+        st.info("Nessun documento caricato.")
+        return
+
+    for d in docs:
+        tipo = d.get("tipo_documento") or d.get("tipo") or "Documento"
+        nome = d.get("nome_file") or d.get("filename") or d.get("storage_path") or d.get("path") or d.get("percorso_file") or ""
+        url = document_url_for_display(d)
+        st.markdown(f"**{tipo}** · {nome}")
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            if url:
+                st.link_button("Apri PDF", url)
+        with c2:
+            if st.button("🗑️ Elimina", key=f"v3803_c360_del_{d.get('id')}_{nome}", use_container_width=True):
+                ok_del, msg_del = v3803_delete_documento(d)
+                st.success(msg_del) if ok_del else st.error(msg_del)
+                if ok_del:
+                    st.rerun()
+
+
+def v3803_cliente_360_pagamenti(cliente_id):
+    try:
+        pag = load_pagamenti()
+    except Exception:
+        try:
+            pag = pd.DataFrame(get_supabase().table("pagamenti").select("*").eq("cliente_id", int(float(cliente_id))).order("id", desc=True).execute().data or [])
+        except Exception:
+            pag = pd.DataFrame()
+
+    if pag.empty or "cliente_id" not in pag.columns:
+        st.info("Nessun pagamento.")
+        return
+
+    sub = pag[pd.to_numeric(pag["cliente_id"], errors="coerce") == int(float(cliente_id))]
+    if sub.empty:
+        st.info("Nessun pagamento per questo cliente.")
+        return
+
+    for _, r in sub.head(50).iterrows():
+        imp = v38_float(r.get("importo"))
+        data = r.get("data_pagamento") or r.get("data") or r.get("created_at") or ""
+        metodo = r.get("metodo_pagamento") or r.get("metodo") or ""
+        note = r.get("note") or r.get("causale") or ""
+        st.markdown(f"**{data}** · {v38_euro(imp)} · {metodo} · {note}")
+
+
+def v3803_cliente_360_lezioni(cliente_id, cliente):
+    totale, usate, residue = v38_contatori_cliente(cliente)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Lezioni totali", totale)
+    c2.metric("Lezioni usate", usate)
+    c3.metric("Lezioni residue", residue)
+
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        if st.button("✅ Scala 1 lezione", disabled=residue <= 0, use_container_width=True, key="v3803_c360_scala"):
+            ok, msg = v38_update_lezioni_cliente(cliente_id, totale, usate + 1)
+            try:
+                v38_movimento_accesso_unico(cliente_id, 0, 1, "PRESENZA_MANUALE_SCALATA", "V38.03 Cliente360: scala manuale")
+            except Exception:
+                pass
+            st.success(msg) if ok else st.error(msg)
+            st.rerun()
+    with a2:
+        if st.button("↩️ Restituisci 1 lezione", disabled=usate <= 0, use_container_width=True, key="v3803_c360_restituisci"):
+            ok, msg = v38_update_lezioni_cliente(cliente_id, totale, usate - 1)
+            st.success(msg) if ok else st.error(msg)
+            st.rerun()
+    with a3:
+        if st.button("🟦 Presenza senza scalare", use_container_width=True, key="v3803_c360_no_scala"):
+            try:
+                get_supabase().table("movimenti_lezioni").insert({
+                    "cliente_id": int(float(cliente_id)),
+                    "tipo": "PRESENZA_MANUALE_NO_SCALA",
+                    "quantita": 0,
+                    "motivo": "V38.03 Cliente360: presenza manuale senza scalare",
+                    "created_at": datetime.now().isoformat(),
+                }).execute()
+            except Exception:
+                pass
+            st.success("Presenza registrata senza scalare.")
+
+
+def render_v37_cliente360():
+    st.header("👤 Cliente 360")
+    st.caption("V38.03: scheda unica cliente senza selezione duplicata.")
+
+    clienti = v38_load_clienti()
+    if clienti.empty:
+        st.info("Nessun cliente presente.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(lambda r: v38_cliente_label(r, show_badge=True), axis=1)
+
+    pre_id = st.session_state.get("cliente_360_id") or st.session_state.get("cliente_preselezionato_id")
+    default_index = 0
+    if pre_id is not None:
+        try:
+            ids = pd.to_numeric(clienti["id"], errors="coerce").fillna(-1).astype(int).tolist()
+            if int(float(pre_id)) in ids:
+                default_index = ids.index(int(float(pre_id)))
+        except Exception:
+            default_index = 0
+
+    selected = st.selectbox("Seleziona cliente", clienti["__label"].tolist(), index=default_index, key="v3803_cliente360_select")
+    cliente_id = int(str(selected).split(" - ")[0])
+    cliente = v38_get_cliente(cliente_id)
+
+    totale, usate, residue = v38_contatori_cliente(cliente)
+    badge = v38_badge_cliente(cliente_id)
+
+    st.markdown(
+        f"""
+        <div style="border:2px solid #d4af37;border-radius:18px;background:#050505;padding:18px 20px;margin:12px 0;">
+          <div style="font-size:26px;font-weight:950;color:#f8e7a1;">{v38_cliente_nome(cliente)}</div>
+          <div style="font-size:13px;color:#fff;">ID {cliente_id} · Badge: {badge or 'non associato'} · Pacchetto: {cliente.get('pacchetto') or '-'}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Lezioni residue", residue)
+    m2.metric("Lezioni usate", usate)
+    m3.metric("Lezioni totali", totale)
+    m4.metric("Residuo €", v38_euro(cliente.get("residuo") or 0))
+
+    tabs = st.tabs(["📒 Lezioni/presenze", "💳 Pagamenti", "📄 Documenti", "🚦 Accessi", "📝 Note"])
+    with tabs[0]:
+        v3803_cliente_360_lezioni(cliente_id, cliente)
+    with tabs[1]:
+        v3803_cliente_360_pagamenti(cliente_id)
+    with tabs[2]:
+        v3803_cliente_360_documenti(cliente_id)
+    with tabs[3]:
+        try:
+            accessi = v38_load_accessi()
+            if not accessi.empty and "cliente_id" in accessi.columns:
+                sub = accessi[pd.to_numeric(accessi["cliente_id"], errors="coerce") == int(float(cliente_id))]
+                if sub.empty:
+                    st.info("Nessun accesso.")
+                else:
+                    for _, r in sub.head(50).iterrows():
+                        st.markdown(f"**{r.get('data_accesso','')} {r.get('ora_accesso','')}** · Badge {r.get('badge_uid') or '-'} · {r.get('stato_accesso') or '-'}")
+            else:
+                st.info("Nessun accesso.")
+        except Exception:
+            st.info("Accessi non disponibili.")
+    with tabs[4]:
+        st.write(cliente.get("note") or "Nessuna nota.")
+
+
+# Alias cliente 360
+render_cliente360 = render_v37_cliente360
+render_cliente_360 = render_v37_cliente360
+render_staff_cliente360 = render_v37_cliente360
+
+
+# ------------------------------------------------------------
+# V38.03 - router aggiornato senza doppio back
+# ------------------------------------------------------------
+
+def kreo_render_reception_internal_view_if_any():
+    view = st.session_state.get("reception_internal_view") or st.session_state.get("reception_view")
+    if not view:
+        return False
+
+    aliases = {
+        "incassi": "incasso",
+        "registra_incasso": "incasso",
+        "ricevuta": "ricevute_storico",
+        "ricevute": "ricevute_storico",
+        "cliente360": "cliente_360",
+        "clienti": "modifica_cliente",
+        "tornello": "v36_checkin",
+        "accesso_tornello": "v36_checkin",
+        "agenda": "agenda_7gg",
+        "documenti_cliente": "documenti",
+        "badge": "badge_alert",
+    }
+    view = aliases.get(view, view)
+
+    # Un solo bottone, renderizzato qui
+    v3803_back_button()
+
+    if view == "nuovo_cliente":
+        render_v37_nuovo_cliente()
+    elif view == "modifica_cliente":
+        render_staff_modifica_cliente()
+    elif view == "incasso":
+        render_v37_incasso_rate()
+    elif view == "v36_checkin":
+        render_v36_checkin_core()
+    elif view == "agenda_7gg":
+        render_v37_agenda_7gg()
+    elif view == "ricevute_storico":
+        render_v37_ricevute_storico()
+    elif view == "messaggio":
+        render_staff_messaggio_cliente()
+    elif view == "cliente_360":
+        render_v37_cliente360()
+    elif view == "modifica_accessi":
+        render_v37_modifica_accessi()
+    elif view == "documenti":
+        render_staff_documenti()
+    elif view == "badge_alert":
+        render_alert_badge_associa()
+    elif view == "alert_certificati":
+        try:
+            render_alert_certificati()
+        except Exception:
+            df = v38_alert_certificati_df()
+            st.header("Certificati mancanti/scaduti")
+            if df.empty:
+                st.success("Nessun certificato mancante/scaduto.")
+            else:
+                for _, r in df.head(100).iterrows():
+                    st.warning(f"{v38_cliente_nome(r)} - {r.get('_motivo_certificato')}")
+    elif view == "alert_center":
+        kreo_call_first_available(["render_alert_center_page", "render_reception_alert_side_panel"], "Alert Center")
+    else:
+        st.warning(f"Vista Reception non riconosciuta: {view}")
+
+    return True
 
 
 if __name__ == "__main__":
