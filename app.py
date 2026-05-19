@@ -1,4 +1,4 @@
-# KREO V38 PRODUCTION - base reale stabilizzata da V37.05/V37.11
+# KREO V38.01 PRODUCTION - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38 PRODUCTION OVERRIDE
+# KREO V38.01 PRODUCTION OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38 PRODUCTION"
+APP_VERSION = "KREO V38.01 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19933,6 +19933,275 @@ def v38_version_marker():
         st.caption("KREO V38 Production · base reale V37 stabilizzata · Developed by Pentti Salenius © 2026")
     except Exception:
         pass
+
+
+
+
+# ============================================================
+# KREO V38.01 DOCUMENTI HARD FIX
+# Motivo:
+# Il bucket "documenti" esiste, ma vecchie funzioni usano list_buckets()
+# e bloccano l'upload con "Bucket rilevati: nessuno".
+# Questa patch forza ogni vecchia route documenti a usare upload diretto.
+# ============================================================
+
+APP_VERSION = "KREO V38.01 PRODUCTION"
+DOCUMENTI_BUCKET_PRIVATO = "documenti"
+DOCUMENTI_BUCKET_STORICO = "documenti"
+KREO_DOCUMENTI_BUCKET = "documenti"
+
+
+def kreo_document_bucket_status():
+    """
+    V38.01: il bucket documenti esiste.
+    Non usiamo più list_buckets perché in alcune condizioni Supabase client
+    non lo restituisce, pur permettendo l'accesso diretto al bucket.
+    """
+    return "documenti", True, ["documenti"]
+
+
+def v3801_doc_clienti_df():
+    try:
+        return v38_load_clienti()
+    except Exception:
+        try:
+            return v3709_clients_df()
+        except Exception:
+            try:
+                return v3705_clients_df()
+            except Exception:
+                try:
+                    return load_clienti()
+                except Exception:
+                    try:
+                        rows = get_supabase().table("clienti").select("*").order("cognome").execute().data or []
+                        return pd.DataFrame(rows)
+                    except Exception:
+                        return pd.DataFrame()
+
+
+def v3801_cliente_label(row):
+    try:
+        return v38_cliente_label(row, show_badge=False)
+    except Exception:
+        if isinstance(row, pd.Series):
+            row = row.to_dict()
+        cid = row.get("id")
+        nome = f"{row.get('nome','')} {row.get('cognome','')}".strip()
+        return f"{int(float(cid))} - {nome}"
+
+
+def v3801_upload_documento_storage(cliente_id, file_obj, tipo_documento):
+    """
+    Upload diretto su bucket pubblico documenti.
+    Non verifica esistenza bucket via list_buckets.
+    """
+    if not file_obj:
+        return False, "", "Seleziona un PDF."
+
+    filename = getattr(file_obj, "name", "documento.pdf")
+    if not filename.lower().endswith(".pdf"):
+        return False, "", "Sono ammessi solo file PDF."
+
+    safe_name = str(filename).replace(" ", "_").replace("/", "_").replace("\\", "_")
+    safe_tipo = str(tipo_documento or "documento").lower().replace(" ", "_").replace("/", "_")
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    storage_path = f"cliente_{int(float(cliente_id))}/{safe_tipo}_{timestamp}_{safe_name}"
+    data = file_obj.getvalue()
+    bucket = get_supabase().storage.from_("documenti")
+
+    errors = []
+
+    attempts = [
+        ("upload_options_positional", lambda: bucket.upload(storage_path, data, {"content-type": "application/pdf", "upsert": "true"})),
+        ("upload_kwargs", lambda: bucket.upload(path=storage_path, file=data, file_options={"content-type": "application/pdf", "upsert": "true"})),
+        ("upload_plain", lambda: bucket.upload(storage_path, data)),
+    ]
+
+    for name, fn in attempts:
+        try:
+            fn()
+            try:
+                public_url = bucket.get_public_url(storage_path)
+            except Exception:
+                public_url = ""
+            return True, storage_path, public_url
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+
+    return False, storage_path, "Upload fallito su bucket 'documenti'. Errore reale: " + " | ".join(errors[-3:])
+
+
+def v3801_insert_documento_record(cliente_id, tipo_documento, filename, storage_path, public_url="", note=""):
+    payloads = [
+        {
+            "cliente_id": int(float(cliente_id)),
+            "tipo_documento": tipo_documento,
+            "nome_file": filename,
+            "storage_path": storage_path,
+            "public_url": public_url,
+            "note": note,
+            "created_at": datetime.now().isoformat(),
+        },
+        {
+            "cliente_id": int(float(cliente_id)),
+            "tipo": tipo_documento,
+            "filename": filename,
+            "path": storage_path,
+            "url": public_url,
+            "note": note,
+        },
+        {
+            "id_cliente": int(float(cliente_id)),
+            "tipo_documento": tipo_documento,
+            "nome_file": filename,
+            "percorso_file": storage_path,
+            "url_file": public_url,
+        },
+    ]
+
+    last = None
+    for payload in payloads:
+        try:
+            get_supabase().table("documenti_cliente").insert(payload).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True, "Documento salvato nello storico cliente."
+        except Exception as e:
+            last = e
+
+    return False, f"Upload riuscito, ma non sono riuscito a salvare lo storico in documenti_cliente: {last}"
+
+
+def upload_documento_cliente(cliente_id, file, tipo_documento, note_documento=""):
+    """
+    Firma vecchia: ritorna ok, msg.
+    Usata da render_documenti_operativi storico.
+    """
+    ok, path, url_or_err = v3801_upload_documento_storage(cliente_id, file, tipo_documento)
+    if not ok:
+        return False, url_or_err
+
+    ok2, msg = v3801_insert_documento_record(
+        cliente_id,
+        tipo_documento,
+        getattr(file, "name", "documento.pdf"),
+        path,
+        url_or_err,
+        note_documento,
+    )
+
+    if not ok2:
+        return False, msg
+
+    return True, "Documento caricato e associato correttamente al cliente."
+
+
+# Vecchie funzioni V37/V370x forzate sulla nuova logica
+v3705_upload_documento_storage = v3801_upload_documento_storage
+v3709_upload_documento_storage = v3801_upload_documento_storage
+v38_upload_documento_storage = v3801_upload_documento_storage
+
+v3705_insert_documento_record = v3801_insert_documento_record
+v3709_insert_documento_record = v3801_insert_documento_record
+v38_insert_documento_record = v3801_insert_documento_record
+
+
+def signed_document_url(storage_path, expires_in=300):
+    if not storage_path:
+        return ""
+    try:
+        return get_supabase().storage.from_("documenti").get_public_url(storage_path)
+    except Exception:
+        try:
+            res = get_supabase().storage.from_("documenti").create_signed_url(storage_path, expires_in)
+            if isinstance(res, dict):
+                return res.get("signedURL") or res.get("signedUrl") or res.get("url") or ""
+            return str(res)
+        except Exception:
+            return ""
+
+
+def document_url_for_display(row, expires_in=300):
+    if row is None:
+        return ""
+    try:
+        public_url = row.get("public_url", "") if hasattr(row, "get") else ""
+        if public_url:
+            return public_url
+        for k in ["storage_path", "path", "percorso_file"]:
+            storage_path = row.get(k, "") if hasattr(row, "get") else ""
+            if storage_path:
+                return signed_document_url(storage_path, expires_in)
+    except Exception:
+        pass
+    return ""
+
+
+def render_staff_documenti():
+    st.header("📄 Documenti e certificati cliente")
+    st.caption("V38.01: upload diretto sul bucket pubblico 'documenti'. Nessun controllo list_buckets.")
+
+    clienti = v3801_doc_clienti_df()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(v3801_cliente_label, axis=1)
+
+    tab1, tab2 = st.tabs(["Carica documento", "Archivio documenti"])
+
+    with tab1:
+        st.subheader("Carica PDF cliente")
+        selected = st.selectbox("Cliente", clienti["__label"].tolist(), key="v3801_doc_cliente")
+        cliente_id = int(str(selected).split(" - ")[0])
+        tipo_documento = st.selectbox("Tipo documento", ["CERTIFICATO MEDICO", "CONTRATTO", "PRIVACY", "ALTRO DOCUMENTO"], key="v3801_tipo_doc")
+        file = st.file_uploader("Carica PDF", type=["pdf"], key="v3801_upload_pdf")
+        note_documento = st.text_area("Note documento", key="v3801_note_doc")
+
+        if st.button("Carica documento", use_container_width=True, key="v3801_carica_doc"):
+            ok, msg = upload_documento_cliente(cliente_id, file, tipo_documento, note_documento)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    with tab2:
+        st.subheader("Archivio documenti")
+        selected2 = st.selectbox("Cliente archivio", clienti["__label"].tolist(), key="v3801_doc_arch_cliente")
+        cid2 = int(str(selected2).split(" - ")[0])
+
+        docs = []
+        for col in ["cliente_id", "id_cliente"]:
+            try:
+                docs = get_supabase().table("documenti_cliente").select("*").eq(col, cid2).order("id", desc=True).execute().data or []
+                if docs:
+                    break
+            except Exception:
+                pass
+
+        if not docs:
+            st.info("Nessun documento in archivio per questo cliente.")
+        else:
+            for d in docs:
+                tipo = d.get("tipo_documento") or d.get("tipo") or "Documento"
+                nome = d.get("nome_file") or d.get("filename") or d.get("storage_path") or d.get("path") or d.get("percorso_file") or ""
+                url = document_url_for_display(d)
+                st.markdown(f"**{tipo}** · {nome}")
+                if url:
+                    st.link_button("Apri PDF", url)
+
+
+# Tutte le route documenti devono puntare qui
+render_documenti_operativi = render_staff_documenti
+render_documenti_cliente_page = render_staff_documenti
+render_documenti_page = render_staff_documenti
+render_documenti = render_staff_documenti
+render_cliente_documenti = render_staff_documenti
 
 
 if __name__ == "__main__":
