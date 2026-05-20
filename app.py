@@ -1,4 +1,4 @@
-# KREO V38.06 PRODUCTION - base reale stabilizzata da V37.05/V37.11
+# KREO V38.07 PRODUCTION - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.06 PRODUCTION OVERRIDE
+# KREO V38.07 PRODUCTION OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.06 PRODUCTION"
+APP_VERSION = "KREO V38.07 PRODUCTION"
 
 
 def kreo_reception_open(view_name):
@@ -22516,6 +22516,338 @@ def main():
 
     # Nessun top_return globale qui: era la fonte del doppio pulsante.
     v3806_route_menu(menu)
+
+
+
+
+# ============================================================
+# KREO V38.07 BACK FIX + DOCUMENTI NAV + SPEED PATCH
+# - Fix errore Streamlit: non modificare v32_macro_nav/v32_sub_nav dopo widget creato
+# - Back button visibile anche in Documenti
+# - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
+# ============================================================
+
+APP_VERSION = "KREO V38.07 PRODUCTION"
+
+
+def v3807_go_reception():
+    """
+    Fix definitivo:
+    NON tocchiamo v32_macro_nav / v32_sub_nav perché sono chiavi di widget già istanziati.
+    Puliamo solo la navigazione interna V38 e lasciamo che la sidebar resti com'è.
+    """
+    for k in [
+        "reception_view",
+        "reception_internal_view",
+        "kreo_force_menu",
+        "cliente_preselezionato_id",
+        "cliente_360_id",
+        "active_reception_module",
+        "selected_reception_action",
+    ]:
+        try:
+            st.session_state.pop(k, None)
+        except Exception:
+            pass
+    st.session_state["reception_home"] = True
+    st.rerun()
+
+
+def v3807_back_button():
+    if st.button("↩️ Torna a Reception", key="v3807_single_back_to_reception", use_container_width=False):
+        v3807_go_reception()
+
+
+# Neutralizzo i back precedenti che causavano doppioni/errore widget-state
+def v3806_single_back(*args, **kwargs): return None
+def v3806_go_reception(*args, **kwargs): v3807_go_reception()
+def v3804_back_button(*args, **kwargs): return None
+def v3803_back_button(*args, **kwargs): return None
+def v37_render_back(*args, **kwargs): return None
+def kreo_render_back_to_reception(*args, **kwargs): return None
+def render_back_to_reception(*args, **kwargs): return None
+def render_torna_reception(*args, **kwargs): return None
+
+
+def kreo_reception_open(view_name):
+    """
+    Apertura vista reception senza forzare le chiavi widget del menu laterale.
+    """
+    for k in [
+        "reception_internal_view",
+        "kreo_internal_view",
+        "clienti_internal_view",
+        "selected_reception_action",
+        "active_reception_module",
+        "active_view",
+        "subview",
+        "view",
+        "checkin_mode",
+        "selected_action",
+        "modulo_attivo",
+        "pagina",
+        "submenu",
+    ]:
+        try:
+            st.session_state.pop(k, None)
+        except Exception:
+            pass
+
+    st.session_state["reception_view"] = view_name
+    st.session_state["reception_home"] = False
+    st.rerun()
+
+
+def kreo_render_reception_internal_view_if_any():
+    view = st.session_state.get("reception_internal_view") or st.session_state.get("reception_view")
+    if not view:
+        return False
+
+    aliases = {
+        "incassi": "incasso",
+        "registra_incasso": "incasso",
+        "ricevuta": "ricevute_storico",
+        "ricevute": "ricevute_storico",
+        "cliente360": "cliente_360",
+        "clienti": "modifica_cliente",
+        "tornello": "v36_checkin",
+        "accesso_tornello": "v36_checkin",
+        "agenda": "agenda_7gg",
+        "documenti_cliente": "documenti",
+        "badge": "badge_alert",
+    }
+    view = aliases.get(view, view)
+
+    # unico back, sicuro
+    v3807_back_button()
+
+    if view == "nuovo_cliente":
+        render_v37_nuovo_cliente()
+    elif view == "modifica_cliente":
+        render_staff_modifica_cliente()
+    elif view == "incasso":
+        render_v37_incasso_rate()
+    elif view == "v36_checkin":
+        render_v36_checkin_core()
+    elif view == "agenda_7gg":
+        render_v37_agenda_7gg()
+    elif view == "ricevute_storico":
+        render_v37_ricevute_storico()
+    elif view == "messaggio":
+        render_staff_messaggio_cliente()
+    elif view == "cliente_360":
+        render_v37_cliente360()
+    elif view == "modifica_accessi":
+        render_v37_modifica_accessi()
+    elif view == "documenti":
+        render_staff_documenti()
+    elif view == "badge_alert":
+        render_alert_badge_associa()
+    elif view == "alert_certificati":
+        try:
+            render_alert_certificati()
+        except Exception:
+            df = v38_alert_certificati_df()
+            st.header("Certificati mancanti/scaduti")
+            if df.empty:
+                st.success("Nessun certificato mancante/scaduto.")
+            else:
+                for _, r in df.head(100).iterrows():
+                    st.warning(f"{v38_cliente_nome(r)} - {r.get('_motivo_certificato')}")
+    elif view == "alert_center":
+        try:
+            render_alert_center_page()
+        except Exception:
+            render_reception_alert_side_panel()
+    else:
+        st.warning(f"Vista Reception non riconosciuta: {view}")
+
+    return True
+
+
+def render_staff_documenti():
+    """
+    Override V38.07: documenti funzionanti + back sicuro.
+    """
+    st.header("📄 Documenti e certificati cliente")
+    st.caption("V38.07: upload diretto su bucket 'documenti' + ritorno Reception stabile.")
+
+    clienti = v3801_doc_clienti_df()
+    if clienti.empty:
+        st.info("Nessun cliente disponibile.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(v3801_cliente_label, axis=1)
+
+    tab1, tab2 = st.tabs(["Carica documento", "Archivio documenti"])
+
+    with tab1:
+        st.subheader("Carica PDF cliente")
+        selected = st.selectbox("Cliente", clienti["__label"].tolist(), key="v3807_doc_cliente")
+        cliente_id = int(str(selected).split(" - ")[0])
+        tipo_documento = st.selectbox("Tipo documento", ["CERTIFICATO MEDICO", "CONTRATTO", "PRIVACY", "AUTORIZZAZIONE TRATTAMENTO", "ALTRO DOCUMENTO"], key="v3807_tipo_doc")
+        file = st.file_uploader("Carica PDF", type=["pdf"], key="v3807_upload_pdf")
+        note_documento = st.text_area("Note documento", key="v3807_note_doc")
+
+        if st.button("Carica documento", use_container_width=True, key="v3807_carica_doc"):
+            ok, msg = upload_documento_cliente(cliente_id, file, tipo_documento, note_documento)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    with tab2:
+        st.subheader("Archivio documenti")
+        selected2 = st.selectbox("Cliente archivio", clienti["__label"].tolist(), key="v3807_doc_arch_cliente")
+        cid2 = int(str(selected2).split(" - ")[0])
+
+        docs = []
+        for table in ["documenti_cliente", "documenti_clienti"]:
+            for col in ["cliente_id", "id_cliente"]:
+                try:
+                    docs = get_supabase().table(table).select("*").eq(col, cid2).order("id", desc=True).limit(100).execute().data or []
+                    if docs:
+                        break
+                except Exception:
+                    pass
+            if docs:
+                break
+
+        if not docs:
+            st.info("Nessun documento in archivio per questo cliente.")
+        else:
+            for d in docs:
+                tipo = d.get("tipo_documento") or d.get("tipo") or "Documento"
+                nome = d.get("nome_file") or d.get("filename") or d.get("storage_path") or d.get("path") or d.get("percorso_file") or ""
+                data_doc = d.get("created_at") or d.get("data") or ""
+                url = document_url_for_display(d)
+                st.markdown(
+                    f"""
+                    <div style="border:1.5px solid #d4af37;border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;">
+                      <div style="font-size:18px;font-weight:950;">{tipo}</div>
+                      <div style="font-size:13px;color:#555;">{nome}</div>
+                      <div style="font-size:12px;color:#777;">{data_doc}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    if url:
+                        st.link_button("Apri PDF", url)
+                with c2:
+                    if st.button("🗑️ Elimina documento", key=f"v3807_del_doc_{d.get('id')}_{nome}", use_container_width=True):
+                        ok_del, msg_del = v3803_delete_documento(d)
+                        st.success(msg_del) if ok_del else st.error(msg_del)
+                        if ok_del:
+                            st.rerun()
+
+
+# Alias documenti
+render_documenti_operativi = render_staff_documenti
+render_documenti_cliente_page = render_staff_documenti
+render_documenti_page = render_staff_documenti
+render_documenti = render_staff_documenti
+render_cliente_documenti = render_staff_documenti
+
+
+def v3807_route_menu(menu):
+    """
+    Router con precedenza assoluta alle sottoviste reception.
+    Se c'è reception_view, non esegue la pagina del menu laterale.
+    """
+    if st.session_state.get("reception_view") or st.session_state.get("reception_internal_view"):
+        kreo_render_reception_internal_view_if_any()
+        return
+
+    if menu == "🏠 Reception Center":
+        render_reception_center()
+    elif menu == "➕ Nuovo cliente":
+        render_v37_nuovo_cliente()
+    elif menu == "✏️ Modifica cliente":
+        render_staff_modifica_cliente()
+    elif menu == "📋 Database clienti":
+        try:
+            render_v37_cliente360()
+        except Exception:
+            render_clienti_database()
+    elif menu == "📄 Documenti / Certificati":
+        render_staff_documenti()
+    elif menu == "👤 Area Cliente":
+        render_v37_cliente360()
+    elif menu == "✨ Agenda Luxury":
+        try:
+            render_v37_agenda_7gg()
+        except Exception:
+            render_agenda_light_launch()
+    elif menu == "📅 Calendario lezioni":
+        try:
+            render_v37_agenda_7gg()
+        except Exception:
+            render_agenda_light_launch()
+    elif menu == "💳 Gestione incassi":
+        render_v37_incasso_rate()
+    elif menu == "🧾 Stampa ricevuta":
+        render_v37_ricevute_storico()
+    elif menu == "📊 Dashboard":
+        try:
+            render_dashboard()
+        except Exception:
+            st.info("Dashboard non disponibile.")
+    elif menu == "📈 Analytics direzionali":
+        try:
+            render_analytics_direzionali()
+        except Exception:
+            st.info("Analytics non disponibili.")
+    elif menu == "⬇️ Export Excel":
+        try:
+            render_export_excel()
+        except Exception:
+            st.info("Export non disponibile.")
+    elif menu == "👥 Gestione utenti":
+        render_gestione_utenti()
+    elif menu == "🏢 Anagrafica azienda":
+        try:
+            render_anagrafica_azienda()
+        except Exception:
+            st.info("Anagrafica azienda non disponibile.")
+    elif menu == "⚙️ Settaggi KREO":
+        try:
+            render_settaggi_kreo()
+        except Exception:
+            st.info("Settaggi non disponibili.")
+    else:
+        render_reception_center()
+
+
+def main():
+    st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
+    style()
+    inject_kreo_luxury_sidebar_style()
+
+    if not login_gate():
+        return
+
+    col_logo, col_title = st.columns([1, 3])
+    with col_logo:
+        show_logo()
+    with col_title:
+        st.title("Gestionale Clienti")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | {APP_VERSION}")
+
+    st.sidebar.markdown(f"**Utente:** {user_label()}")
+    st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
+    if st.sidebar.button("Logout", key="v3807_logout"):
+        st.session_state.logged_in = False
+        st.session_state.user = None
+        st.rerun()
+
+    menu = render_v32_navigation()
+    render_kreo_welcome_banner()
+
+    v3807_route_menu(menu)
 
 
 if __name__ == "__main__":
