@@ -1,4 +1,4 @@
-# KREO V38.09 PAGAMENTI RETTIFICABILI - base reale stabilizzata da V37.05/V37.11
+# KREO V38.10 MONEY PARSER FIX - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.09 PAGAMENTI RETTIFICABILI OVERRIDE
+# KREO V38.10 MONEY PARSER FIX OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.09 PAGAMENTI RETTIFICABILI
+# KREO V38.10 MONEY PARSER FIX
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
 
 
 def v3809_is_admin():
@@ -23324,6 +23324,228 @@ def v3809_render_pagamenti_cliente(cliente_id):
 
 
 # Override tab pagamenti Cliente 360
+def v3803_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+def v3809_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+
+
+
+# ============================================================
+# KREO V38.10 MONEY PARSER FIX
+# Base: V38.09.
+# Fix bug importi:
+# prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
+# Ora:
+# - float/int restano float
+# - 300.0 -> 300.0
+# - "300.00" -> 300.0
+# - "300,00" -> 300.0
+# - "1.800,00" -> 1800.0
+# - "1,800.00" -> 1800.0
+# ============================================================
+
+APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+
+
+def v3810_parse_money(value):
+    if value is None:
+        return 0.0
+
+    # Se Supabase restituisce già numero, NON trattarlo come stringa italiana
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+
+    s = str(value).strip()
+    if not s or s.lower() in ["nan", "none", "null"]:
+        return 0.0
+
+    s = (
+        s.replace("€", "")
+         .replace("EUR", "")
+         .replace("eur", "")
+         .replace(" ", "")
+         .strip()
+    )
+
+    # Gestione segno negativo
+    neg = False
+    if s.startswith("-"):
+        neg = True
+        s = s[1:]
+
+    # Se ci sono sia punto che virgola, capisco quale è il separatore decimale dall'ultimo simbolo
+    if "." in s and "," in s:
+        if s.rfind(",") > s.rfind("."):
+            # formato italiano: 1.800,50
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # formato inglese: 1,800.50
+            s = s.replace(",", "")
+    elif "," in s:
+        # solo virgola: 300,50
+        s = s.replace(".", "").replace(",", ".")
+    elif "." in s:
+        # solo punto: potrebbe essere 300.0 oppure 1.800
+        parts = s.split(".")
+        if len(parts) == 2 and len(parts[1]) in [1, 2]:
+            # decimale normale
+            pass
+        elif len(parts) > 2:
+            # migliaia tipo 1.800.000
+            s = s.replace(".", "")
+        else:
+            # se parte decimale lunga o ambigua, lascia float provare
+            pass
+
+    try:
+        val = float(s)
+        return -val if neg else val
+    except Exception:
+        return 0.0
+
+
+def v3810_get_raw_cliente_importo(cliente):
+    """
+    Cerca l'importo contrattuale vero.
+    Evita campi derivati come importo_pagato/residuo.
+    """
+    if not cliente:
+        return 0.0
+    if isinstance(cliente, pd.Series):
+        cliente = cliente.to_dict()
+
+    preferred = [
+        "importo",
+        "importo_totale",
+        "importo_contratto",
+        "totale_contratto",
+        "valore_contratto",
+        "prezzo",
+    ]
+    forbidden = [
+        "importo_pagato",
+        "pagato",
+        "residuo",
+        "saldo",
+    ]
+
+    for k in preferred:
+        if k in cliente and k not in forbidden and cliente.get(k) not in [None, "", "nan", "None"]:
+            return v3810_parse_money(cliente.get(k))
+
+    return 0.0
+
+
+# Override funzioni V38.09 errate
+def v3809_importo_pagamento(row):
+    for k in ["importo", "amount", "totale", "valore"]:
+        try:
+            if k in row and row.get(k) not in [None, "", "nan", "None"]:
+                return v3810_parse_money(row.get(k))
+        except Exception:
+            pass
+    return 0.0
+
+
+def v3809_importo_contratto(cliente):
+    return v3810_get_raw_cliente_importo(cliente)
+
+
+def v3809_ricalcola_contabilita_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    importo_contratto = v3810_get_raw_cliente_importo(cliente)
+    pagamenti = v3809_pagamenti_cliente(cliente_id)
+    totale_pagato = sum(v3809_importo_pagamento(p) for p in pagamenti)
+    residuo = max(importo_contratto - totale_pagato, 0.0)
+
+    payloads = [
+        {"importo_pagato": float(totale_pagato), "residuo": float(residuo), "updated_at": datetime.now().isoformat()},
+        {"importo_pagato": float(totale_pagato), "updated_at": datetime.now().isoformat()},
+        {"residuo": float(residuo)},
+    ]
+
+    last = None
+    for payload in payloads:
+        try:
+            get_supabase().table("clienti").update(payload).eq("id", int(float(cliente_id))).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True, f"Contabilità aggiornata: pagato {v38_euro(totale_pagato)}, residuo {v38_euro(residuo)}."
+        except Exception as e:
+            last = e
+
+    return False, f"Ricalcolo cliente non completato: {last}"
+
+
+def v3809_render_pagamenti_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    importo_contratto = v3810_get_raw_cliente_importo(cliente)
+    pagamenti = v3809_pagamenti_cliente(cliente_id)
+    totale_pagato = sum(v3809_importo_pagamento(p) for p in pagamenti)
+    residuo = max(importo_contratto - totale_pagato, 0.0)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Importo contratto", v38_euro(importo_contratto))
+    m2.metric("Pagato registrato", v38_euro(totale_pagato))
+    m3.metric("Residuo ricalcolato", v38_euro(residuo))
+
+    st.caption("V38.10: importi corretti con parser sicuro per formato italiano/inglese.")
+
+    if st.button("🔄 Riallinea contabilità cliente", key=f"v3810_recalc_{cliente_id}", use_container_width=True):
+        ok, msg = v3809_ricalcola_contabilita_cliente(cliente_id)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            st.rerun()
+
+    if not pagamenti:
+        st.info("Nessun pagamento registrato.")
+        return
+
+    st.markdown("### Storico pagamenti")
+    for p in pagamenti:
+        pid = p.get("id")
+        imp = v3809_importo_pagamento(p)
+        data = v3809_data_pagamento(p)
+        metodo = v3809_metodo_pagamento(p)
+        note = v3809_note_pagamento(p)
+
+        st.markdown(
+            f"""
+            <div style="border:1.5px solid #d4af37;border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;">
+              <div style="font-size:18px;font-weight:950;">{data} · {v38_euro(imp)} · {metodo}</div>
+              <div style="font-size:13px;color:#555;">{note}</div>
+              <div style="font-size:12px;color:#777;">ID pagamento: {pid}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if v3809_is_admin():
+            confirm_key = f"v3810_confirm_delete_{pid}_{cliente_id}"
+            st.checkbox(f"Confermo eliminazione pagamento ID {pid}", key=confirm_key)
+            if st.button(
+                "🗑️ Elimina/Rettifica pagamento",
+                key=f"v3810_delete_payment_{pid}_{cliente_id}",
+                use_container_width=True,
+                disabled=not st.session_state.get(confirm_key, False),
+            ):
+                ok, msg = v3809_elimina_pagamento(p, cliente_id)
+                st.success(msg) if ok else st.error(msg)
+                if ok:
+                    st.rerun()
+        else:
+            st.caption("Eliminazione pagamenti disponibile solo per admin.")
+
+
+# Override definitivo tab pagamenti Cliente 360
 def v3803_cliente_360_pagamenti(cliente_id):
     v3809_render_pagamenti_cliente(cliente_id)
 
