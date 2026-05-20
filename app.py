@@ -1,4 +1,4 @@
-# KREO V38.10 MONEY PARSER FIX - base reale stabilizzata da V37.05/V37.11
+# KREO V38.11 RESIDUO SYNC FIX - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.10 MONEY PARSER FIX OVERRIDE
+# KREO V38.11 RESIDUO SYNC FIX OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.10 MONEY PARSER FIX
+# KREO V38.11 RESIDUO SYNC FIX
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 def v3809_is_admin():
@@ -23334,7 +23334,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.10 MONEY PARSER FIX
+# KREO V38.11 RESIDUO SYNC FIX
 # Base: V38.09.
 # Fix bug importi:
 # prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
@@ -23347,7 +23347,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - "1,800.00" -> 1800.0
 # ============================================================
 
-APP_VERSION = "KREO V38.10 MONEY PARSER FIX"
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
 
 
 def v3810_parse_money(value):
@@ -23550,6 +23550,253 @@ def v3803_cliente_360_pagamenti(cliente_id):
     v3809_render_pagamenti_cliente(cliente_id)
 
 def v3809_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+
+
+
+# ============================================================
+# KREO V38.11 RESIDUO SYNC FIX
+# Base: V38.10.
+# Problema:
+# il residuo ricalcolato era corretto nel tab pagamenti,
+# ma la card alta Cliente 360 leggeva ancora il vecchio campo cliente.
+# Fix:
+# - ricalcolo centralizzato contabilità
+# - aggiornamento più colonne possibili
+# - Cliente 360 mostra residuo contabile ricalcolato
+# ============================================================
+
+APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+
+
+def v3811_contabilita_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    importo_contratto = v3810_get_raw_cliente_importo(cliente)
+    pagamenti = v3809_pagamenti_cliente(cliente_id)
+    totale_pagato = sum(v3809_importo_pagamento(p) for p in pagamenti)
+    residuo = max(importo_contratto - totale_pagato, 0.0)
+    return importo_contratto, totale_pagato, residuo
+
+
+def v3809_ricalcola_contabilita_cliente(cliente_id):
+    importo_contratto, totale_pagato, residuo = v3811_contabilita_cliente(cliente_id)
+
+    payloads = [
+        {
+            "importo_pagato": float(totale_pagato),
+            "residuo": float(residuo),
+            "residuo_euro": float(residuo),
+            "saldo": float(residuo),
+            "updated_at": datetime.now().isoformat(),
+        },
+        {
+            "importo_pagato": float(totale_pagato),
+            "residuo": float(residuo),
+            "updated_at": datetime.now().isoformat(),
+        },
+        {
+            "importo_pagato": float(totale_pagato),
+            "residuo_euro": float(residuo),
+            "updated_at": datetime.now().isoformat(),
+        },
+        {
+            "importo_pagato": float(totale_pagato),
+            "saldo": float(residuo),
+            "updated_at": datetime.now().isoformat(),
+        },
+        {
+            "residuo": float(residuo),
+        },
+    ]
+
+    last = None
+    for payload in payloads:
+        try:
+            get_supabase().table("clienti").update(payload).eq("id", int(float(cliente_id))).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True, f"Contabilità aggiornata: pagato {v38_euro(totale_pagato)}, residuo {v38_euro(residuo)}."
+        except Exception as e:
+            last = e
+
+    return False, f"Ricalcolo cliente non completato: {last}"
+
+
+def v3809_render_pagamenti_cliente(cliente_id):
+    importo_contratto, totale_pagato, residuo = v3811_contabilita_cliente(cliente_id)
+    pagamenti = v3809_pagamenti_cliente(cliente_id)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Importo contratto", v38_euro(importo_contratto))
+    m2.metric("Pagato registrato", v38_euro(totale_pagato))
+    m3.metric("Residuo ricalcolato", v38_euro(residuo))
+
+    st.caption("V38.11: il residuo ricalcolato alimenta anche la scheda alta Cliente 360 dopo riallineamento.")
+
+    if st.button("🔄 Riallinea contabilità cliente", key=f"v3811_recalc_{cliente_id}", use_container_width=True):
+        ok, msg = v3809_ricalcola_contabilita_cliente(cliente_id)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            st.rerun()
+
+    if not pagamenti:
+        st.info("Nessun pagamento registrato.")
+        return
+
+    st.markdown("### Storico pagamenti")
+    for p in pagamenti:
+        pid = p.get("id")
+        imp = v3809_importo_pagamento(p)
+        data = v3809_data_pagamento(p)
+        metodo = v3809_metodo_pagamento(p)
+        note = v3809_note_pagamento(p)
+
+        st.markdown(
+            f"""
+            <div style="border:1.5px solid #d4af37;border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;">
+              <div style="font-size:18px;font-weight:950;">{data} · {v38_euro(imp)} · {metodo}</div>
+              <div style="font-size:13px;color:#555;">{note}</div>
+              <div style="font-size:12px;color:#777;">ID pagamento: {pid}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if v3809_is_admin():
+            confirm_key = f"v3811_confirm_delete_{pid}_{cliente_id}"
+            st.checkbox(f"Confermo eliminazione pagamento ID {pid}", key=confirm_key)
+            if st.button(
+                "🗑️ Elimina/Rettifica pagamento",
+                key=f"v3811_delete_payment_{pid}_{cliente_id}",
+                use_container_width=True,
+                disabled=not st.session_state.get(confirm_key, False),
+            ):
+                ok, msg = v3809_elimina_pagamento(p, cliente_id)
+                st.success(msg) if ok else st.error(msg)
+                if ok:
+                    st.rerun()
+        else:
+            st.caption("Eliminazione pagamenti disponibile solo per admin.")
+
+
+def render_v37_cliente360():
+    st.header("👤 Cliente 360")
+    st.caption("V38.11: scheda cliente con residuo contabile sincronizzato e storico preservato.")
+
+    show_disabled = st.checkbox("Mostra anche clienti disattivati", value=False, key="v3811_c360_show_disabled")
+    clienti = v3808_load_clienti(include_disabled=show_disabled)
+
+    if clienti.empty:
+        st.info("Nessun cliente presente.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(lambda r: v3808_cliente_label(r, show_badge=True), axis=1)
+
+    pre_id = st.session_state.get("cliente_360_id") or st.session_state.get("cliente_preselezionato_id")
+    default_index = 0
+    if pre_id is not None:
+        try:
+            ids = pd.to_numeric(clienti["id"], errors="coerce").fillna(-1).astype(int).tolist()
+            if int(float(pre_id)) in ids:
+                default_index = ids.index(int(float(pre_id)))
+        except Exception:
+            default_index = 0
+
+    selected = st.selectbox("Seleziona cliente", clienti["__label"].tolist(), index=default_index, key="v3811_cliente360_select")
+    cliente_id = int(str(selected).split(" - ")[0])
+    cliente = v38_get_cliente(cliente_id)
+
+    attivo = v3808_is_cliente_attivo(cliente)
+    stato_badge = "ATTIVO" if attivo else "DISATTIVATO"
+    badge_color = "#22c55e" if attivo else "#ef4444"
+
+    totale, usate, residue_lezioni = v38_contatori_cliente(cliente)
+    badge = v38_badge_cliente(cliente_id)
+    importo_contratto, totale_pagato, residuo_contabile = v3811_contabilita_cliente(cliente_id)
+
+    st.markdown(
+        f"""
+        <div style="border:2px solid #d4af37;border-radius:18px;background:#050505;padding:18px 20px;margin:12px 0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;">
+            <div>
+              <div style="font-size:26px;font-weight:950;color:#f8e7a1;">{v38_cliente_nome(cliente)}</div>
+              <div style="font-size:13px;color:#fff;">ID {cliente_id} · Badge: {badge or 'non associato'} · Pacchetto: {cliente.get('pacchetto') or '-'}</div>
+            </div>
+            <div style="background:{badge_color};color:white;border-radius:999px;padding:8px 14px;font-weight:950;">{stato_badge}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cst1, cst2 = st.columns(2)
+    with cst1:
+        if attivo:
+            if st.button("🔴 Disattiva cliente", use_container_width=True, key=f"v3811_disattiva_{cliente_id}"):
+                ok, msg = v3808_set_cliente_attivo(cliente_id, False)
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+        else:
+            if st.button("🟢 Riattiva cliente", use_container_width=True, key=f"v3811_riattiva_{cliente_id}"):
+                ok, msg = v3808_set_cliente_attivo(cliente_id, True)
+                st.success(msg) if ok else st.error(msg)
+                st.rerun()
+    with cst2:
+        st.info("Lo storico resta sempre disponibile. Nessun dato viene eliminato.")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Lezioni residue", residue_lezioni)
+    m2.metric("Lezioni usate", usate)
+    m3.metric("Lezioni totali", totale)
+    m4.metric("Residuo €", v38_euro(residuo_contabile))
+
+    tabs = st.tabs(["📒 Lezioni/presenze", "💳 Pagamenti", "📄 Documenti", "🚦 Accessi", "📝 Note"])
+
+    with tabs[0]:
+        if not attivo:
+            st.warning("Cliente disattivato: evita nuove presenze salvo riattivazione.")
+        try:
+            v3803_cliente_360_lezioni(cliente_id, cliente)
+        except Exception:
+            st.info("Gestione lezioni non disponibile in questa vista.")
+
+    with tabs[1]:
+        v3809_render_pagamenti_cliente(cliente_id)
+
+    with tabs[2]:
+        try:
+            v3803_cliente_360_documenti(cliente_id)
+        except Exception:
+            st.info("Documenti non disponibili.")
+
+    with tabs[3]:
+        try:
+            accessi = v38_load_accessi()
+            if not accessi.empty and "cliente_id" in accessi.columns:
+                sub = accessi[pd.to_numeric(accessi["cliente_id"], errors="coerce") == int(float(cliente_id))]
+                if sub.empty:
+                    st.info("Nessun accesso.")
+                else:
+                    for _, r in sub.head(50).iterrows():
+                        st.markdown(f"**{r.get('data_accesso','')} {r.get('ora_accesso','')}** · Badge {r.get('badge_uid') or '-'} · {r.get('stato_accesso') or '-'}")
+            else:
+                st.info("Nessun accesso.")
+        except Exception:
+            st.info("Accessi non disponibili.")
+
+    with tabs[4]:
+        st.write(cliente.get("note") or "Nessuna nota.")
+
+
+# Override definitivo
+render_cliente360 = render_v37_cliente360
+render_cliente_360 = render_v37_cliente360
+render_staff_cliente360 = render_v37_cliente360
+def v3803_cliente_360_pagamenti(cliente_id):
     v3809_render_pagamenti_cliente(cliente_id)
 
 
