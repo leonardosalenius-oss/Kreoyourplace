@@ -1,4 +1,4 @@
-# KREO V38.08 SAFE CLIENTI ATTIVI - base reale stabilizzata da V37.05/V37.11
+# KREO V38.09 PAGAMENTI RETTIFICABILI - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.08 SAFE CLIENTI ATTIVI OVERRIDE
+# KREO V38.09 PAGAMENTI RETTIFICABILI OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.08 SAFE CLIENTI ATTIVI"
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23119,6 +23119,216 @@ def v38_decidi_accesso(accesso, azione):
     return _old_v38_decidi_accesso(accesso, azione)
 
 decidi_accesso = v38_decidi_accesso
+
+
+
+
+# ============================================================
+# KREO V38.09 PAGAMENTI RETTIFICABILI
+# Base: V38.08 SAFE.
+# - eliminazione/rettifica pagamenti solo admin
+# - ricalcolo automatico importo_pagato e residuo cliente
+# ============================================================
+
+APP_VERSION = "KREO V38.09 PAGAMENTI RETTIFICABILI"
+
+
+def v3809_is_admin():
+    try:
+        u = current_user() or {}
+        ruolo = str(u.get("ruolo") or u.get("role") or "").strip().lower()
+        return ruolo == "admin" or "admin" in ruolo
+    except Exception:
+        return False
+
+
+def v3809_importo_pagamento(row):
+    for k in ["importo", "amount", "totale", "valore"]:
+        try:
+            val = row.get(k)
+            if val not in [None, "", "nan", "None"]:
+                return float(str(val).replace("€", "").replace(" ", "").replace(".", "").replace(",", "."))
+        except Exception:
+            pass
+    return 0.0
+
+
+def v3809_data_pagamento(row):
+    return row.get("data_pagamento") or row.get("data") or row.get("created_at") or ""
+
+
+def v3809_metodo_pagamento(row):
+    return row.get("metodo_pagamento") or row.get("metodo") or row.get("payment_method") or ""
+
+
+def v3809_note_pagamento(row):
+    return row.get("causale") or row.get("note") or row.get("descrizione") or ""
+
+
+def v3809_pagamenti_cliente(cliente_id):
+    for table in ["pagamenti", "pagamenti_clienti", "incassi"]:
+        try:
+            rows = (
+                get_supabase()
+                .table(table)
+                .select("*")
+                .eq("cliente_id", int(float(cliente_id)))
+                .order("id", desc=True)
+                .execute()
+                .data
+                or []
+            )
+            if rows:
+                for r in rows:
+                    r["_table"] = table
+                return rows
+        except Exception:
+            pass
+    return []
+
+
+def v3809_importo_contratto(cliente):
+    for k in ["importo", "importo_totale", "totale_contratto", "prezzo", "valore_contratto"]:
+        try:
+            val = cliente.get(k)
+            if val not in [None, "", "nan", "None"]:
+                return float(str(val).replace("€", "").replace(" ", "").replace(".", "").replace(",", "."))
+        except Exception:
+            pass
+    return 0.0
+
+
+def v3809_ricalcola_contabilita_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    importo_contratto = v3809_importo_contratto(cliente)
+    pagamenti = v3809_pagamenti_cliente(cliente_id)
+    totale_pagato = sum(v3809_importo_pagamento(p) for p in pagamenti)
+    residuo = max(importo_contratto - totale_pagato, 0.0)
+
+    payloads = [
+        {"importo_pagato": float(totale_pagato), "residuo": float(residuo), "updated_at": datetime.now().isoformat()},
+        {"importo_pagato": float(totale_pagato), "updated_at": datetime.now().isoformat()},
+        {"residuo": float(residuo)},
+    ]
+
+    last = None
+    for payload in payloads:
+        try:
+            get_supabase().table("clienti").update(payload).eq("id", int(float(cliente_id))).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True, f"Contabilità aggiornata: pagato {v38_euro(totale_pagato)}, residuo {v38_euro(residuo)}."
+        except Exception as e:
+            last = e
+
+    return False, f"Pagamento eliminato, ma ricalcolo cliente non completato: {last}"
+
+
+def v3809_log_eliminazione_pagamento(cliente_id, pagamento):
+    payload = {
+        "cliente_id": int(float(cliente_id)),
+        "tipo": "PAGAMENTO_ELIMINATO",
+        "quantita": 0,
+        "motivo": "Pagamento eliminato/rettificato da admin",
+        "riferimento": f"pagamento_id={pagamento.get('id')} importo={v3809_importo_pagamento(pagamento)}",
+        "created_at": datetime.now().isoformat(),
+    }
+    for table in ["movimenti_lezioni", "cronologia", "log_operazioni"]:
+        try:
+            get_supabase().table(table).insert(payload).execute()
+            return
+        except Exception:
+            pass
+
+
+def v3809_elimina_pagamento(row, cliente_id):
+    if not v3809_is_admin():
+        return False, "Solo admin può eliminare/rettificare un pagamento."
+
+    table = row.get("_table") or "pagamenti"
+    pid = row.get("id")
+    if pid in [None, "", "nan", "None"]:
+        return False, "Pagamento senza ID: impossibile eliminarlo in sicurezza."
+
+    try:
+        get_supabase().table(table).delete().eq("id", int(float(pid))).execute()
+    except Exception as e:
+        return False, f"Errore eliminazione pagamento: {e}"
+
+    try:
+        v3809_log_eliminazione_pagamento(cliente_id, row)
+    except Exception:
+        pass
+
+    return v3809_ricalcola_contabilita_cliente(cliente_id)
+
+
+def v3809_render_pagamenti_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    importo_contratto = v3809_importo_contratto(cliente)
+    pagamenti = v3809_pagamenti_cliente(cliente_id)
+    totale_pagato = sum(v3809_importo_pagamento(p) for p in pagamenti)
+    residuo = max(importo_contratto - totale_pagato, 0.0)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Importo contratto", v38_euro(importo_contratto))
+    m2.metric("Pagato registrato", v38_euro(totale_pagato))
+    m3.metric("Residuo ricalcolato", v38_euro(residuo))
+
+    if st.button("🔄 Riallinea contabilità cliente", key=f"v3809_recalc_{cliente_id}", use_container_width=True):
+        ok, msg = v3809_ricalcola_contabilita_cliente(cliente_id)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            st.rerun()
+
+    if not pagamenti:
+        st.info("Nessun pagamento registrato.")
+        return
+
+    st.markdown("### Storico pagamenti")
+    for p in pagamenti:
+        pid = p.get("id")
+        imp = v3809_importo_pagamento(p)
+        data = v3809_data_pagamento(p)
+        metodo = v3809_metodo_pagamento(p)
+        note = v3809_note_pagamento(p)
+
+        st.markdown(
+            f"""
+            <div style="border:1.5px solid #d4af37;border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;">
+              <div style="font-size:18px;font-weight:950;">{data} · {v38_euro(imp)} · {metodo}</div>
+              <div style="font-size:13px;color:#555;">{note}</div>
+              <div style="font-size:12px;color:#777;">ID pagamento: {pid}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if v3809_is_admin():
+            confirm_key = f"v3809_confirm_delete_{pid}_{cliente_id}"
+            st.checkbox(f"Confermo eliminazione pagamento ID {pid}", key=confirm_key)
+            if st.button(
+                "🗑️ Elimina/Rettifica pagamento",
+                key=f"v3809_delete_payment_{pid}_{cliente_id}",
+                use_container_width=True,
+                disabled=not st.session_state.get(confirm_key, False),
+            ):
+                ok, msg = v3809_elimina_pagamento(p, cliente_id)
+                st.success(msg) if ok else st.error(msg)
+                if ok:
+                    st.rerun()
+        else:
+            st.caption("Eliminazione pagamenti disponibile solo per admin.")
+
+
+# Override tab pagamenti Cliente 360
+def v3803_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+def v3809_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
 
 
 if __name__ == "__main__":
