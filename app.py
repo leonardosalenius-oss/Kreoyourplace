@@ -1,4 +1,4 @@
-# KREO V38.11 RESIDUO SYNC FIX - base reale stabilizzata da V37.05/V37.11
+# KREO V38.12 CONTABILITA SAFE - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.11 RESIDUO SYNC FIX OVERRIDE
+# KREO V38.12 CONTABILITA SAFE OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.11 RESIDUO SYNC FIX
+# KREO V38.12 CONTABILITA SAFE
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def v3809_is_admin():
@@ -23334,7 +23334,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.11 RESIDUO SYNC FIX
+# KREO V38.12 CONTABILITA SAFE
 # Base: V38.09.
 # Fix bug importi:
 # prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
@@ -23347,7 +23347,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - "1,800.00" -> 1800.0
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def v3810_parse_money(value):
@@ -23556,7 +23556,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.11 RESIDUO SYNC FIX
+# KREO V38.12 CONTABILITA SAFE
 # Base: V38.10.
 # Problema:
 # il residuo ricalcolato era corretto nel tab pagamenti,
@@ -23567,7 +23567,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - Cliente 360 mostra residuo contabile ricalcolato
 # ============================================================
 
-APP_VERSION = "KREO V38.11 RESIDUO SYNC FIX"
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
 
 
 def v3811_contabilita_cliente(cliente_id):
@@ -23797,6 +23797,221 @@ render_cliente360 = render_v37_cliente360
 render_cliente_360 = render_v37_cliente360
 render_staff_cliente360 = render_v37_cliente360
 def v3803_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+
+
+
+# ============================================================
+# KREO V38.12 CONTABILITA SAFE + DELETE INCASSI FIX
+# Base: V38.11.
+# ============================================================
+
+APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+
+
+def v3812_update_cliente_safe(cliente_id, values):
+    updated, skipped = [], []
+    try:
+        payload = {k: v for k, v in values.items() if v is not None}
+        get_supabase().table("clienti").update(payload).eq("id", int(float(cliente_id))).execute()
+        try: st.cache_data.clear()
+        except Exception: pass
+        return True, list(payload.keys()), []
+    except Exception:
+        pass
+
+    for k, v in values.items():
+        if v is None:
+            continue
+        try:
+            get_supabase().table("clienti").update({k: v}).eq("id", int(float(cliente_id))).execute()
+            updated.append(k)
+        except Exception:
+            skipped.append(k)
+
+    try: st.cache_data.clear()
+    except Exception: pass
+
+    return (len(updated) > 0), updated, skipped
+
+
+def v3812_row_is_deleted(row):
+    txt = " ".join(str(row.get(k) or "") for k in ["stato", "status", "tipo", "causale", "note", "descrizione"]).upper()
+    return any(x in txt for x in ["ELIMINATO", "RETTIFICATO", "ANNULLATO", "CANCELLATO"])
+
+
+def v3812_pagamenti_cliente(cliente_id, include_deleted=False):
+    rows, seen = [], set()
+    for table in ["pagamenti", "pagamenti_clienti", "incassi"]:
+        for col in ["cliente_id", "id_cliente"]:
+            try:
+                data = get_supabase().table(table).select("*").eq(col, int(float(cliente_id))).order("id", desc=True).execute().data or []
+                for r in data:
+                    r["_table"] = table
+                    key = f"{table}:{r.get('id')}:{r.get('importo')}:{r.get('data_pagamento') or r.get('data')}"
+                    if key not in seen:
+                        seen.add(key)
+                        if include_deleted or not v3812_row_is_deleted(r):
+                            rows.append(r)
+                break
+            except Exception:
+                pass
+    return rows
+
+
+def v3809_pagamenti_cliente(cliente_id):
+    return v3812_pagamenti_cliente(cliente_id, include_deleted=False)
+
+
+def v3812_contabilita_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    importo_contratto = v3810_get_raw_cliente_importo(cliente)
+    pagamenti = v3812_pagamenti_cliente(cliente_id, include_deleted=False)
+    totale_pagato = sum(v3809_importo_pagamento(p) for p in pagamenti)
+    residuo = max(importo_contratto - totale_pagato, 0.0)
+    return importo_contratto, totale_pagato, residuo
+
+
+def v3809_ricalcola_contabilita_cliente(cliente_id):
+    importo_contratto, totale_pagato, residuo = v3812_contabilita_cliente(cliente_id)
+    values = {
+        "importo_pagato": float(totale_pagato),
+        "pagato": float(totale_pagato),
+        "totale_pagato": float(totale_pagato),
+        "residuo": float(residuo),
+        "residuo_euro": float(residuo),
+        "saldo": float(residuo),
+        "saldo_residuo": float(residuo),
+        "importo_residuo": float(residuo),
+        "updated_at": datetime.now().isoformat(),
+    }
+    ok, updated, skipped = v3812_update_cliente_safe(cliente_id, values)
+    if ok:
+        extra = f" Colonne ignorate perché assenti: {', '.join(skipped[:4])}." if skipped else ""
+        return True, f"Contabilità aggiornata: pagato {v38_euro(totale_pagato)}, residuo {v38_euro(residuo)}.{extra}"
+    return False, f"Ricalcolo visuale completato, ma nessuna colonna contabile aggiornabile trovata. Pagato {v38_euro(totale_pagato)}, residuo {v38_euro(residuo)}."
+
+
+def v3812_soft_delete_payment(row):
+    table = row.get("_table") or "pagamenti"
+    pid = row.get("id")
+    if pid in [None, "", "nan", "None"]:
+        return False
+    payloads = [
+        {"stato": "ELIMINATO", "note": f"{v3809_note_pagamento(row)} | ELIMINATO/RETTIFICATO DA ADMIN {datetime.now().isoformat()}"},
+        {"status": "ELIMINATO"},
+        {"tipo": "PAGAMENTO_ELIMINATO"},
+        {"causale": f"ELIMINATO - {v3809_note_pagamento(row)}"},
+    ]
+    for p in payloads:
+        try:
+            get_supabase().table(table).update(p).eq("id", int(float(pid))).execute()
+            return True
+        except Exception:
+            pass
+    return False
+
+
+def v3812_delete_payment_everywhere(row, cliente_id):
+    pid = row.get("id")
+    deleted_any = False
+    candidates = []
+    if row.get("_table"):
+        candidates.append(row.get("_table"))
+    for t in ["pagamenti", "pagamenti_clienti", "incassi"]:
+        if t not in candidates:
+            candidates.append(t)
+
+    for table in candidates:
+        if pid not in [None, "", "nan", "None"]:
+            try:
+                get_supabase().table(table).delete().eq("id", int(float(pid))).execute()
+                deleted_any = True
+            except Exception:
+                pass
+
+    try:
+        if v3812_soft_delete_payment(row):
+            deleted_any = True
+    except Exception:
+        pass
+    return deleted_any
+
+
+def v3809_elimina_pagamento(row, cliente_id):
+    if not v3809_is_admin():
+        return False, "Solo admin può eliminare/rettificare un pagamento."
+
+    ok_del = v3812_delete_payment_everywhere(row, cliente_id)
+    if not ok_del:
+        return False, "Non sono riuscito a eliminare o rettificare il pagamento."
+
+    try: v3809_log_eliminazione_pagamento(cliente_id, row)
+    except Exception: pass
+
+    ok, msg = v3809_ricalcola_contabilita_cliente(cliente_id)
+    try: st.cache_data.clear()
+    except Exception: pass
+    return True, "Pagamento/incasso eliminato o rettificato. " + msg
+
+
+def v3809_render_pagamenti_cliente(cliente_id):
+    importo_contratto, totale_pagato, residuo = v3812_contabilita_cliente(cliente_id)
+    pagamenti = v3812_pagamenti_cliente(cliente_id, include_deleted=False)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Importo contratto", v38_euro(importo_contratto))
+    m2.metric("Pagato registrato", v38_euro(totale_pagato))
+    m3.metric("Residuo ricalcolato", v38_euro(residuo))
+
+    st.caption("V38.12: contabilità sicura anche se il DB non ha la colonna residuo.")
+
+    if st.button("🔄 Riallinea contabilità cliente", key=f"v3812_recalc_{cliente_id}", use_container_width=True):
+        ok, msg = v3809_ricalcola_contabilita_cliente(cliente_id)
+        st.success(msg) if ok else st.warning(msg)
+        st.rerun()
+
+    if not pagamenti:
+        st.info("Nessun pagamento registrato.")
+        return
+
+    st.markdown("### Storico pagamenti")
+    for p in pagamenti:
+        pid = p.get("id")
+        imp = v3809_importo_pagamento(p)
+        data = v3809_data_pagamento(p)
+        metodo = v3809_metodo_pagamento(p)
+        note = v3809_note_pagamento(p)
+        table = p.get("_table") or "pagamenti"
+
+        st.markdown(
+            f"""
+            <div style="border:1.5px solid #d4af37;border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;">
+              <div style="font-size:18px;font-weight:950;">{data} · {v38_euro(imp)} · {metodo}</div>
+              <div style="font-size:13px;color:#555;">{note}</div>
+              <div style="font-size:12px;color:#777;">Origine: {table} · ID pagamento: {pid}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if v3809_is_admin():
+            confirm_key = f"v3812_confirm_delete_{table}_{pid}_{cliente_id}"
+            st.checkbox(f"Confermo eliminazione pagamento/incasso ID {pid}", key=confirm_key)
+            if st.button("🗑️ Elimina/Rettifica pagamento", key=f"v3812_delete_payment_{table}_{pid}_{cliente_id}", use_container_width=True, disabled=not st.session_state.get(confirm_key, False)):
+                ok, msg = v3809_elimina_pagamento(p, cliente_id)
+                st.success(msg) if ok else st.error(msg)
+                if ok: st.rerun()
+        else:
+            st.caption("Eliminazione pagamenti disponibile solo per admin.")
+
+
+# Override definitivi
+def v3803_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+def v3809_cliente_360_pagamenti(cliente_id):
     v3809_render_pagamenti_cliente(cliente_id)
 
 
