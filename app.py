@@ -1,4 +1,4 @@
-# KREO V38.12 CONTABILITA SAFE - base reale stabilizzata da V37.05/V37.11
+# KREO V38.13 GESTIONE SCADENZE - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.12 CONTABILITA SAFE OVERRIDE
+# KREO V38.13 GESTIONE SCADENZE OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.12 CONTABILITA SAFE
+# KREO V38.13 GESTIONE SCADENZE
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3809_is_admin():
@@ -23334,7 +23334,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.12 CONTABILITA SAFE
+# KREO V38.13 GESTIONE SCADENZE
 # Base: V38.09.
 # Fix bug importi:
 # prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
@@ -23347,7 +23347,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - "1,800.00" -> 1800.0
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3810_parse_money(value):
@@ -23556,7 +23556,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.12 CONTABILITA SAFE
+# KREO V38.13 GESTIONE SCADENZE
 # Base: V38.10.
 # Problema:
 # il residuo ricalcolato era corretto nel tab pagamenti,
@@ -23567,7 +23567,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - Cliente 360 mostra residuo contabile ricalcolato
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3811_contabilita_cliente(cliente_id):
@@ -23803,11 +23803,11 @@ def v3803_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.12 CONTABILITA SAFE + DELETE INCASSI FIX
+# KREO V38.13 GESTIONE SCADENZE + DELETE INCASSI FIX
 # Base: V38.11.
 # ============================================================
 
-APP_VERSION = "KREO V38.12 CONTABILITA SAFE"
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
 
 
 def v3812_update_cliente_safe(cliente_id, values):
@@ -24008,6 +24008,169 @@ def v3809_render_pagamenti_cliente(cliente_id):
 
 
 # Override definitivi
+def v3803_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+def v3809_cliente_360_pagamenti(cliente_id):
+    v3809_render_pagamenti_cliente(cliente_id)
+
+
+
+
+# ============================================================
+# KREO V38.13 GESTIONE SCADENZE RATE / ABBONAMENTO
+# Base: V38.12.
+# ============================================================
+
+APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+
+
+def v3813_parse_date_any(value):
+    if value in [None, "", "nan", "None"]:
+        return None
+    if isinstance(value, date):
+        return value
+    s = str(value).strip()
+    for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y"]:
+        try:
+            return datetime.strptime(s[:10], fmt).date()
+        except Exception:
+            pass
+    try:
+        out = pd.to_datetime(s, errors="coerce")
+        if pd.isna(out):
+            return None
+        return out.date()
+    except Exception:
+        return None
+
+
+def v3813_cliente_date_value(cliente, keys, default=None):
+    if not cliente:
+        return default
+    if isinstance(cliente, pd.Series):
+        cliente = cliente.to_dict()
+    for k in keys:
+        d = v3813_parse_date_any(cliente.get(k))
+        if d:
+            return d
+    return default
+
+
+def v3813_update_cliente_safe_local(cliente_id, values):
+    """
+    Fallback autonomo se v3812_update_cliente_safe non fosse disponibile.
+    """
+    if "v3812_update_cliente_safe" in globals():
+        return v3812_update_cliente_safe(cliente_id, values)
+
+    updated, skipped = [], []
+    for k, v in values.items():
+        if v is None:
+            continue
+        try:
+            get_supabase().table("clienti").update({k: v}).eq("id", int(float(cliente_id))).execute()
+            updated.append(k)
+        except Exception:
+            skipped.append(k)
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    return bool(updated), updated, skipped
+
+
+def v3813_update_cliente_dates(cliente_id, scadenza_rata=None, scadenza_abbonamento=None, motivo=""):
+    values = {"updated_at": datetime.now().isoformat()}
+
+    if scadenza_rata:
+        values.update({
+            "scadenza_rata": str(scadenza_rata),
+            "scadenza_prossima_rata": str(scadenza_rata),
+            "prossima_scadenza_pagamento": str(scadenza_rata),
+            "data_scadenza_rata": str(scadenza_rata),
+        })
+
+    if scadenza_abbonamento:
+        values.update({
+            "scadenza_abbonamento": str(scadenza_abbonamento),
+            "data_scadenza": str(scadenza_abbonamento),
+            "data_fine_pacchetto": str(scadenza_abbonamento),
+            "scadenza": str(scadenza_abbonamento),
+        })
+
+    ok, updated, skipped = v3813_update_cliente_safe_local(cliente_id, values)
+
+    # log best effort
+    payload = {
+        "cliente_id": int(float(cliente_id)),
+        "tipo": "MODIFICA_SCADENZE",
+        "quantita": 0,
+        "motivo": motivo,
+        "riferimento": f"scadenza_rata={scadenza_rata} scadenza_abbonamento={scadenza_abbonamento}",
+        "created_at": datetime.now().isoformat(),
+    }
+    for table in ["cronologia", "log_operazioni", "movimenti_lezioni"]:
+        try:
+            get_supabase().table(table).insert(payload).execute()
+            break
+        except Exception:
+            pass
+
+    if ok:
+        extra = f" Campi ignorati perché assenti: {', '.join(skipped[:4])}." if skipped else ""
+        return True, "Scadenze aggiornate correttamente." + extra
+    return False, "Non sono riuscito ad aggiornare le colonne scadenza nella tabella clienti."
+
+
+def v3813_render_scadenze_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    today = date.today()
+
+    current_rata = v3813_cliente_date_value(
+        cliente,
+        ["scadenza_rata", "scadenza_prossima_rata", "prossima_scadenza_pagamento", "data_scadenza_rata"],
+        today,
+    )
+    current_abb = v3813_cliente_date_value(
+        cliente,
+        ["scadenza_abbonamento", "data_scadenza", "data_fine_pacchetto", "scadenza"],
+        today,
+    )
+
+    st.markdown("### 📅 Gestione scadenze")
+    st.caption("Modifica manuale delle scadenze. La nota è obbligatoria.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        nuova_rata = st.date_input("Scadenza prossima rata", value=current_rata or today, key=f"v3813_scad_rata_{cliente_id}")
+    with c2:
+        nuova_abb = st.date_input("Scadenza abbonamento", value=current_abb or today, key=f"v3813_scad_abb_{cliente_id}")
+
+    motivo = st.text_area(
+        "Motivo modifica scadenze *",
+        placeholder="Esempio: accordo con cliente, proroga, recupero rata...",
+        key=f"v3813_motivo_scadenze_{cliente_id}",
+    )
+
+    if st.button("💾 Salva nuove scadenze", key=f"v3813_save_scadenze_{cliente_id}", use_container_width=True):
+        if not str(motivo or "").strip():
+            st.error("Inserisci il motivo della modifica.")
+            return
+        ok, msg = v3813_update_cliente_dates(cliente_id, nuova_rata, nuova_abb, motivo)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            st.rerun()
+
+
+_old_v3809_render_pagamenti_cliente = v3809_render_pagamenti_cliente
+
+def v3809_render_pagamenti_cliente(cliente_id):
+    v3813_render_scadenze_cliente(cliente_id)
+    st.divider()
+    _old_v3809_render_pagamenti_cliente(cliente_id)
+
+
 def v3803_cliente_360_pagamenti(cliente_id):
     v3809_render_pagamenti_cliente(cliente_id)
 
