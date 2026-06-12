@@ -1,4 +1,4 @@
-# KREO V38.13 GESTIONE SCADENZE - base reale stabilizzata da V37.05/V37.11
+# KREO V38.14 CLEANUP DIREZIONE - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.13 GESTIONE SCADENZE OVERRIDE
+# KREO V38.14 CLEANUP DIREZIONE OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.13 GESTIONE SCADENZE
+# KREO V38.14 CLEANUP DIREZIONE
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3809_is_admin():
@@ -23334,7 +23334,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.13 GESTIONE SCADENZE
+# KREO V38.14 CLEANUP DIREZIONE
 # Base: V38.09.
 # Fix bug importi:
 # prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
@@ -23347,7 +23347,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - "1,800.00" -> 1800.0
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3810_parse_money(value):
@@ -23556,7 +23556,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.13 GESTIONE SCADENZE
+# KREO V38.14 CLEANUP DIREZIONE
 # Base: V38.10.
 # Problema:
 # il residuo ricalcolato era corretto nel tab pagamenti,
@@ -23567,7 +23567,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - Cliente 360 mostra residuo contabile ricalcolato
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3811_contabilita_cliente(cliente_id):
@@ -23803,11 +23803,11 @@ def v3803_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.13 GESTIONE SCADENZE + DELETE INCASSI FIX
+# KREO V38.14 CLEANUP DIREZIONE + DELETE INCASSI FIX
 # Base: V38.11.
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3812_update_cliente_safe(cliente_id, values):
@@ -24018,11 +24018,11 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.13 GESTIONE SCADENZE RATE / ABBONAMENTO
+# KREO V38.14 CLEANUP DIREZIONE RATE / ABBONAMENTO
 # Base: V38.12.
 # ============================================================
 
-APP_VERSION = "KREO V38.13 GESTIONE SCADENZE"
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
 
 
 def v3813_parse_date_any(value):
@@ -24176,6 +24176,239 @@ def v3803_cliente_360_pagamenti(cliente_id):
 
 def v3809_cliente_360_pagamenti(cliente_id):
     v3809_render_pagamenti_cliente(cliente_id)
+
+
+
+
+# ============================================================
+# KREO V38.14 CLEANUP DIREZIONE / ANALYTICS
+# Base: V38.13.
+# Obiettivo:
+# - eliminare/neutralizzare funzioni Analytics e Direzione non funzionanti
+# - lasciare solo Anagrafica azienda / Logo
+# - mantenere Reception, Clienti, Agenda, Incassi, Documenti, Cliente 360
+# ============================================================
+
+APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+
+
+def v3814_upload_logo_azienda(file):
+    if not file:
+        return False, "Nessun file selezionato."
+
+    filename = f"logo_azienda_{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.name}"
+    path = f"azienda/{filename}"
+
+    # Provo bucket più probabili, senza rompere se uno manca
+    for bucket in ["assets pubblici", "assets_pubblici", "documenti", "documenti_pubblici"]:
+        try:
+            data = file.getvalue()
+            get_supabase().storage.from_(bucket).upload(
+                path,
+                data,
+                {"content-type": file.type or "image/png", "upsert": "true"}
+            )
+            try:
+                public_url = get_supabase().storage.from_(bucket).get_public_url(path)
+            except Exception:
+                public_url = path
+            return True, public_url
+        except Exception:
+            pass
+
+    return False, "Non sono riuscito a caricare il logo nei bucket disponibili."
+
+
+def v3814_save_anagrafica_azienda(payload):
+    """
+    Salvataggio best effort:
+    - prova tabella anagrafica_azienda
+    - prova impostazioni_kreo
+    - altrimenti salva in session_state per non bloccare UI
+    """
+    payload = {k: v for k, v in payload.items() if v not in [None, ""]}
+    payload["updated_at"] = datetime.now().isoformat()
+
+    for table in ["anagrafica_azienda", "impostazioni_kreo", "azienda_config"]:
+        try:
+            existing = get_supabase().table(table).select("*").limit(1).execute().data or []
+            if existing and existing[0].get("id") is not None:
+                get_supabase().table(table).update(payload).eq("id", existing[0].get("id")).execute()
+            else:
+                get_supabase().table(table).insert(payload).execute()
+            try:
+                st.cache_data.clear()
+            except Exception:
+                pass
+            return True, f"Anagrafica azienda salvata in {table}."
+        except Exception:
+            pass
+
+    st.session_state["v3814_anagrafica_azienda"] = payload
+    return True, "Anagrafica salvata temporaneamente in sessione. Per renderla permanente serve una tabella azienda/impostazioni."
+
+
+def v3814_load_anagrafica_azienda():
+    for table in ["anagrafica_azienda", "impostazioni_kreo", "azienda_config"]:
+        try:
+            rows = get_supabase().table(table).select("*").limit(1).execute().data or []
+            if rows:
+                return rows[0]
+        except Exception:
+            pass
+    return st.session_state.get("v3814_anagrafica_azienda", {})
+
+
+def render_anagrafica_azienda():
+    st.header("🏢 Anagrafica azienda / Logo")
+    st.caption("V38.14: unica sezione Direzione mantenuta. Serve per intestazioni, ricevute e documenti.")
+
+    data = v3814_load_anagrafica_azienda() or {}
+
+    st.markdown("### Dati aziendali")
+    c1, c2 = st.columns(2)
+    with c1:
+        ragione_sociale = st.text_input("Ragione sociale", value=str(data.get("ragione_sociale") or data.get("azienda") or "KREO Your Place"), key="v3814_ragione_sociale")
+        partita_iva = st.text_input("Partita IVA", value=str(data.get("partita_iva") or data.get("piva") or ""), key="v3814_piva")
+        codice_fiscale = st.text_input("Codice fiscale", value=str(data.get("codice_fiscale") or ""), key="v3814_cf")
+        telefono = st.text_input("Telefono", value=str(data.get("telefono") or ""), key="v3814_tel_azienda")
+    with c2:
+        email = st.text_input("Email", value=str(data.get("email") or ""), key="v3814_email_azienda")
+        indirizzo = st.text_input("Indirizzo", value=str(data.get("indirizzo") or data.get("sede") or ""), key="v3814_indirizzo")
+        citta = st.text_input("Città", value=str(data.get("citta") or ""), key="v3814_citta")
+        pec = st.text_input("PEC / SDI", value=str(data.get("pec_sdi") or data.get("pec") or ""), key="v3814_pec")
+
+    st.markdown("### Logo")
+    current_logo = data.get("logo_url") or data.get("logo") or ""
+    if current_logo:
+        st.caption("Logo attualmente salvato:")
+        try:
+            st.image(current_logo, width=180)
+        except Exception:
+            st.write(current_logo)
+
+    logo_file = st.file_uploader("Carica nuovo logo", type=["png", "jpg", "jpeg", "webp"], key="v3814_logo_upload")
+    logo_url = current_logo
+
+    if logo_file and st.button("⬆️ Carica logo", key="v3814_upload_logo_btn", use_container_width=True):
+        ok_logo, msg_logo = v3814_upload_logo_azienda(logo_file)
+        if ok_logo:
+            logo_url = msg_logo
+            st.success("Logo caricato.")
+        else:
+            st.error(msg_logo)
+
+    note = st.text_area("Note intestazione / dati extra", value=str(data.get("note") or ""), key="v3814_note_azienda")
+
+    if st.button("💾 Salva anagrafica azienda", key="v3814_save_azienda", use_container_width=True):
+        payload = {
+            "ragione_sociale": ragione_sociale,
+            "azienda": ragione_sociale,
+            "partita_iva": partita_iva,
+            "piva": partita_iva,
+            "codice_fiscale": codice_fiscale,
+            "telefono": telefono,
+            "email": email,
+            "indirizzo": indirizzo,
+            "sede": indirizzo,
+            "citta": citta,
+            "pec_sdi": pec,
+            "pec": pec,
+            "logo_url": logo_url,
+            "logo": logo_url,
+            "note": note,
+        }
+        ok, msg = v3814_save_anagrafica_azienda(payload)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            st.rerun()
+
+
+# Neutralizzo funzioni direzionali non affidabili
+def render_dashboard(*args, **kwargs):
+    render_anagrafica_azienda()
+
+def render_analytics_direzionali(*args, **kwargs):
+    render_anagrafica_azienda()
+
+def render_export_excel(*args, **kwargs):
+    st.header("⬇️ Export Excel")
+    st.info("Export/Analytics disattivati in V38.14 per evitare funzioni non affidabili. Rimane attiva Anagrafica azienda / Logo.")
+
+
+def v3814_route_menu(menu):
+    """
+    Router pulito:
+    - Sezione Direzione/Analytics rimandata solo ad Anagrafica azienda
+    """
+    if st.session_state.get("reception_view") or st.session_state.get("reception_internal_view"):
+        kreo_render_reception_internal_view_if_any()
+        return
+
+    if menu == "🏠 Reception Center":
+        render_reception_center()
+    elif menu == "➕ Nuovo cliente":
+        render_v37_nuovo_cliente()
+    elif menu == "✏️ Modifica cliente":
+        render_staff_modifica_cliente()
+    elif menu == "📋 Database clienti":
+        render_v37_cliente360()
+    elif menu == "📄 Documenti / Certificati":
+        render_staff_documenti()
+    elif menu == "👤 Area Cliente":
+        render_v37_cliente360()
+    elif menu in ["✨ Agenda Luxury", "📅 Calendario lezioni", "🗓 Calendario unificato", "🗓 Premium Calendar", "🗓 Planner Slot", "⚙️ Disponibilità calendario"]:
+        try:
+            render_v37_agenda_7gg()
+        except Exception:
+            render_agenda_light_launch()
+    elif menu == "💳 Gestione incassi":
+        render_v37_incasso_rate()
+    elif menu == "🧾 Stampa ricevuta":
+        render_v37_ricevute_storico()
+    elif menu in ["📊 Dashboard", "📈 Analytics direzionali", "⬇️ Export Excel", "🏢 Anagrafica azienda"]:
+        render_anagrafica_azienda()
+    elif menu == "👥 Gestione utenti":
+        render_gestione_utenti()
+    elif menu == "⚙️ Settaggi KREO":
+        try:
+            render_settaggi_kreo()
+        except Exception:
+            render_anagrafica_azienda()
+    else:
+        # fallback: niente analytics vecchie
+        if "direzione" in str(menu).lower() or "analytics" in str(menu).lower() or "dashboard" in str(menu).lower():
+            render_anagrafica_azienda()
+        else:
+            render_reception_center()
+
+
+def main():
+    st.set_page_config(page_title="KREO Gestionale Clienti", page_icon="✨", layout="wide")
+    style()
+    inject_kreo_luxury_sidebar_style()
+
+    if not login_gate():
+        return
+
+    col_logo, col_title = st.columns([1, 3])
+    with col_logo:
+        show_logo()
+    with col_title:
+        st.title("Gestionale Clienti")
+        st.caption(f"Database cloud Supabase | Accesso: {user_label()} | Ruolo: {current_user().get('ruolo', '') if current_user() else ''} | {APP_VERSION}")
+
+    st.sidebar.markdown(f"**Utente:** {user_label()}")
+    st.sidebar.markdown(f"**Ruolo:** {current_user().get('ruolo', '') if current_user() else ''}")
+    if st.sidebar.button("Logout", key="v3814_logout"):
+        st.session_state.logged_in = False
+        st.session_state.user = None
+        st.rerun()
+
+    menu = render_v32_navigation()
+    render_kreo_welcome_banner()
+
+    v3814_route_menu(menu)
 
 
 if __name__ == "__main__":
