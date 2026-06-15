@@ -1,4 +1,4 @@
-# KREO V38.15 CLIENTI OVERVIEW - base reale stabilizzata da V37.05/V37.11
+# KREO V38.16 ADMIN DELETE EDIT FULL - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW OVERRIDE
+# KREO V38.16 ADMIN DELETE EDIT FULL OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW
+# KREO V38.16 ADMIN DELETE EDIT FULL
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3809_is_admin():
@@ -23334,7 +23334,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW
+# KREO V38.16 ADMIN DELETE EDIT FULL
 # Base: V38.09.
 # Fix bug importi:
 # prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
@@ -23347,7 +23347,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - "1,800.00" -> 1800.0
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3810_parse_money(value):
@@ -23556,7 +23556,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW
+# KREO V38.16 ADMIN DELETE EDIT FULL
 # Base: V38.10.
 # Problema:
 # il residuo ricalcolato era corretto nel tab pagamenti,
@@ -23567,7 +23567,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - Cliente 360 mostra residuo contabile ricalcolato
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3811_contabilita_cliente(cliente_id):
@@ -23803,11 +23803,11 @@ def v3803_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW + DELETE INCASSI FIX
+# KREO V38.16 ADMIN DELETE EDIT FULL + DELETE INCASSI FIX
 # Base: V38.11.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3812_update_cliente_safe(cliente_id, values):
@@ -24018,11 +24018,11 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW RATE / ABBONAMENTO
+# KREO V38.16 ADMIN DELETE EDIT FULL RATE / ABBONAMENTO
 # Base: V38.12.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3813_parse_date_any(value):
@@ -24181,7 +24181,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW / ANALYTICS
+# KREO V38.16 ADMIN DELETE EDIT FULL / ANALYTICS
 # Base: V38.13.
 # Obiettivo:
 # - eliminare/neutralizzare funzioni Analytics e Direzione non funzionanti
@@ -24189,7 +24189,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - mantenere Reception, Clienti, Agenda, Incassi, Documenti, Cliente 360
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3814_upload_logo_azienda(file):
@@ -24414,11 +24414,11 @@ def main():
 
 
 # ============================================================
-# KREO V38.15 CLIENTI OVERVIEW + ALERT CERTIFICATI FIX
+# KREO V38.16 ADMIN DELETE EDIT FULL + ALERT CERTIFICATI FIX
 # Base: V38.14.
 # ============================================================
 
-APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
 
 
 def v3815_load_clienti_direct():
@@ -24824,6 +24824,377 @@ def kreo_render_reception_internal_view_if_any():
         render_v3815_clienti_overview()
         return True
     return _old_kreo_render_reception_internal_view_if_any()
+
+
+
+
+# ============================================================
+# KREO V38.16 ADMIN DELETE + EDIT CLIENTE FULL
+# Base: V38.15.
+# Nuovo:
+# 1) Eliminazione definitiva cliente TEST con tutti i dati collegati - solo Admin
+# 2) Modifica completa cliente: dati anagrafici, pacchetto, lezioni, contabilità, scadenze, certificato/privacy
+# ============================================================
+
+APP_VERSION = "KREO V38.16 ADMIN DELETE EDIT FULL"
+
+
+def v3816_is_admin():
+    try:
+        u = current_user() or {}
+        ruolo = str(u.get("ruolo") or u.get("role") or "").strip().lower()
+        username = str(u.get("username") or "").strip().lower()
+        return "admin" in ruolo or username in ["admin", "pentti"]
+    except Exception:
+        return False
+
+
+def v3816_update_cliente_full(cliente_id, payload):
+    """
+    Aggiornamento sicuro campo-per-campo:
+    ignora colonne non esistenti senza rompere la UI.
+    """
+    updated, skipped = [], []
+    payload = {k: v for k, v in payload.items() if v is not None}
+
+    # prova completo
+    try:
+        get_supabase().table("clienti").update(payload).eq("id", int(float(cliente_id))).execute()
+        try:
+            st.cache_data.clear()
+        except Exception:
+            pass
+        return True, f"Cliente aggiornato. Campi aggiornati: {len(payload)}."
+    except Exception:
+        pass
+
+    # fallback singolo campo
+    for k, v in payload.items():
+        try:
+            get_supabase().table("clienti").update({k: v}).eq("id", int(float(cliente_id))).execute()
+            updated.append(k)
+        except Exception:
+            skipped.append(k)
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+    if updated:
+        msg = f"Cliente aggiornato. Campi salvati: {', '.join(updated[:12])}."
+        if skipped:
+            msg += f" Campi ignorati perché assenti: {', '.join(skipped[:8])}."
+        return True, msg
+
+    return False, "Non sono riuscito ad aggiornare nessun campo cliente."
+
+
+def v3816_delete_storage_docs_for_cliente(cliente_id):
+    """
+    Elimina i file dal bucket documenti quando trova storage_path/path/percorso_file.
+    Best effort: se fallisce non blocca la cancellazione DB.
+    """
+    removed = 0
+    docs = []
+    for table in ["documenti_cliente", "documenti_clienti"]:
+        for col in ["cliente_id", "id_cliente"]:
+            try:
+                rows = get_supabase().table(table).select("*").eq(col, int(float(cliente_id))).execute().data or []
+                for r in rows:
+                    docs.append(r)
+                break
+            except Exception:
+                pass
+
+    for d in docs:
+        storage_path = d.get("storage_path") or d.get("path") or d.get("percorso_file")
+        if not storage_path:
+            continue
+        for bucket in ["documenti", "documenti_privati", "documenti_pubblici"]:
+            try:
+                get_supabase().storage.from_(bucket).remove([storage_path])
+                removed += 1
+                break
+            except Exception:
+                pass
+    return removed
+
+
+def v3816_delete_cliente_everywhere(cliente_id):
+    """
+    Eliminazione definitiva:
+    cancella prima tabelle figlie, poi clienti.
+    Best effort su tabelle non esistenti.
+    """
+    deleted = []
+    errors = []
+
+    # storage documenti prima dei record
+    try:
+        removed_files = v3816_delete_storage_docs_for_cliente(cliente_id)
+        if removed_files:
+            deleted.append(f"file_storage:{removed_files}")
+    except Exception as e:
+        errors.append(f"storage:{e}")
+
+    targets = [
+        ("documenti_cliente", ["cliente_id", "id_cliente"]),
+        ("documenti_clienti", ["cliente_id", "id_cliente"]),
+        ("pagamenti", ["cliente_id", "id_cliente"]),
+        ("pagamenti_clienti", ["cliente_id", "id_cliente"]),
+        ("incassi", ["cliente_id", "id_cliente"]),
+        ("lezioni", ["cliente_id", "id_cliente"]),
+        ("agenda", ["cliente_id", "id_cliente"]),
+        ("accessi_tornello", ["cliente_id", "id_cliente"]),
+        ("badge_clienti", ["cliente_id", "id_cliente"]),
+        ("movimenti_lezioni", ["cliente_id", "id_cliente"]),
+        ("presenze", ["cliente_id", "id_cliente"]),
+        ("cronologia", ["cliente_id", "id_cliente"]),
+        ("log_operazioni", ["cliente_id", "id_cliente"]),
+        ("ricevute", ["cliente_id", "id_cliente"]),
+    ]
+
+    for table, cols in targets:
+        for col in cols:
+            try:
+                get_supabase().table(table).delete().eq(col, int(float(cliente_id))).execute()
+                deleted.append(f"{table}.{col}")
+                break
+            except Exception as e:
+                errors.append(f"{table}.{col}:{str(e)[:80]}")
+
+    # infine cliente
+    try:
+        get_supabase().table("clienti").delete().eq("id", int(float(cliente_id))).execute()
+        deleted.append("clienti.id")
+    except Exception as e:
+        return False, f"Non sono riuscito a eliminare il record cliente principale: {e}"
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+    return True, f"Cliente eliminato definitivamente. Tabelle/record processati: {len(deleted)}."
+
+
+def v3816_render_edit_cliente_full(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    if not cliente:
+        st.error("Cliente non trovato.")
+        return
+
+    st.markdown("### ✏️ Modifica completa cliente")
+    st.caption("Aggiorna tutti i dati cliente. I campi non presenti nel DB vengono ignorati senza errore.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        nome = st.text_input("Nome", value=str(cliente.get("nome") or ""), key=f"v3816_nome_{cliente_id}")
+        cognome = st.text_input("Cognome", value=str(cliente.get("cognome") or ""), key=f"v3816_cognome_{cliente_id}")
+        telefono = st.text_input("Telefono / WhatsApp", value=str(cliente.get("cellulare") or cliente.get("telefono") or ""), key=f"v3816_tel_{cliente_id}")
+        email = st.text_input("Email", value=str(cliente.get("email") or ""), key=f"v3816_email_{cliente_id}")
+    with c2:
+        stato = st.selectbox("Stato cliente", ["ATTIVO", "DISATTIVATO", "IN PROVA", "SOSPESO", "ARCHIVIATO"], index=0 if v3808_is_cliente_attivo(cliente) else 1, key=f"v3816_stato_{cliente_id}")
+        pacchetto = st.text_input("Pacchetto", value=str(cliente.get("pacchetto") or ""), key=f"v3816_pacchetto_{cliente_id}")
+        tipo_abbonamento = st.selectbox("Tipologia abbonamento", ["MENSILE", "TRIMESTRALE", "SEMESTRALE", "ANNUALE", "PERSONALIZZATO"], index=0, key=f"v3816_tipo_abb_{cliente_id}")
+        tipo_pagamento = st.selectbox("Tipologia pagamento", ["MENSILE", "TRIMESTRALE", "SEMESTRALE", "ANNUALE", "UNICA SOLUZIONE", "PERSONALIZZATO"], index=0, key=f"v3816_tipo_pag_{cliente_id}")
+    with c3:
+        totale, usate, residue = v38_contatori_cliente(cliente)
+        numero_lezioni = st.number_input("Lezioni totali", min_value=0, max_value=1000, value=int(totale), key=f"v3816_lez_tot_{cliente_id}")
+        lezioni_utilizzate = st.number_input("Lezioni utilizzate", min_value=0, max_value=1000, value=int(usate), key=f"v3816_lez_usate_{cliente_id}")
+        importo = st.number_input("Importo contratto", min_value=0.0, value=float(v3810_get_raw_cliente_importo(cliente)), step=10.0, key=f"v3816_importo_{cliente_id}")
+        importo_pagato = st.number_input("Importo pagato", min_value=0.0, value=float(cliente.get("importo_pagato") or 0), step=10.0, key=f"v3816_pagato_{cliente_id}")
+
+    st.markdown("#### Scadenze e documenti")
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        data_iscrizione = st.date_input("Data iscrizione", value=v3813_cliente_date_value(cliente, ["data_iscrizione", "created_at"], date.today()), key=f"v3816_data_isc_{cliente_id}")
+        data_inizio = st.date_input("Data inizio pacchetto", value=v3813_cliente_date_value(cliente, ["data_inizio_pacchetto", "data_inizio"], date.today()), key=f"v3816_data_inizio_{cliente_id}")
+    with d2:
+        scadenza_abbonamento = st.date_input("Scadenza abbonamento", value=v3813_cliente_date_value(cliente, ["scadenza_abbonamento", "data_scadenza", "data_fine_pacchetto", "scadenza"], date.today()), key=f"v3816_scad_abb_{cliente_id}")
+        scadenza_rata = st.date_input("Scadenza prossima rata", value=v3813_cliente_date_value(cliente, ["scadenza_rata", "scadenza_prossima_rata", "prossima_scadenza_pagamento", "data_scadenza_rata"], date.today()), key=f"v3816_scad_rata_{cliente_id}")
+    with d3:
+        certificato_medico = st.selectbox("Certificato medico", ["NO", "SÌ"], index=1 if str(cliente.get("certificato_medico") or "").upper() in ["SÌ","SI","TRUE","1"] else 0, key=f"v3816_cert_{cliente_id}")
+        scadenza_certificato = st.date_input("Scadenza certificato", value=v3813_cliente_date_value(cliente, ["scadenza_certificato", "data_scadenza_certificato", "certificato_medico_scadenza"], date.today()), key=f"v3816_scad_cert_{cliente_id}")
+        privacy = st.selectbox("Privacy/autorizzazione", ["NO", "SÌ"], index=1 if str(cliente.get("autorizzazione_trattamento") or "").upper() in ["SÌ","SI","TRUE","1"] else 0, key=f"v3816_privacy_{cliente_id}")
+
+    note = st.text_area("Note", value=str(cliente.get("note") or ""), key=f"v3816_note_{cliente_id}")
+
+    if st.button("💾 Salva modifiche cliente", key=f"v3816_save_full_{cliente_id}", use_container_width=True):
+        residuo_calc = max(float(importo or 0) - float(importo_pagato or 0), 0)
+        payload = {
+            "nome": nome,
+            "cognome": cognome,
+            "cellulare": telefono,
+            "telefono": telefono,
+            "email": email,
+            "stato": stato,
+            "stato_cliente": stato,
+            "pacchetto": pacchetto,
+            "tipo_abbonamento": tipo_abbonamento,
+            "tipo_pagamento": tipo_pagamento,
+            "numero_lezioni": int(numero_lezioni),
+            "lezioni_utilizzate": int(lezioni_utilizzate),
+            "lezioni_residue": max(int(numero_lezioni) - int(lezioni_utilizzate), 0),
+            "importo": float(importo),
+            "importo_pagato": float(importo_pagato),
+            "residuo": float(residuo_calc),
+            "saldo": float(residuo_calc),
+            "data_iscrizione": str(data_iscrizione),
+            "data_inizio_pacchetto": str(data_inizio),
+            "data_inizio": str(data_inizio),
+            "scadenza_abbonamento": str(scadenza_abbonamento),
+            "data_scadenza": str(scadenza_abbonamento),
+            "data_fine_pacchetto": str(scadenza_abbonamento),
+            "scadenza_rata": str(scadenza_rata),
+            "prossima_scadenza_pagamento": str(scadenza_rata),
+            "scadenza_prossima_rata": str(scadenza_rata),
+            "certificato_medico": certificato_medico,
+            "scadenza_certificato": str(scadenza_certificato),
+            "data_scadenza_certificato": str(scadenza_certificato),
+            "autorizzazione_trattamento": privacy,
+            "note": note,
+            "updated_at": datetime.now().isoformat(),
+        }
+        ok, msg = v3816_update_cliente_full(cliente_id, payload)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            st.rerun()
+
+
+def v3816_render_delete_cliente(cliente_id):
+    cliente = v38_get_cliente(cliente_id) or {}
+    if not cliente:
+        return
+
+    st.markdown("### ⚠️ Eliminazione definitiva cliente")
+    st.warning("Usare solo per clienti di test o errori di inserimento. Questa operazione elimina anagrafica, pagamenti, documenti, accessi, badge, lezioni e storico collegato.")
+
+    if not v3816_is_admin():
+        st.info("Eliminazione definitiva disponibile solo per admin.")
+        return
+
+    expected = f"ELIMINA {v38_cliente_nome(cliente)}"
+    confirm = st.text_input(f"Per confermare scrivi: {expected}", key=f"v3816_delete_confirm_{cliente_id}")
+
+    if st.button("🗑️ Elimina definitivamente cliente e dati collegati", key=f"v3816_delete_btn_{cliente_id}", use_container_width=True, disabled=(confirm.strip() != expected)):
+        ok, msg = v3816_delete_cliente_everywhere(cliente_id)
+        st.success(msg) if ok else st.error(msg)
+        if ok:
+            # torna a reception/clienti overview
+            for k in ["cliente_360_id", "cliente_preselezionato_id"]:
+                st.session_state.pop(k, None)
+            st.rerun()
+
+
+# Override Cliente360 aggiungendo tabs modifica/elimina
+_old_render_v37_cliente360_v3816 = render_v37_cliente360
+
+def render_v37_cliente360():
+    st.header("👤 Cliente 360")
+    st.caption("V38.16: scheda cliente con modifica completa ed eliminazione definitiva admin.")
+
+    show_disabled = st.checkbox("Mostra anche clienti disattivati", value=False, key="v3816_c360_show_disabled")
+    clienti = v3808_load_clienti(include_disabled=show_disabled)
+
+    if clienti.empty:
+        st.info("Nessun cliente presente.")
+        return
+
+    clienti = clienti.copy()
+    clienti["__label"] = clienti.apply(lambda r: v3808_cliente_label(r, show_badge=True), axis=1)
+
+    pre_id = st.session_state.get("cliente_360_id") or st.session_state.get("cliente_preselezionato_id")
+    default_index = 0
+    if pre_id is not None:
+        try:
+            ids = pd.to_numeric(clienti["id"], errors="coerce").fillna(-1).astype(int).tolist()
+            if int(float(pre_id)) in ids:
+                default_index = ids.index(int(float(pre_id)))
+        except Exception:
+            default_index = 0
+
+    selected = st.selectbox("Seleziona cliente", clienti["__label"].tolist(), index=default_index, key="v3816_cliente360_select")
+    cliente_id = int(str(selected).split(" - ")[0])
+    cliente = v38_get_cliente(cliente_id)
+
+    attivo = v3808_is_cliente_attivo(cliente)
+    stato_badge = "ATTIVO" if attivo else "DISATTIVATO"
+    badge_color = "#22c55e" if attivo else "#ef4444"
+    totale, usate, residue_lezioni = v38_contatori_cliente(cliente)
+    badge = v38_badge_cliente(cliente_id)
+
+    try:
+        importo_contratto, totale_pagato, residuo_contabile = v3812_contabilita_cliente(cliente_id)
+    except Exception:
+        try:
+            importo_contratto, totale_pagato, residuo_contabile = v3811_contabilita_cliente(cliente_id)
+        except Exception:
+            residuo_contabile = cliente.get("residuo") or cliente.get("saldo") or 0
+
+    st.markdown(
+        f"""
+        <div style="border:2px solid #d4af37;border-radius:18px;background:#050505;padding:18px 20px;margin:12px 0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;">
+            <div>
+              <div style="font-size:26px;font-weight:950;color:#f8e7a1;">{v38_cliente_nome(cliente)}</div>
+              <div style="font-size:13px;color:#fff;">ID {cliente_id} · Badge: {badge or 'non associato'} · Pacchetto: {cliente.get('pacchetto') or '-'}</div>
+            </div>
+            <div style="background:{badge_color};color:white;border-radius:999px;padding:8px 14px;font-weight:950;">{stato_badge}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Lezioni residue", residue_lezioni)
+    m2.metric("Lezioni usate", usate)
+    m3.metric("Lezioni totali", totale)
+    m4.metric("Residuo €", v38_euro(residuo_contabile))
+
+    tabs = st.tabs(["📒 Lezioni/presenze", "💳 Pagamenti", "📄 Documenti", "🚦 Accessi", "✏️ Modifica", "⚠️ Admin", "📝 Note"])
+
+    with tabs[0]:
+        if not attivo:
+            st.warning("Cliente disattivato: evita nuove presenze salvo riattivazione.")
+        try:
+            v3803_cliente_360_lezioni(cliente_id, cliente)
+        except Exception:
+            st.info("Gestione lezioni non disponibile.")
+    with tabs[1]:
+        v3809_render_pagamenti_cliente(cliente_id)
+    with tabs[2]:
+        try:
+            v3803_cliente_360_documenti(cliente_id)
+        except Exception:
+            st.info("Documenti non disponibili.")
+    with tabs[3]:
+        try:
+            accessi = v38_load_accessi()
+            if not accessi.empty and "cliente_id" in accessi.columns:
+                sub = accessi[pd.to_numeric(accessi["cliente_id"], errors="coerce") == int(float(cliente_id))]
+                if sub.empty:
+                    st.info("Nessun accesso.")
+                else:
+                    for _, r in sub.head(50).iterrows():
+                        st.markdown(f"**{r.get('data_accesso','')} {r.get('ora_accesso','')}** · Badge {r.get('badge_uid') or '-'} · {r.get('stato_accesso') or '-'}")
+            else:
+                st.info("Nessun accesso.")
+        except Exception:
+            st.info("Accessi non disponibili.")
+    with tabs[4]:
+        v3816_render_edit_cliente_full(cliente_id)
+    with tabs[5]:
+        v3816_render_delete_cliente(cliente_id)
+    with tabs[6]:
+        st.write(cliente.get("note") or "Nessuna nota.")
+
+
+render_cliente360 = render_v37_cliente360
+render_cliente_360 = render_v37_cliente360
+render_staff_cliente360 = render_v37_cliente360
 
 
 if __name__ == "__main__":
