@@ -1,4 +1,4 @@
-# KREO V38.14 CLEANUP DIREZIONE - base reale stabilizzata da V37.05/V37.11
+# KREO V38.15 CLIENTI OVERVIEW - base reale stabilizzata da V37.05/V37.11
 from pathlib import Path
 
 from datetime import datetime, date, timedelta
@@ -18919,12 +18919,12 @@ def v3710_registra_movimento_accesso_unico(cliente_id, accesso_id, delta, tipo, 
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE OVERRIDE
+# KREO V38.15 CLIENTI OVERVIEW OVERRIDE
 # Base: app reale V37.05/V37.11 caricato da Pentti.
 # Obiettivo: stabilizzare le logiche operative senza cancellare il paracadute storico.
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -19945,7 +19945,7 @@ def v38_version_marker():
 # Questa patch forza ogni vecchia route documenti a usare upload diretto.
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 DOCUMENTI_BUCKET_PRIVATO = "documenti"
 DOCUMENTI_BUCKET_STORICO = "documenti"
 KREO_DOCUMENTI_BUCKET = "documenti"
@@ -20216,7 +20216,7 @@ render_cliente_documenti = render_staff_documenti
 # - Accessi da confermare con anti doppio click
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3802_go_reception():
@@ -20581,7 +20581,7 @@ render_accesso_tornello = render_v36_checkin_core
 # - storico documenti con eliminazione documento
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 # ------------------------------------------------------------
@@ -21316,7 +21316,7 @@ def kreo_render_reception_internal_view_if_any():
 # KREO V38.04 NUOVO CLIENTE UNIFICATO + SCADENZE + PAGAMENTI + BACK HARD FIX
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 # ------------------------------------------------------------
@@ -21839,7 +21839,7 @@ def kreo_render_reception_internal_view_if_any():
 # - un solo pulsante Torna a Reception: disattivato quello aggiunto dalle patch V38
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 # ------------------------------------------------------------
@@ -22259,7 +22259,7 @@ def kreo_render_reception_internal_view_if_any():
 # Questa versione sostituisce il main finale con routing V38.
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def kreo_reception_open(view_name):
@@ -22527,7 +22527,7 @@ def main():
 # - Routing più leggero: ritorno a Reception tramite sole chiavi reception_view
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3807_go_reception():
@@ -22858,7 +22858,7 @@ def main():
 # Nessuna eliminazione cliente. Solo stato ATTIVO/DISATTIVATO.
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3808_is_cliente_attivo(cliente):
@@ -23124,13 +23124,13 @@ decidi_accesso = v38_decidi_accesso
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE
+# KREO V38.15 CLIENTI OVERVIEW
 # Base: V38.08 SAFE.
 # - eliminazione/rettifica pagamenti solo admin
 # - ricalcolo automatico importo_pagato e residuo cliente
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3809_is_admin():
@@ -23334,7 +23334,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE
+# KREO V38.15 CLIENTI OVERVIEW
 # Base: V38.09.
 # Fix bug importi:
 # prima "300.0" diventava "3000" perché veniva sempre rimosso il punto.
@@ -23347,7 +23347,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - "1,800.00" -> 1800.0
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3810_parse_money(value):
@@ -23556,7 +23556,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE
+# KREO V38.15 CLIENTI OVERVIEW
 # Base: V38.10.
 # Problema:
 # il residuo ricalcolato era corretto nel tab pagamenti,
@@ -23567,7 +23567,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - Cliente 360 mostra residuo contabile ricalcolato
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3811_contabilita_cliente(cliente_id):
@@ -23803,11 +23803,11 @@ def v3803_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE + DELETE INCASSI FIX
+# KREO V38.15 CLIENTI OVERVIEW + DELETE INCASSI FIX
 # Base: V38.11.
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3812_update_cliente_safe(cliente_id, values):
@@ -24018,11 +24018,11 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE RATE / ABBONAMENTO
+# KREO V38.15 CLIENTI OVERVIEW RATE / ABBONAMENTO
 # Base: V38.12.
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3813_parse_date_any(value):
@@ -24181,7 +24181,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 
 
 # ============================================================
-# KREO V38.14 CLEANUP DIREZIONE / ANALYTICS
+# KREO V38.15 CLIENTI OVERVIEW / ANALYTICS
 # Base: V38.13.
 # Obiettivo:
 # - eliminare/neutralizzare funzioni Analytics e Direzione non funzionanti
@@ -24189,7 +24189,7 @@ def v3809_cliente_360_pagamenti(cliente_id):
 # - mantenere Reception, Clienti, Agenda, Incassi, Documenti, Cliente 360
 # ============================================================
 
-APP_VERSION = "KREO V38.14 CLEANUP DIREZIONE"
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
 
 
 def v3814_upload_logo_azienda(file):
@@ -24409,6 +24409,421 @@ def main():
     render_kreo_welcome_banner()
 
     v3814_route_menu(menu)
+
+
+
+
+# ============================================================
+# KREO V38.15 CLIENTI OVERVIEW + ALERT CERTIFICATI FIX
+# Base: V38.14.
+# ============================================================
+
+APP_VERSION = "KREO V38.15 CLIENTI OVERVIEW"
+
+
+def v3815_load_clienti_direct():
+    try:
+        rows = get_supabase().table("clienti").select("*").order("cognome").execute().data or []
+        return pd.DataFrame(rows)
+    except Exception:
+        try:
+            return v38_load_clienti()
+        except Exception:
+            return pd.DataFrame()
+
+
+def v3815_load_documenti_all():
+    rows = []
+    for table in ["documenti_cliente", "documenti_clienti"]:
+        try:
+            data = get_supabase().table(table).select("*").limit(5000).execute().data or []
+            if data:
+                for r in data:
+                    r["_table"] = table
+                rows.extend(data)
+                break
+        except Exception:
+            pass
+    return pd.DataFrame(rows)
+
+
+def v3815_load_pagamenti_all():
+    rows, seen = [], set()
+    for table in ["pagamenti", "pagamenti_clienti", "incassi"]:
+        try:
+            data = get_supabase().table(table).select("*").limit(7000).execute().data or []
+            for r in data:
+                r["_table"] = table
+                key = f"{table}:{r.get('id')}:{r.get('cliente_id') or r.get('id_cliente')}:{r.get('importo')}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    if v3812_row_is_deleted(r):
+                        continue
+                except Exception:
+                    pass
+                rows.append(r)
+        except Exception:
+            pass
+    return pd.DataFrame(rows)
+
+
+def v3815_doc_cliente_id(row):
+    if row is None:
+        return None
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+    return row.get("cliente_id") or row.get("id_cliente")
+
+
+def v3815_doc_tipo(row):
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+    return str(row.get("tipo_documento") or row.get("tipo") or row.get("categoria") or row.get("nome_file") or row.get("filename") or "").upper()
+
+
+def v3815_is_cert_doc(row):
+    tipo = v3815_doc_tipo(row)
+    return "CERT" in tipo or "MEDICO" in tipo or "MEDICA" in tipo
+
+
+def v3815_parse_date(value):
+    if value in [None, "", "nan", "None"]:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        out = pd.to_datetime(value, errors="coerce")
+        if pd.isna(out):
+            return None
+        return out.date()
+    except Exception:
+        return None
+
+
+def v3815_cert_status(cliente, docs_cliente):
+    if isinstance(cliente, pd.Series):
+        cliente = cliente.to_dict()
+
+    today = date.today()
+    cert_date = None
+    for col in ["scadenza_certificato","certificato_scadenza","data_scadenza_certificato","certificato_medico_scadenza","scadenza_certificato_medico","data_certificato"]:
+        d = v3815_parse_date(cliente.get(col))
+        if d:
+            cert_date = d
+            break
+
+    has_doc = False
+    try:
+        if docs_cliente is not None and not docs_cliente.empty:
+            has_doc = any(v3815_is_cert_doc(r) for _, r in docs_cliente.iterrows())
+    except Exception:
+        has_doc = False
+
+    cert_flag = str(cliente.get("certificato_medico") or cliente.get("certificato") or cliente.get("certificato_consegnato") or "").strip().upper()
+    has_flag = cert_flag in ["SI", "SÌ", "TRUE", "1", "YES", "CONSEGNATO"]
+
+    if cert_date and cert_date < today:
+        return "SCADUTO", cert_date
+    if has_doc or has_flag:
+        return "OK", cert_date
+    return "MANCANTE", cert_date
+
+
+def v3815_alert_certificati_df():
+    clienti = v3815_load_clienti_direct()
+    docs = v3815_load_documenti_all()
+    if clienti.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for _, c in clienti.iterrows():
+        cid = c.get("id")
+        docs_c = pd.DataFrame()
+        if not docs.empty and cid is not None:
+            try:
+                doc_ids = pd.to_numeric(docs.apply(v3815_doc_cliente_id, axis=1), errors="coerce")
+                docs_c = docs[doc_ids == int(float(cid))]
+            except Exception:
+                docs_c = pd.DataFrame()
+
+        stato, scad = v3815_cert_status(c, docs_c)
+        if stato in ["MANCANTE", "SCADUTO"]:
+            rr = c.to_dict()
+            rr["_certificato_status"] = stato
+            rr["_scadenza_certificato"] = scad
+            rr["_motivo_certificato"] = "Certificato mancante" if stato == "MANCANTE" else f"Certificato scaduto il {scad.strftime('%d/%m/%Y') if scad else '-'}"
+            rows.append(rr)
+    return pd.DataFrame(rows)
+
+
+v38_alert_certificati_df = v3815_alert_certificati_df
+
+
+def v3815_pagamenti_cliente_sum(pagamenti, cliente_id):
+    if pagamenti.empty:
+        return 0.0, 0
+    total, count = 0.0, 0
+    for _, p in pagamenti.iterrows():
+        pid = p.get("cliente_id") or p.get("id_cliente")
+        try:
+            if int(float(pid)) != int(float(cliente_id)):
+                continue
+        except Exception:
+            continue
+        try:
+            total += v3809_importo_pagamento(p.to_dict())
+        except Exception:
+            try:
+                total += float(p.get("importo") or 0)
+            except Exception:
+                pass
+        count += 1
+    return total, count
+
+
+def v3815_docs_cliente_info(docs, cliente_id):
+    if docs.empty:
+        return 0, "", "NO"
+    tipi, cert, count = [], "NO", 0
+    for _, d in docs.iterrows():
+        cid = v3815_doc_cliente_id(d)
+        try:
+            if int(float(cid)) != int(float(cliente_id)):
+                continue
+        except Exception:
+            continue
+        count += 1
+        tipo = v3815_doc_tipo(d)
+        if tipo:
+            tipi.append(tipo[:30])
+        if v3815_is_cert_doc(d):
+            cert = "SÌ"
+    uniq = []
+    for t in tipi:
+        if t not in uniq:
+            uniq.append(t)
+    return count, ", ".join(uniq[:6]), cert
+
+
+def v3815_clienti_overview_df():
+    clienti = v3815_load_clienti_direct()
+    docs = v3815_load_documenti_all()
+    pag = v3815_load_pagamenti_all()
+    rows = []
+    if clienti.empty:
+        return pd.DataFrame()
+
+    for _, c in clienti.iterrows():
+        cid = c.get("id")
+        try:
+            attivo = "ATTIVO" if v3808_is_cliente_attivo(c) else "DISATTIVATO"
+        except Exception:
+            attivo = str(c.get("stato") or c.get("stato_cliente") or "ATTIVO")
+
+        totale, usate, residue = v38_contatori_cliente(c)
+
+        try:
+            importo_contratto = v3810_get_raw_cliente_importo(c.to_dict())
+        except Exception:
+            try:
+                importo_contratto = float(c.get("importo") or 0)
+            except Exception:
+                importo_contratto = 0.0
+
+        pagato, n_pag = v3815_pagamenti_cliente_sum(pag, cid)
+        residuo_calc = max(importo_contratto - pagato, 0.0)
+        n_docs, tipi_docs, cert_doc = v3815_docs_cliente_info(docs, cid)
+
+        docs_c = pd.DataFrame()
+        if not docs.empty and cid is not None:
+            try:
+                doc_ids = pd.to_numeric(docs.apply(v3815_doc_cliente_id, axis=1), errors="coerce")
+                docs_c = docs[doc_ids == int(float(cid))]
+            except Exception:
+                docs_c = pd.DataFrame()
+
+        cert_status, cert_scad = v3815_cert_status(c, docs_c)
+
+        rows.append({
+            "ID": cid,
+            "Cliente": v38_cliente_nome(c),
+            "Stato": attivo,
+            "Telefono": c.get("cellulare") or c.get("telefono") or "",
+            "Email": c.get("email") or "",
+            "Pacchetto": c.get("pacchetto") or "",
+            "Tipo abbonamento": c.get("tipo_abbonamento") or "",
+            "Scadenza abbonamento": c.get("scadenza_abbonamento") or c.get("data_scadenza") or c.get("data_fine_pacchetto") or "",
+            "Scadenza rata": c.get("scadenza_rata") or c.get("scadenza_prossima_rata") or c.get("prossima_scadenza_pagamento") or "",
+            "Lezioni totali": totale,
+            "Lezioni usate": usate,
+            "Lezioni residue": residue,
+            "Importo contratto": round(importo_contratto, 2),
+            "Pagato": round(pagato, 2),
+            "Residuo calcolato": round(residuo_calc, 2),
+            "N. pagamenti": n_pag,
+            "N. documenti": n_docs,
+            "Tipi documenti": tipi_docs,
+            "Certificato": cert_status,
+            "Scadenza certificato": cert_scad.strftime("%d/%m/%Y") if cert_scad else "",
+            "Note": c.get("note") or "",
+        })
+    return pd.DataFrame(rows)
+
+
+def render_v3815_clienti_overview():
+    st.header("👥 Elenco clienti completo")
+    st.caption("Vista riepilogativa con anagrafica, documenti, certificati, pagamenti e situazione contabile.")
+
+    df = v3815_clienti_overview_df()
+    if df.empty:
+        st.info("Nessun cliente presente.")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Clienti totali", len(df))
+    c2.metric("Attivi", len(df[df["Stato"].astype(str).str.upper() == "ATTIVO"]))
+    c3.metric("Disattivati", len(df[df["Stato"].astype(str).str.upper() != "ATTIVO"]))
+    c4.metric("Certificati mancanti/scaduti", len(df[df["Certificato"].isin(["MANCANTE", "SCADUTO"])]))
+
+    show_disabled = st.checkbox("Mostra anche clienti disattivati", value=True, key="v3815_overview_show_dis")
+    only_cert = st.checkbox("Mostra solo certificati mancanti/scaduti", value=st.session_state.get("v3815_overview_cert_only", False), key="v3815_overview_cert_only")
+    search = st.text_input("Cerca cliente / telefono / email", key="v3815_overview_search")
+
+    view = df.copy()
+    if not show_disabled:
+        view = view[view["Stato"].astype(str).str.upper() == "ATTIVO"]
+    if only_cert:
+        view = view[view["Certificato"].isin(["MANCANTE", "SCADUTO"])]
+    if search:
+        s = search.lower().strip()
+        mask = pd.Series(False, index=view.index)
+        for col in ["Cliente", "Telefono", "Email", "Pacchetto", "Tipi documenti"]:
+            mask = mask | view[col].astype(str).str.lower().str.contains(s, na=False)
+        view = view[mask]
+
+    st.dataframe(view, use_container_width=True, hide_index=True)
+    st.download_button("⬇️ Scarica elenco clienti CSV", view.to_csv(index=False).encode("utf-8-sig"), file_name="kreo_clienti_overview.csv", mime="text/csv", use_container_width=True)
+
+
+def render_reception_alert_side_panel():
+    st.markdown("## 🚨 Alert live")
+    cert_df = v3815_alert_certificati_df()
+    try:
+        badge_df = v38_badge_da_associare_unici()
+    except Exception:
+        badge_df = pd.DataFrame()
+
+    try:
+        overview = v3815_clienti_overview_df()
+        residui = len(overview[pd.to_numeric(overview["Residuo calcolato"], errors="coerce").fillna(0) > 0])
+    except Exception:
+        residui = 0
+
+    def box(title, value, color, key, target):
+        st.markdown(f"<div style='border:1.7px solid {color};border-radius:16px;background:#fffdf7;padding:13px 15px;margin:10px 0;'><div style='font-size:13px;font-weight:900;'>{title}</div><div style='font-size:28px;font-weight:950;'>{value}</div></div>", unsafe_allow_html=True)
+        if st.button(f"Apri {title}", key=key, use_container_width=True):
+            st.session_state["reception_internal_view"] = target
+            st.rerun()
+
+    box("Certificati mancanti/scaduti", len(cert_df), "#ef4444", "v3815_alert_cert", "clienti_overview_cert")
+    box("Rate/residui aperti", residui, "#ef4444", "v3815_alert_residui", "clienti_overview_residui")
+    box("Badge/accessi da associare", len(badge_df), "#3b82f6", "v3815_alert_badge", "badge_alert")
+
+
+def render_reception_center():
+    st.session_state.setdefault("reception_home", True)
+
+    if st.session_state.get("reception_internal_view") in ["clienti_overview", "clienti_overview_cert", "clienti_overview_residui"]:
+        if st.session_state.get("reception_internal_view") == "clienti_overview_cert":
+            st.session_state["v3815_overview_cert_only"] = True
+        render_v3815_clienti_overview()
+        return
+    if st.session_state.get("reception_internal_view") == "badge_alert":
+        render_alert_badge_associa()
+        return
+    if st.session_state.get("reception_internal_view") == "documenti":
+        render_staff_documenti()
+        return
+    if kreo_render_reception_internal_view_if_any():
+        return
+
+    st.header("🏠 Reception Center")
+    st.caption("V38.15: dashboard operativa + elenco clienti completo cliccabile.")
+
+    clienti = v3815_load_clienti_direct()
+    accessi = v38_load_accessi()
+
+    agenda_count = 0
+    accessi_count = 0
+    incassi_oggi = 0.0
+    try:
+        lez = load_lezioni()
+        dcol = "data_lezione" if "data_lezione" in lez.columns else ("data" if "data" in lez.columns else None)
+        if dcol:
+            agenda_count = len(lez[lez[dcol].astype(str).str[:10] == str(v38_today())])
+    except Exception:
+        pass
+    try:
+        if not accessi.empty and "data_accesso" in accessi.columns:
+            accessi_count = len(accessi[accessi["data_accesso"].astype(str).str[:10] == str(v38_today())])
+    except Exception:
+        pass
+    try:
+        pag = v3815_load_pagamenti_all()
+        pcol = "data_pagamento" if "data_pagamento" in pag.columns else ("data" if "data" in pag.columns else None)
+        if pcol and "importo" in pag.columns:
+            today_s = str(v38_today())
+            tmp = pag[pag[pcol].astype(str).str[:10] == today_s]
+            incassi_oggi = sum(v3809_importo_pagamento(r.to_dict()) for _, r in tmp.iterrows())
+    except Exception:
+        pass
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        if st.button(f"👥 Clienti\n\n{0 if clienti.empty else len(clienti)}", key="v3815_clienti_metric_btn", use_container_width=True):
+            st.session_state["reception_internal_view"] = "clienti_overview"
+            st.rerun()
+    with m2:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>📅 Agenda oggi</b><br><span style='font-size:28px;font-weight:950'>{agenda_count}</span></div>", unsafe_allow_html=True)
+    with m3:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>🚦 Accessi oggi</b><br><span style='font-size:28px;font-weight:950'>{accessi_count}</span></div>", unsafe_allow_html=True)
+    with m4:
+        st.markdown(f"<div style='border:1.5px solid #d4af37;border-radius:16px;padding:14px;background:#fffdf7;'><b>💰 Incassi oggi</b><br><span style='font-size:28px;font-weight:950'>{v38_euro(incassi_oggi)}</span></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    left, right = st.columns([3.6, 1.15], gap="large")
+    with left:
+        v38_render_accessi_da_confermare_dashboard()
+        v3802_render_reception_buttons()
+        st.markdown("---")
+        st.markdown("### Agenda oggi")
+        try:
+            v3705_render_agenda_oggi_pulita()
+        except Exception:
+            try:
+                render_agenda_light_launch()
+            except Exception:
+                st.caption("Agenda oggi non disponibile.")
+    with right:
+        render_reception_alert_side_panel()
+
+
+_old_kreo_render_reception_internal_view_if_any = kreo_render_reception_internal_view_if_any
+
+def kreo_render_reception_internal_view_if_any():
+    view = st.session_state.get("reception_internal_view") or st.session_state.get("reception_view")
+    if view in ["clienti_overview", "clienti_overview_cert", "clienti_overview_residui"]:
+        try:
+            v3807_back_button()
+        except Exception:
+            pass
+        if view == "clienti_overview_cert":
+            st.session_state["v3815_overview_cert_only"] = True
+        render_v3815_clienti_overview()
+        return True
+    return _old_kreo_render_reception_internal_view_if_any()
 
 
 if __name__ == "__main__":
